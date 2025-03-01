@@ -93,7 +93,7 @@ For example:
 python manage.py factchecker "college graduation rates in the US"
 ```
 
-Specifying the Number of Datasets
+**Specifying the Number of Datasets**
 
 Limit the number of most relevant datasets to initially download:
 
@@ -103,7 +103,7 @@ python manage.py factchecker "high school dropout rates" --top 3
 
 This will download only the 3 most relevant datasets (default is 5).
 
-Setting the Output Directory
+**Setting the Output Directory**
 
 Specify where downloaded datasets should be saved:
 
@@ -112,7 +112,7 @@ python manage.py factchecker "unemployment statistics" --output "my_data_folder"
 ```
 This saves downloaded files to "my_data_folder" instead of the default "downloads" directory.
 
-Showing Data Preview
+**Showing Data Preview**
 
 Display a preview of the data:
 
@@ -122,7 +122,7 @@ python manage.py factchecker "covid vaccination rates" --preview
 
 This displays a preview of the data in the console.
 
-Setting Relevance Threshold
+**Setting Relevance Threshold**
 Adjust the minimum relevance score for datasets:
 
 ```bash
