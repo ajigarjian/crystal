@@ -622,6 +622,49 @@ def get_data_dimensions(data: Any) -> Dict[str, Any]:
     else:
         return {"type": "scalar"}
 
+def display_extracted_data(self, extracted_data):
+    """Display extracted data in a readable format in the CLI."""
+    self.stdout.write(self.style.SUCCESS("\nEXTRACTED DATA:"))
+    
+    # Display dataset info
+    self.stdout.write(f"\nFrom dataset: {extracted_data.get('dataset_title', 'Unknown')}")
+    
+    # Display extraction strategy
+    self.stdout.write("\nExtraction Strategy:")
+    self.stdout.write(extracted_data.get("extraction_plan", {}).get("strategy", "No strategy provided"))
+    
+    # Display the data itself
+    self.stdout.write("\nData:")
+    data = extracted_data.get("extracted_data")
+    
+    if isinstance(data, pd.DataFrame):
+        # For DataFrames, print all rows without any limit
+        self.stdout.write(data.to_string())
+        self.stdout.write(f"\n[{len(data)} rows x {len(data.columns)} columns]")
+    elif isinstance(data, pd.Series):
+        # For Series, show all values
+        self.stdout.write(data.to_string())
+        self.stdout.write(f"\n[{len(data)} values]")
+    elif isinstance(data, dict):
+        # For dictionaries
+        import json
+        self.stdout.write(json.dumps(data, indent=2, default=str))
+    elif isinstance(data, list):
+        # For lists
+        import json
+        self.stdout.write(json.dumps(data, indent=2, default=str))
+    else:
+        # For other types
+        self.stdout.write(str(data))
+    
+    # Display explanation
+    self.stdout.write("\nExplanation:")
+    self.stdout.write(extracted_data.get("extraction_plan", {}).get("explanation", "No explanation provided"))
+    
+    # Display code used
+    self.stdout.write("\nCode Used:")
+    self.stdout.write(f"```python\n{extracted_data.get('code_used', 'No code provided')}\n```")
+
 def summarize_findings(
     query: str,
     extracted_data_list: List[Dict[str, Any]],
@@ -652,22 +695,15 @@ def summarize_findings(
         
         # Create a concise summary of the extracted data
         if isinstance(extracted, pd.DataFrame):
-            # For DataFrames, just include the first 3 rows
-            if not extracted.empty:
-                sample = extracted.head(3).to_string()
-                data_summary = f"Data sample:\n{sample}"
-            else:
-                data_summary = "Empty dataset"
+            # For DataFrames, include all rows without any limit
+            sample = extracted.to_string()
+            data_summary = f"Data:\n{sample}"
         elif isinstance(extracted, dict):
-            # For dictionaries, just list the key-value pairs
-            data_summary = "\n".join([f"{k}: {v}" for k, v in list(extracted.items())[:5]])
-            if len(extracted) > 5:
-                data_summary += f"\n... and {len(extracted) - 5} more items"
+            # For dictionaries, include all key-value pairs
+            data_summary = "\n".join([f"{k}: {v}" for k, v in extracted.items()])
         elif isinstance(extracted, list):
-            # For lists, show first few items
-            data_summary = "\n".join([str(item) for item in extracted[:3]])
-            if len(extracted) > 3:
-                data_summary += f"\n... and {len(extracted) - 3} more items"
+            # For lists, include all items
+            data_summary = "\n".join([str(item) for item in extracted])
         else:
             data_summary = str(extracted)
         
@@ -681,13 +717,14 @@ DATA POINTS:
 {chr(10).join(dataset_summaries)}
 
 INSTRUCTIONS:
-1. Present ONLY the key data points that directly answer the query
-2. Be extremely concise - no lengthy explanations
+1. Present the key data points that directly answer the query
+2. Be concise but thorough - include all relevant data in your analysis
 3. Format as bullet points where appropriate
 4. Always cite the source dataset for each data point
-5. If data is insufficient, briefly state what's missing
+5. If analyzing trends over time, be sure to include the full time range in your analysis
+6. Pay special attention to the most recent data points when analyzing trends
 
-Your response should be no more than 2-3 short paragraphs or 5-7 bullet points.
+Your response should focus on answering the query using all available data.
 """
 
     # Call OpenAI API
@@ -695,11 +732,11 @@ Your response should be no more than 2-3 short paragraphs or 5-7 bullet points.
     response = client.chat.completions.create(
         model="gpt-4o",
         messages=[
-            {"role": "system", "content": "You are a data analyst who provides only essential information with minimal text."},
+            {"role": "system", "content": "You are a data analyst who provides thorough analysis of data, with special attention to recent data points."},
             {"role": "user", "content": prompt}
         ],
         temperature=0.2,
-        max_tokens=300  # Limit response length
+        max_tokens=600  # Increased token limit to allow for more comprehensive analysis
     )
     
     # Return the summary
