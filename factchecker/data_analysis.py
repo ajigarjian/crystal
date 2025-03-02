@@ -426,45 +426,105 @@ def execute_extraction_plan(df: pd.DataFrame, extraction_plan: Dict[str, Any]) -
             print(f"Expression evaluation failed with SyntaxError: {str(se)}")
             print("Attempting to execute as a statement block")
             
+            # Capture stdout to get printed results
+            import io
+            from contextlib import redirect_stdout
+            
+            # Create a StringIO object to capture printed output
+            captured_output = io.StringIO()
+            
             # If it's not a simple expression, try executing as a statement block
-            # IMPORTANT CHANGE: Modify the code to explicitly return the result
+            # Modify the code to store results in a dictionary instead of printing them
             modified_code = code
             
-            # Check if the code ends with a variable name (likely the result)
-            lines = code.strip().split('\n')
-            last_line = lines[-1].strip()
-            
-            # If the last line is just a variable name, use that as the result
-            if last_line and not last_line.startswith('#') and '=' not in last_line:
-                result_var = last_line
-                # Replace the last line with an assignment to result
-                lines[-1] = f"result = {result_var}"
-                modified_code = '\n'.join(lines)
-            else:
-                # Otherwise, try to find the last variable assignment
-                var_assignments = []
-                for line in lines:
-                    line = line.strip()
-                    if line and not line.startswith('#') and '=' in line:
-                        var_name = line.split('=')[0].strip()
-                        if var_name != 'result':  # Avoid existing result assignments
-                            var_assignments.append(var_name)
+            # Check if the code contains print statements
+            if "print(" in code:
+                # Replace print statements with assignments to a results dictionary
+                result_dict_code = "results_dict = {}\n"
                 
-                if var_assignments:
-                    # Add a line to assign the last variable to result
-                    modified_code = f"{code}\nresult = {var_assignments[-1]}"
+                # Split the code into lines
+                lines = code.strip().split('\n')
+                modified_lines = []
+                result_keys = []
+                
+                for i, line in enumerate(lines):
+                    if "print(" in line:
+                        # Extract the content inside print()
+                        content = line.split("print(", 1)[1].rsplit(")", 1)[0]
+                        
+                        # Create a key for this result
+                        key = f"result_{i}"
+                        result_keys.append(key)
+                        
+                        # Replace print with assignment to results_dict
+                        modified_lines.append(f"results_dict['{key}'] = {content}")
+                    else:
+                        modified_lines.append(line)
+                
+                # Join the modified lines
+                modified_code = result_dict_code + "\n".join(modified_lines)
+                
+                # Execute the modified code with print statements replaced
+                exec(modified_code, {"__builtins__": __builtins__}, local_env)
+                
+                # Get the results dictionary
+                results_dict = local_env.get("results_dict", {})
+                
+                # Also execute the original code to capture the printed output
+                with redirect_stdout(captured_output):
+                    exec(code, {"__builtins__": __builtins__}, local_env)
+                
+                # Get the printed output
+                printed_output = captured_output.getvalue()
+                
+                # Create a result that includes both the dictionary and printed output
+                result = {
+                    "results_dict": results_dict,
+                    "printed_output": printed_output.strip()
+                }
+            else:
+                # Check if the last line is just a variable name (likely the result)
+                lines = code.strip().split('\n')
+                last_line = lines[-1].strip()
+                
+                # If the last line is just a variable name, use that as the result
+                if last_line and not last_line.startswith('#') and '=' not in last_line:
+                    result_var = last_line
+                    # Replace the last line with an assignment to result
+                    lines[-1] = f"result = {result_var}"
+                    modified_code = '\n'.join(lines)
                 else:
-                    # If no variable assignments found, just use the original code
-                    modified_code = f"{code}\n# No result variable found"
-            
-            # Execute the modified code
-            exec_code = f"result = None\n{modified_code}\n"
-            print(f"Executing modified code block:\n{exec_code}")
-            
-            exec(exec_code, {"__builtins__": __builtins__}, local_env)
-            
-            # Get the result from the local environment
-            result = local_env.get("result")
+                    # Otherwise, try to find the last variable assignment
+                    var_assignments = []
+                    for line in lines:
+                        line = line.strip()
+                        if line and not line.startswith('#') and '=' in line:
+                            var_name = line.split('=')[0].strip()
+                            if var_name != 'result':  # Avoid existing result assignments
+                                var_assignments.append(var_name)
+                    
+                    if var_assignments:
+                        # Add a line to assign the last variable to result
+                        modified_code = f"{code}\nresult = {var_assignments[-1]}"
+                    else:
+                        # If no variable assignments found, just use the original code
+                        modified_code = f"{code}\n# No result variable found"
+                
+                # Execute the modified code
+                exec_code = f"result = None\n{modified_code}\n"
+                print(f"Executing modified code block:\n{exec_code}")
+                
+                # Execute the code and capture any printed output
+                with redirect_stdout(captured_output):
+                    exec(exec_code, {"__builtins__": __builtins__}, local_env)
+                
+                # Get the result from the local environment
+                result = local_env.get("result")
+                
+                # If result is None but we have printed output, use that instead
+                printed_output = captured_output.getvalue().strip()
+                if result is None and printed_output:
+                    result = {"printed_output": printed_output}
             
             print("=" * 80)
             print("EXECUTION RESULTS")
@@ -476,6 +536,8 @@ def execute_extraction_plan(df: pd.DataFrame, extraction_plan: Dict[str, Any]) -
                 print(f"Result DataFrame - shape: {result.shape}")
                 print(f"Result columns: {list(result.columns)}")
                 print(f"Result sample:\n{result.head(5).to_string() if not result.empty else 'Empty DataFrame'}")
+            elif isinstance(result, dict) and "printed_output" in result:
+                print(f"Captured printed output: {result['printed_output']}")
             else:
                 print(f"Result: {result}")
                 

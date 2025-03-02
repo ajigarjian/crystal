@@ -17,6 +17,7 @@ class Command(BaseCommand):
         parser.add_argument("--preview", action="store_true", help="Show data preview")
         parser.add_argument("--relevance-threshold", type=float, default=0.7, 
                            help="Threshold for dataset relevance (0-1)")
+        parser.add_argument("--force", help="Comma-separated list of local dataset paths to analyze directly, skipping search")
     
     def handle(self, *args, **options):
         query = options['query']
@@ -24,6 +25,7 @@ class Command(BaseCommand):
         output_dir = options['output']
         show_preview = options['preview']
         relevance_threshold = options['relevance_threshold']
+        force_datasets = options.get('force')
         
         self.stdout.write(f"Factchecker query: '{query}'")
         
@@ -36,10 +38,27 @@ class Command(BaseCommand):
             self.stderr.write(self.style.ERROR(f"Error initializing API keys: {e}"))
             return
         
-        # Use vector search to find relevant datasets
-        self.stdout.write(f"Searching for datasets matching '{query}' using vector similarity...")
-        relevant_datasets = dgd.vector_search_datasets(query, openai_api_key, top_n=top_n)
-        self.stdout.write(f"Found {len(relevant_datasets)} relevant datasets")
+        # Process forced datasets if specified, otherwise do vector search
+        relevant_datasets = []
+        if force_datasets:
+            self.stdout.write(f"Skipping search and using specified datasets: {force_datasets}")
+            dataset_paths = [path.strip() for path in force_datasets.split(',')]
+            
+            for path in dataset_paths:
+                # Create a minimal dataset info dict for each forced dataset
+                dataset_name = path.split('/')[-1] if '/' in path else path
+                relevant_datasets.append({
+                    "id": f"local-{dataset_name}",
+                    "title": dataset_name,
+                    "description": "Locally specified dataset",
+                    "similarity": 1.0,  # Assume perfect similarity since user specified it
+                    "local_path": path  # Add the local path directly
+                })
+        else:
+            # Use vector search to find relevant datasets
+            self.stdout.write(f"Searching for datasets matching '{query}' using vector similarity...")
+            relevant_datasets = dgd.vector_search_datasets(query, openai_api_key, top_n=top_n)
+            self.stdout.write(f"Found {len(relevant_datasets)} relevant datasets")
         
         if not relevant_datasets:
             self.stdout.write("No datasets found. Try a different query.")
@@ -52,15 +71,20 @@ class Command(BaseCommand):
         for i, dataset in enumerate(relevant_datasets, 1):
             self.stdout.write(f"\n[{i}/{len(relevant_datasets)}] Processing: {dataset['title']} (Query similarity: {dataset['similarity']:.4f})")
             
-            # Download the dataset
-            self.stdout.write("Downloading dataset...")
-            output_path = dgd.download_dataset(gov_api_key, dataset["id"], output_dir=output_dir)
-            
-            if not output_path:
-                self.stdout.write(self.style.WARNING("Download failed. Skipping dataset."))
-                continue
+            # Handle the dataset - either use local path or download
+            if 'local_path' in dataset:
+                output_path = dataset['local_path']
+                self.stdout.write(f"Using local dataset: {output_path}")
+            else:
+                # Download the dataset
+                self.stdout.write("Downloading dataset...")
+                output_path = dgd.download_dataset(gov_api_key, dataset["id"], output_dir=output_dir)
                 
-            self.stdout.write(f"Downloaded to: {output_path}")
+                if not output_path:
+                    self.stdout.write(self.style.WARNING("Download failed. Skipping dataset."))
+                    continue
+                    
+                self.stdout.write(f"Downloaded to: {output_path}")
             
             # Load and analyze the dataset
             try:

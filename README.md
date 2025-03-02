@@ -13,7 +13,7 @@ A Django application that uses Data.gov datasets and OpenAI to fact-check querie
 
 ### Prerequisites
 
-- Python 3.10+
+- Python 3.12+ (advanced f string support)
 - Django 5.1+
 - Data.gov API key
 - OpenAI API key
