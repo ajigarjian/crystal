@@ -735,7 +735,7 @@ Your response should focus on answering the query using all available data.
             {"role": "system", "content": "You are a data analyst who provides thorough analysis of data, with special attention to recent data points."},
             {"role": "user", "content": prompt}
         ],
-        temperature=0.2,
+        temperature=0.1,
         max_tokens=600  # Increased token limit to allow for more comprehensive analysis
     )
     
