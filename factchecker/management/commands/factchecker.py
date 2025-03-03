@@ -1,14 +1,30 @@
 # factchecker/management/commands/factchecker.py
 import argparse
 from django.core.management.base import BaseCommand
-from factchecker import download_gov_data as dgd
-from factchecker import data_analysis as da
+
+# For searching for the right datasets to download, we use vector search, and have support for keyword search using the gov api
+from factchecker.search import vector_search_datasets
+from factchecker.search import preprocess_query, search_datasets, filter_relevant_datasets
+
+# For downloading the datasets, we use the download_dataset function for now
+from factchecker.download import download_dataset
+
+# For analyzing the datasets and extracting the relevant data, we use the following functions
+from factchecker.analysis import (
+    load_csv_dataset,
+    assess_dataset_relevance,
+    extract_relevant_data,
+    analyze_dataset_overview,
+    summarize_findings
+)
+
 import pandas as pd
-from typing import Dict, Tuple, List, Any
+from typing import Dict, Tuple, List, Any, Optional
 import openai
 import time
 import concurrent.futures
 from threading import Lock
+import os
 
 class Command(BaseCommand):
     help = 'Search, download, and analyze datasets from Data.gov'
@@ -28,6 +44,12 @@ class Command(BaseCommand):
         parser.add_argument("--force", help="Comma-separated list of local dataset paths to analyze directly, skipping search")
         parser.add_argument("--workers", type=int, default=3, 
                            help="Number of parallel workers for processing datasets")
+        parser.add_argument(
+            '--search-method',
+            choices=['vector', 'keyword'],
+            default='vector',
+            help='Search method to use: vector (default) or keyword'
+        )
     
     def handle(self, *args, **options):
         # Start timing the execution
@@ -40,19 +62,20 @@ class Command(BaseCommand):
         relevance_threshold = options['relevance_threshold']
         force_datasets = options.get('force')
         workers = options.get('workers', 3)
+        search_method = options['search_method']
         
         self.stdout.write(f"Factchecker query: '{query}'")
         
         # Initialize API keys
         try:
-            api_keys = dgd.init_api_key()
+            api_keys = self.init_api_key()
             openai_api_key = api_keys["openai"]
             gov_api_key = api_keys["data_gov"]
         except ValueError as e:
             self.stderr.write(self.style.ERROR(f"Error initializing API keys: {e}"))
             return
         
-        # Process forced datasets if specified, otherwise do vector search
+        # Process forced datasets if specified, otherwise do search
         relevant_datasets = []
         if force_datasets:
             self.stdout.write(f"Skipping search and using specified datasets: {force_datasets}")
@@ -69,9 +92,20 @@ class Command(BaseCommand):
                     "local_path": path  # Add the local path directly
                 })
         else:
-            # Use vector search to find relevant datasets
-            self.stdout.write(f"Searching for datasets matching '{query}' using vector similarity...")
-            relevant_datasets = dgd.vector_search_datasets(query, openai_api_key, top_n=top_n)
+            if search_method == 'vector':
+                # Use vector search to find relevant datasets
+                self.stdout.write(f"Searching for datasets matching '{query}' using vector similarity...")
+                relevant_datasets = vector_search_datasets(query, openai_api_key, top_n=top_n)
+            else:
+                # Use keyword search to find relevant datasets
+                self.stdout.write(f"Searching for datasets matching '{query}' using keyword search...")
+                # Preprocess the query for better results
+                generalized_query = preprocess_query(query, openai_api_key)
+                # Search for datasets
+                search_results = search_datasets(gov_api_key, generalized_query, rows=top_n*2)
+                # Filter to most relevant
+                relevant_datasets = filter_relevant_datasets(query, search_results, openai_api_key, top_n=top_n)
+            
             self.stdout.write(f"Found {len(relevant_datasets)} relevant datasets")
         
         if not relevant_datasets:
@@ -107,7 +141,7 @@ class Command(BaseCommand):
                     # Download the dataset
                     with self.stdout_lock:
                         self.stdout.write(f"{dataset_short_id} Downloading dataset...")
-                    output_path = dgd.download_dataset(gov_api_key, dataset["id"], output_dir=output_dir)
+                    output_path = download_dataset(gov_api_key, dataset["id"], output_dir=output_dir)
                     
                     if not output_path:
                         with self.stdout_lock:
@@ -125,7 +159,7 @@ class Command(BaseCommand):
                 # Load and analyze the dataset
                 with self.stdout_lock:
                     self.stdout.write(f"{dataset_short_id} Loading dataset for analysis...")
-                df = da.load_csv_dataset(output_path)
+                df = load_csv_dataset(output_path)
                 
                 # Record basic dataset info
                 dataset_info = {
@@ -148,7 +182,7 @@ class Command(BaseCommand):
                 # Assess dataset relevance
                 with self.stdout_lock:
                     self.stdout.write(f"\n{dataset_short_id} Assessing dataset relevance...")
-                is_relevant, relevance_score, reasoning = da.assess_dataset_relevance(
+                is_relevant, relevance_score, reasoning = assess_dataset_relevance(
                     df, query, dataset_info, openai_api_key, relevance_threshold
                 )
                 
@@ -167,7 +201,7 @@ class Command(BaseCommand):
                     # Extract relevant data
                     with self.stdout_lock:
                         self.stdout.write(f"{dataset_short_id} Extracting relevant data...")
-                    extracted_data = da.extract_relevant_data(df, query, dataset_info, openai_api_key)
+                    extracted_data = extract_relevant_data(df, query, dataset_info, openai_api_key)
                     
                     # Add dataset source information to the extracted data
                     if extracted_data:
@@ -182,7 +216,7 @@ class Command(BaseCommand):
                     # Generate dataset overview analysis AFTER extraction
                     with self.stdout_lock:
                         self.stdout.write(f"\n{dataset_short_id} Analyzing dataset overview...")
-                    dataset_analysis = da.analyze_dataset_overview(
+                    dataset_analysis = analyze_dataset_overview(
                         df, 
                         query, 
                         dataset_info, 
@@ -204,7 +238,7 @@ class Command(BaseCommand):
                     # Even for non-relevant datasets, we might want a basic analysis
                     with self.stdout_lock:
                         self.stdout.write(f"\n{dataset_short_id} Analyzing dataset overview...")
-                    dataset_analysis = da.analyze_dataset_overview(df, query, dataset_info, openai_api_key)
+                    dataset_analysis = analyze_dataset_overview(df, query, dataset_info, openai_api_key)
                     with self.stdout_lock:
                         self.display_dataset_analysis(dataset_analysis)
                     dataset_info["dataset_analysis"] = dataset_analysis["analysis"]
@@ -255,7 +289,7 @@ class Command(BaseCommand):
         
         if extracted_data_list:
             self.stdout.write("\nGenerating summary of findings...")
-            summary = da.summarize_findings(query, extracted_data_list, openai_api_key, dataset_analyses)
+            summary = summarize_findings(query, extracted_data_list, openai_api_key, dataset_analyses)
             self.stdout.write(self.style.SUCCESS("\nFINDINGS:"))
             self.stdout.write(summary)
         else:
@@ -299,3 +333,19 @@ class Command(BaseCommand):
             self.stdout.write("```python")
             self.stdout.write(extracted_data["code"])
             self.stdout.write("```")
+
+    def init_api_key(self, api_key: Optional[str] = None) -> Dict[str, str]:
+        """Initialize the Data.gov API key and OpenAI API key."""
+        data_gov_key = api_key or os.environ.get("DATA_GOV_API_KEY")
+        openai_key = os.environ.get("OPENAI_API_KEY")
+        
+        if not data_gov_key:
+            raise ValueError("Data.gov API key is required. Set DATA_GOV_API_KEY environment variable or pass it directly.")
+        
+        if not openai_key:
+            raise ValueError("OpenAI API key is required. Set OPENAI_API_KEY environment variable.")
+        
+        return {
+            "data_gov": data_gov_key,
+            "openai": openai_key
+        }
