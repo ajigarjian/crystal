@@ -4,12 +4,19 @@ from django.core.management.base import BaseCommand
 from factchecker import download_gov_data as dgd
 from factchecker import data_analysis as da
 import pandas as pd
-from typing import Dict, Tuple
+from typing import Dict, Tuple, List, Any
 import openai
 import time
+import concurrent.futures
+from threading import Lock
 
 class Command(BaseCommand):
     help = 'Search, download, and analyze datasets from Data.gov'
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Create a lock for thread-safe stdout writing
+        self.stdout_lock = Lock()
     
     def add_arguments(self, parser):
         parser.add_argument("query", help="Natural language query to search for datasets")
@@ -19,6 +26,8 @@ class Command(BaseCommand):
         parser.add_argument("--relevance-threshold", type=float, default=0.7, 
                            help="Threshold for dataset relevance (0-1)")
         parser.add_argument("--force", help="Comma-separated list of local dataset paths to analyze directly, skipping search")
+        parser.add_argument("--workers", type=int, default=3, 
+                           help="Number of parallel workers for processing datasets")
     
     def handle(self, *args, **options):
         # Start timing the execution
@@ -30,6 +39,7 @@ class Command(BaseCommand):
         show_preview = options['preview']
         relevance_threshold = options['relevance_threshold']
         force_datasets = options.get('force')
+        workers = options.get('workers', 3)
         
         self.stdout.write(f"Factchecker query: '{query}'")
         
@@ -76,27 +86,45 @@ class Command(BaseCommand):
         extracted_data_list = []
         dataset_analyses = []  # Store dataset analyses for final summary
         
-        for i, dataset in enumerate(relevant_datasets, 1):
-            self.stdout.write(f"\n[{i}/{len(relevant_datasets)}] Processing: {dataset['title']} (Query similarity: {dataset['similarity']:.4f})")
+        # Define the worker function that processes a single dataset
+        def process_dataset(dataset_index, dataset):
+            dataset_num = dataset_index + 1
+            dataset_id = dataset['id']
+            dataset_title = dataset['title']
+            # Create a short identifier for this dataset
+            dataset_short_id = f"[{dataset_num}/{len(relevant_datasets)}] {dataset_title[:20]}..."
             
-            # Handle the dataset - either use local path or download
-            if 'local_path' in dataset:
-                output_path = dataset['local_path']
-                self.stdout.write(f"Using local dataset: {output_path}")
-            else:
-                # Download the dataset
-                self.stdout.write("Downloading dataset...")
-                output_path = dgd.download_dataset(gov_api_key, dataset["id"], output_dir=output_dir)
-                
-                if not output_path:
-                    self.stdout.write(self.style.WARNING("Download failed. Skipping dataset."))
-                    continue
-                    
-                self.stdout.write(f"Downloaded to: {output_path}")
+            with self.stdout_lock:
+                self.stdout.write(f"\n{dataset_short_id} Processing dataset (Query similarity: {dataset['similarity']:.4f})")
             
-            # Load and analyze the dataset
             try:
-                self.stdout.write("Loading dataset for analysis...")
+                # Handle the dataset - either use local path or download
+                if 'local_path' in dataset:
+                    output_path = dataset['local_path']
+                    with self.stdout_lock:
+                        self.stdout.write(f"{dataset_short_id} Using local dataset: {output_path}")
+                else:
+                    # Download the dataset
+                    with self.stdout_lock:
+                        self.stdout.write(f"{dataset_short_id} Downloading dataset...")
+                    output_path = dgd.download_dataset(gov_api_key, dataset["id"], output_dir=output_dir)
+                    
+                    if not output_path:
+                        with self.stdout_lock:
+                            self.stdout.write(self.style.WARNING(f"{dataset_short_id} Download failed. Skipping dataset."))
+                        return {
+                            "id": dataset["id"],
+                            "title": dataset["title"],
+                            "similarity": dataset.get("similarity", 0),
+                            "error": "Download failed"
+                        }, None, None
+                        
+                    with self.stdout_lock:
+                        self.stdout.write(f"{dataset_short_id} Downloaded to: {output_path}")
+                
+                # Load and analyze the dataset
+                with self.stdout_lock:
+                    self.stdout.write(f"{dataset_short_id} Loading dataset for analysis...")
                 df = da.load_csv_dataset(output_path)
                 
                 # Record basic dataset info
@@ -113,11 +141,13 @@ class Command(BaseCommand):
                 
                 # Print preview if requested
                 if show_preview:
-                    self.stdout.write("\nData Preview:")
-                    self.stdout.write(str(df.head()))
+                    with self.stdout_lock:
+                        self.stdout.write(f"\n{dataset_short_id} Data Preview:")
+                        self.stdout.write(str(df.head()))
                 
                 # Assess dataset relevance
-                self.stdout.write("\nAssessing dataset relevance...")
+                with self.stdout_lock:
+                    self.stdout.write(f"\n{dataset_short_id} Assessing dataset relevance...")
                 is_relevant, relevance_score, reasoning = da.assess_dataset_relevance(
                     df, query, dataset_info, openai_api_key, relevance_threshold
                 )
@@ -125,20 +155,33 @@ class Command(BaseCommand):
                 dataset_info["relevance_score"] = relevance_score
                 dataset_info["relevance_reasoning"] = reasoning
                 
+                extracted_data = None
+                dataset_analysis = None
+                
                 if is_relevant:
-                    self.stdout.write(self.style.SUCCESS(
-                        f"Dataset is relevant (Score: {relevance_score:.2f})"
-                    ))
+                    with self.stdout_lock:
+                        self.stdout.write(self.style.SUCCESS(
+                            f"{dataset_short_id} Dataset is relevant (Score: {relevance_score:.2f})"
+                        ))
                     
                     # Extract relevant data
-                    self.stdout.write("Extracting relevant data...")
+                    with self.stdout_lock:
+                        self.stdout.write(f"{dataset_short_id} Extracting relevant data...")
                     extracted_data = da.extract_relevant_data(df, query, dataset_info, openai_api_key)
-                    extracted_data_list.append(extracted_data)
-                    self.display_extracted_data(extracted_data)
+                    
+                    # Add dataset source information to the extracted data
+                    if extracted_data:
+                        extracted_data["dataset_title"] = dataset_info["title"]
+                        extracted_data["dataset_source"] = dataset_info.get("description", "Data.gov dataset")
+                        extracted_data["dataset_id"] = dataset_info["id"]
+                    
+                    with self.stdout_lock:
+                        self.stdout.write(f"{dataset_short_id} EXTRACTED DATA:")
+                        self.display_extracted_data(extracted_data)
                     
                     # Generate dataset overview analysis AFTER extraction
-                    # This ensures the overview has context from the extraction process
-                    self.stdout.write("\nAnalyzing dataset overview...")
+                    with self.stdout_lock:
+                        self.stdout.write(f"\n{dataset_short_id} Analyzing dataset overview...")
                     dataset_analysis = da.analyze_dataset_overview(
                         df, 
                         query, 
@@ -147,34 +190,62 @@ class Command(BaseCommand):
                         column_values_analysis=extracted_data.get("column_values_analysis"),
                         relevant_columns=extracted_data.get("relevant_columns")
                     )
-                    self.display_dataset_analysis(dataset_analysis)
-                    dataset_analyses.append(dataset_analysis)  # Store for final summary
+                    with self.stdout_lock:
+                        self.display_dataset_analysis(dataset_analysis)
                     
                     # Add dataset analysis to dataset_info
                     dataset_info["dataset_analysis"] = dataset_analysis["analysis"]
                 else:
-                    self.stdout.write(self.style.WARNING(
-                        f"Dataset is not relevant enough (Score: {relevance_score:.2f})"
-                    ))
+                    with self.stdout_lock:
+                        self.stdout.write(self.style.WARNING(
+                            f"{dataset_short_id} Dataset is not relevant enough (Score: {relevance_score:.2f})"
+                        ))
                     
                     # Even for non-relevant datasets, we might want a basic analysis
-                    self.stdout.write("\nAnalyzing dataset overview...")
+                    with self.stdout_lock:
+                        self.stdout.write(f"\n{dataset_short_id} Analyzing dataset overview...")
                     dataset_analysis = da.analyze_dataset_overview(df, query, dataset_info, openai_api_key)
-                    self.display_dataset_analysis(dataset_analysis)
+                    with self.stdout_lock:
+                        self.display_dataset_analysis(dataset_analysis)
                     dataset_info["dataset_analysis"] = dataset_analysis["analysis"]
                 
-                results.append(dataset_info)
+                return dataset_info, dataset_analysis, extracted_data
                 
             except Exception as e:
-                self.stderr.write(self.style.ERROR(f"Error analyzing dataset: {e}"))
-                # Still add to results, but with error info
-                results.append({
+                with self.stdout_lock:
+                    self.stderr.write(self.style.ERROR(f"{dataset_short_id} Error analyzing dataset: {e}"))
+                # Return error info
+                return {
                     "id": dataset["id"],
                     "title": dataset["title"],
                     "similarity": dataset.get("similarity", 0),
-                    "file_path": output_path,
+                    "file_path": output_path if 'output_path' in locals() else None,
                     "error": str(e)
-                })
+                }, None, None
+        
+        # Use ThreadPoolExecutor to process datasets in parallel
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+            # Submit all tasks and store the futures
+            future_to_index = {
+                executor.submit(process_dataset, i, dataset): i 
+                for i, dataset in enumerate(relevant_datasets)
+            }
+            
+            # Process results as they complete
+            for future in concurrent.futures.as_completed(future_to_index):
+                dataset_info, dataset_analysis, extracted_data = future.result()
+                
+                # Add results to our lists
+                results.append(dataset_info)
+                
+                if dataset_analysis:
+                    dataset_analyses.append(dataset_analysis)
+                
+                if extracted_data:
+                    extracted_data_list.append(extracted_data)
+        
+        # Sort results to maintain the original order
+        results.sort(key=lambda x: next((i for i, d in enumerate(relevant_datasets) if d['id'] == x['id']), 999))
         
         # Summary
         self.stdout.write(self.style.SUCCESS(f"\nSuccessfully processed {len(results)} datasets"))
@@ -198,46 +269,33 @@ class Command(BaseCommand):
         """Display the dataset analysis in a readable format."""
         self.stdout.write(self.style.SUCCESS("\nDATASET ANALYSIS:"))
         self.stdout.write(dataset_analysis["analysis"])
-        
+    
     def display_extracted_data(self, extracted_data):
-        """Display extracted data in a readable format in the CLI."""
-        self.stdout.write(self.style.SUCCESS("\nEXTRACTED DATA:"))
-        
-        # Display dataset info
-        self.stdout.write(f"\nFrom dataset: {extracted_data.get('dataset_title', 'Unknown')}")
+        """Display extracted data in a readable format"""
+        self.stdout.write("\nFrom dataset: " + extracted_data.get("dataset_title", "Unknown Dataset"))
         
         # Display extraction strategy
         self.stdout.write("\nExtraction Strategy:")
-        self.stdout.write(extracted_data.get("extraction_plan", {}).get("strategy", "No strategy provided"))
+        self.stdout.write(extracted_data.get("extraction_strategy", "No strategy provided"))
         
-        # Display the data itself
+        # Display the data
         self.stdout.write("\nData:")
-        data = extracted_data.get("extracted_data")
+        data_dict = extracted_data.get("results_dict", {})
+        for key, value in data_dict.items():
+            self.stdout.write(f"{key}: {value}")
         
-        if isinstance(data, pd.DataFrame):
-            # For DataFrames, print all rows without any limit
-            self.stdout.write(data.to_string())
-            self.stdout.write(f"\n[{len(data)} rows x {len(data.columns)} columns]")
-        elif isinstance(data, pd.Series):
-            # For Series, show all values
-            self.stdout.write(data.to_string())
-            self.stdout.write(f"\n[{len(data)} values]")
-        elif isinstance(data, dict):
-            # For dictionaries
-            import json
-            self.stdout.write(json.dumps(data, indent=2, default=str))
-        elif isinstance(data, list):
-            # For lists
-            import json
-            self.stdout.write(json.dumps(data, indent=2, default=str))
-        else:
-            # For other types
-            self.stdout.write(str(data))
+        # Display printed output if available
+        if "printed_output" in extracted_data and extracted_data["printed_output"]:
+            self.stdout.write("\nPrinted Output:")
+            self.stdout.write(extracted_data["printed_output"])
         
         # Display explanation
         self.stdout.write("\nExplanation:")
-        self.stdout.write(extracted_data.get("extraction_plan", {}).get("explanation", "No explanation provided"))
+        self.stdout.write(extracted_data.get("explanation", "No explanation provided"))
         
         # Display code used
-        self.stdout.write("\nCode Used:")
-        self.stdout.write(f"```python\n{extracted_data.get('code_used', 'No code provided')}\n```")
+        if "code" in extracted_data:
+            self.stdout.write("\nCode Used:")
+            self.stdout.write("```python")
+            self.stdout.write(extracted_data["code"])
+            self.stdout.write("```")

@@ -34,9 +34,7 @@ def vector_search_datasets(query: str, openai_api_key: str, top_n: int = 5) -> L
     Returns:
         List of the most relevant datasets
     """
-    try:
-        print(f"Performing vector search for: '{query}'")
-        
+    try:        
         # Check if we have datasets with embeddings
         indexed_count = DatasetCatalog.objects.filter(indexed=True).count()
         if indexed_count == 0:
