@@ -131,7 +131,16 @@ python manage.py factchecker "income inequality" --relevance-threshold 0.8
 
 This will only use datasets with a relevance score of 0.8 or higher (default is 0.7). This is for when you have downloaded datasets and want to actually filter based on the relevance of their content.
 
-Combined Example
+**Choosing Type of Search**
+Choose to search for datasets using vector search or keyword search:
+
+```bash
+python manage.py factchecker "income inequality" --search-method keyword
+```
+
+This will use the keyword search to find datasets; it uses the data.gov api to search for datasets that contain the query as a substring.
+
+**Combined Example**
 You can combine multiple options:
 
 ```bash

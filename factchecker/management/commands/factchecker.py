@@ -128,8 +128,9 @@ class Command(BaseCommand):
             # Create a short identifier for this dataset
             dataset_short_id = f"[{dataset_num}/{len(relevant_datasets)}] {dataset_title[:20]}..."
             
+            similarity_score = dataset.get('similarity', 1.0)
             with self.stdout_lock:
-                self.stdout.write(f"\n{dataset_short_id} Processing dataset (Query similarity: {dataset['similarity']:.4f})")
+                self.stdout.write(f"\n{dataset_short_id} Processing dataset (Query similarity: {similarity_score:.4f})")
             
             try:
                 # Handle the dataset - either use local path or download
@@ -166,7 +167,7 @@ class Command(BaseCommand):
                     "id": dataset["id"],
                     "title": dataset["title"],
                     "description": dataset.get("description", ""),
-                    "similarity": dataset.get("similarity", 0),
+                    "similarity": similarity_score,
                     "file_path": output_path,
                     "row_count": len(df),
                     "column_count": len(df.columns),
