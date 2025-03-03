@@ -6,6 +6,7 @@ from factchecker import data_analysis as da
 import pandas as pd
 from typing import Dict, Tuple
 import openai
+import time
 
 class Command(BaseCommand):
     help = 'Search, download, and analyze datasets from Data.gov'
@@ -20,6 +21,9 @@ class Command(BaseCommand):
         parser.add_argument("--force", help="Comma-separated list of local dataset paths to analyze directly, skipping search")
     
     def handle(self, *args, **options):
+        # Start timing the execution
+        start_time = time.time()
+        
         query = options['query']
         top_n = options['top']
         output_dir = options['output']
@@ -62,6 +66,9 @@ class Command(BaseCommand):
         
         if not relevant_datasets:
             self.stdout.write("No datasets found. Try a different query.")
+            # Calculate and display execution time before returning
+            execution_time = time.time() - start_time
+            self.stdout.write(self.style.SUCCESS(f"\nQuery execution completed in {execution_time:.2f} seconds"))
             return
         
         # Download and analyze each dataset
@@ -166,6 +173,10 @@ class Command(BaseCommand):
             self.stdout.write(summary)
         else:
             self.stdout.write(self.style.WARNING("\nNo relevant data found to answer the query."))
+        
+        # Calculate and display execution time
+        execution_time = time.time() - start_time
+        self.stdout.write(self.style.SUCCESS(f"\nQuery execution completed in {execution_time:.2f} seconds"))
 
     def display_dataset_analysis(self, dataset_analysis):
         """Display the dataset analysis in a readable format."""
