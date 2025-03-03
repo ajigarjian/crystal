@@ -251,15 +251,32 @@ def extract_relevant_data(
             "std": df[col].std()
         }
     
-    # Step 3: Ask LLM to determine extraction strategy
+    # Step 3: Identify relevant feature columns
+    relevant_columns = identify_relevant_columns(df, query, column_info, openai_api_key)
+    
+    # Step 4: For each relevant column, get unique values and select relevant ones
+    column_values_analysis = {}
+    for col_name in relevant_columns:
+        unique_values = get_unique_column_values(df, col_name)
+        relevant_values = select_relevant_values(unique_values, col_name, query, openai_api_key)
+        column_values_analysis[col_name] = {
+            "unique_values": unique_values,
+            "relevant_values": relevant_values
+        }
+    
+    # Step 5: Generate extraction code based on relevant columns and values
+    extraction_code = generate_extraction_code(df, column_values_analysis, query, openai_api_key)
+    
+    # Step 6: Ask LLM to determine extraction strategy (including the column analysis)
     extraction_plan = determine_extraction_strategy(
-        df, query, dataset_metadata, column_info, dataset_stats, numerical_stats, openai_api_key
+        df, query, dataset_metadata, column_info, dataset_stats, 
+        numerical_stats, openai_api_key, column_values_analysis, extraction_code
     )
     
-    # Step 4: Execute the extraction plan
+    # Step 7: Execute the extraction plan
     extracted_data, code_used = execute_extraction_plan(df, extraction_plan)
     
-    # Step 5: Format and return results
+    # Step 8: Format and return results
     return {
         "dataset_id": dataset_metadata.get("id", ""),
         "dataset_title": dataset_metadata.get("title", ""),
@@ -270,8 +287,491 @@ def extract_relevant_data(
         "data_shape": {
             "type": type(extracted_data).__name__,
             "dimensions": get_data_dimensions(extracted_data)
-        }
+        },
+        "column_values_analysis": column_values_analysis,
+        "relevant_columns": relevant_columns
     }
+
+def identify_relevant_columns(
+    df: pd.DataFrame,
+    query: str,
+    column_info: List[Dict],
+    openai_api_key: str
+) -> List[str]:
+    """
+    Identify columns that are most relevant to the user's query.
+    
+    Args:
+        df: The dataset as a pandas DataFrame
+        query: The original user query
+        column_info: Information about each column
+        openai_api_key: OpenAI API key
+        
+    Returns:
+        List of column names that are relevant to the query
+    """
+    # Format column information for the prompt
+    column_details = []
+    for col in column_info:
+        column_details.append(
+            f"- {col['name']} ({col['dtype']}): {col['unique_values']} unique values, "
+            f"{'has' if col['has_nulls'] else 'no'} nulls, samples: {col['sample_values']}"
+        )
+    
+    # Create prompt for OpenAI
+    prompt = f"""
+You are a data analysis expert. Given a dataset and a user query, identify which columns are most relevant to the query.
+
+USER QUERY: "{query}"
+
+DATASET COLUMNS:
+{chr(10).join(column_details)}
+
+SAMPLE DATA (first 5 rows):
+{df.head(5).to_string()}
+
+Based on the user query and dataset information, identify the columns that are most likely to contain relevant information.
+Consider both direct matches (columns that explicitly match query terms) and indirect matches (columns that might contain 
+information related to the query even if the names don't match directly).
+
+Return ONLY a comma-separated list of the most relevant column names, with no additional text or explanation.
+If no columns seem relevant, return "None".
+"""
+
+    # Call OpenAI API
+    client = openai.OpenAI(api_key=openai_api_key)
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": "You are a data analysis expert specializing in identifying relevant columns in datasets."},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.1  # Low temperature for more deterministic responses
+    )
+    
+    # Parse response
+    content = response.choices[0].message.content.strip()
+    
+    # Handle the case where no columns are relevant
+    if content.lower() == "none":
+        return []
+    
+    # Split the comma-separated list and clean up column names
+    relevant_columns = [col.strip() for col in content.split(',')]
+    
+    # Verify that all returned columns actually exist in the dataframe
+    existing_columns = [col for col in relevant_columns if col in df.columns]
+    
+    return existing_columns
+
+def get_unique_column_values(df: pd.DataFrame, column_name: str, max_values: int = 100) -> List[Any]:
+    """
+    Get unique values from a column, with a limit to prevent performance issues.
+    
+    Args:
+        df: The dataset as a pandas DataFrame
+        column_name: Name of the column to analyze
+        max_values: Maximum number of unique values to return
+        
+    Returns:
+        List of unique values from the column
+    """
+    if column_name not in df.columns:
+        return []
+    
+    # Get unique values
+    unique_values = df[column_name].dropna().unique()
+    
+    # Limit the number of values to prevent performance issues
+    if len(unique_values) > max_values:
+        unique_values = unique_values[:max_values]
+        
+    # Convert numpy types to Python native types for better JSON serialization
+    result = []
+    for val in unique_values:
+        if isinstance(val, (np.integer, np.floating, np.bool_)):
+            val = val.item()  # Convert numpy type to Python native type
+        elif isinstance(val, np.ndarray):
+            val = val.tolist()  # Convert numpy array to list
+        result.append(val)
+    
+    return result
+
+def select_relevant_values(
+    unique_values: List[Any],
+    column_name: str,
+    query: str,
+    openai_api_key: str
+) -> List[Any]:
+    """
+    Select values from a column that are relevant to the user's query.
+    
+    Args:
+        unique_values: List of unique values from the column
+        column_name: Name of the column
+        query: The original user query
+        openai_api_key: OpenAI API key
+        
+    Returns:
+        List of values that are relevant to the query
+    """
+    if not unique_values:
+        return []
+    
+    # Limit the number of values to include in the prompt
+    display_values = unique_values
+    if len(unique_values) > 50:
+        display_values = unique_values[:50]
+        
+    # Create prompt for OpenAI
+    prompt = f"""
+You are a data analysis expert. Given a list of unique values from a column and a user query, identify which values are relevant to the query.
+
+USER QUERY: "{query}"
+
+COLUMN NAME: {column_name}
+
+UNIQUE VALUES (showing up to 50):
+{display_values}
+
+{f"Note: Only showing first 50 of {len(unique_values)} unique values" if len(unique_values) > 50 else ""}
+
+Based on the user query, identify which values from this column are most relevant. Consider both direct matches (values that explicitly match query terms) and indirect matches (values that might be related to the query even if they don't match directly).
+
+Return ONLY a comma-separated list of the relevant values, with no additional text or explanation.
+If no values seem relevant, return "None".
+If ALL values seem relevant or if filtering by specific values doesn't make sense for this column, return "All".
+"""
+
+    # Call OpenAI API
+    client = openai.OpenAI(api_key=openai_api_key)
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": "You are a data analysis expert specializing in identifying relevant values in datasets."},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.1  # Low temperature for more deterministic responses
+    )
+    
+    # Parse response
+    content = response.choices[0].message.content.strip()
+    
+    # Handle special cases
+    if content.lower() == "none":
+        return []
+    if content.lower() == "all":
+        return unique_values
+    
+    # Split the comma-separated list and clean up values
+    relevant_values_str = [val.strip() for val in content.split(',')]
+    
+    # Convert string representations back to appropriate types
+    relevant_values = []
+    for val_str in relevant_values_str:
+        # Try to find the matching value in the original list
+        # This preserves the original type
+        found = False
+        for orig_val in unique_values:
+            if str(orig_val).strip() == val_str:
+                relevant_values.append(orig_val)
+                found = True
+                break
+        
+        # If not found, try to convert to appropriate type
+        if not found:
+            try:
+                # Try as int
+                relevant_values.append(int(val_str))
+            except ValueError:
+                try:
+                    # Try as float
+                    relevant_values.append(float(val_str))
+                except ValueError:
+                    # Keep as string
+                    relevant_values.append(val_str)
+    
+    return relevant_values
+
+def analyze_dataset_overview(
+    df: pd.DataFrame,
+    query: str,
+    dataset_metadata: Dict[str, Any],
+    openai_api_key: str,
+    column_values_analysis: Dict[str, Dict[str, List[Any]]] = None,
+    relevant_columns: List[str] = None
+) -> Dict[str, Any]:
+    """
+    Analyze a dataset to provide a concise overview of its relevance to the query,
+    including data quality assessment and scope limitations.
+    
+    Args:
+        df: The dataset as a pandas DataFrame
+        query: The original user query
+        dataset_metadata: Metadata about the dataset
+        openai_api_key: OpenAI API key
+        column_values_analysis: Analysis of relevant columns and their values
+        relevant_columns: List of columns identified as relevant to the query
+        
+    Returns:
+        Dictionary containing dataset analysis and summary
+    """
+    # Get basic dataset info
+    row_count = len(df)
+    col_count = len(df.columns)
+    
+    # Get column information with sample values and missing value counts
+    column_info = []
+    missing_values_summary = []
+    
+    for col in df.columns:
+        dtype = str(df[col].dtype)
+        missing_count = df[col].isna().sum()
+        missing_percentage = (missing_count / row_count) * 100 if row_count > 0 else 0
+        
+        # Get sample values (first 2 rows)
+        sample_values = df[col].head(2).tolist()
+        
+        column_info.append(f"- {col} ({dtype}): {sample_values}")
+        
+        if missing_count > 0:
+            missing_values_summary.append(f"- {col}: {missing_count} missing values ({missing_percentage:.2f}%)")
+    
+    # Check for temporal and geographic scope
+    temporal_cols = [col for col in df.columns if any(term in col.lower() for term in 
+                    ['year', 'date', 'time', 'month', 'day', 'period'])]
+    
+    geographic_cols = [col for col in df.columns if any(term in col.lower() for term in 
+                      ['city', 'state', 'country', 'region', 'county', 'province', 'location', 
+                       'address', 'zip', 'postal', 'latitude', 'longitude', 'geo'])]
+    
+    # Temporal range analysis
+    temporal_range = {}
+    for col in temporal_cols:
+        if pd.api.types.is_numeric_dtype(df[col]):
+            temporal_range[col] = {
+                "min": df[col].min(),
+                "max": df[col].max()
+            }
+        elif pd.api.types.is_datetime64_dtype(df[col]):
+            temporal_range[col] = {
+                "min": df[col].min().strftime('%Y-%m-%d') if not pd.isna(df[col].min()) else "N/A",
+                "max": df[col].max().strftime('%Y-%m-%d') if not pd.isna(df[col].max()) else "N/A"
+            }
+    
+    # Geographic scope analysis
+    geographic_scope = {}
+    for col in geographic_cols:
+        if pd.api.types.is_string_dtype(df[col]) or pd.api.types.is_object_dtype(df[col]):
+            # Get unique values if there aren't too many
+            unique_values = df[col].dropna().unique()
+            if len(unique_values) <= 10:  # Only include if there's a reasonable number of unique values
+                geographic_scope[col] = unique_values.tolist()
+            else:
+                # Just count the unique values if there are too many
+                geographic_scope[col] = f"{len(unique_values)} unique values"
+    
+    # Identify potential categorical columns (non-numeric with limited unique values)
+    categorical_summaries = []
+    
+    for col in df.columns:
+        # Check if column is non-numeric (string or object type)
+        if pd.api.types.is_string_dtype(df[col]) or pd.api.types.is_object_dtype(df[col]):
+            # Count unique values
+            unique_count = df[col].nunique()
+            # If column has a reasonable number of unique values (not too few, not too many)
+            if 2 <= unique_count <= 100:  # Adjust thresholds as needed
+                # Get value counts for this column
+                value_counts = df[col].value_counts().head(10)  # Top 10 values
+                if not value_counts.empty:
+                    values_summary = ", ".join([f"{val} ({count})" for val, count in value_counts.items()])
+                    categorical_summaries.append(f"- {col} top values: {values_summary}")
+    
+    # Include information about relevant columns and values if provided
+    relevant_column_info = []
+    if relevant_columns:
+        relevant_column_info.append(f"RELEVANT COLUMNS: {', '.join(relevant_columns)}")
+    
+    column_analysis_summary = []
+    if column_values_analysis:
+        column_analysis_summary.append("COLUMN VALUES ANALYSIS:")
+        for col_name, analysis in column_values_analysis.items():
+            relevant_values = analysis.get("relevant_values", [])
+            if not relevant_values:
+                column_analysis_summary.append(f"- Column '{col_name}': No relevant values identified")
+            elif len(relevant_values) == len(analysis.get("unique_values", [])):
+                column_analysis_summary.append(f"- Column '{col_name}': All values are relevant")
+            else:
+                # Limit the number of values to display
+                display_values = relevant_values
+                if len(relevant_values) > 10:
+                    display_values = relevant_values[:10]
+                    column_analysis_summary.append(
+                        f"- Column '{col_name}': {len(relevant_values)} relevant values, including: {display_values}"
+                    )
+                else:
+                    column_analysis_summary.append(
+                        f"- Column '{col_name}': Relevant values: {relevant_values}"
+                    )
+    
+    # Create prompt for OpenAI
+    prompt = f"""
+You are analyzing a dataset to determine its relevance to a user's query.
+
+USER QUERY: "{query}"
+
+DATASET INFORMATION:
+Title: {dataset_metadata.get('title', 'Unknown')}
+Description: {dataset_metadata.get('description', '')}
+Rows: {row_count}
+Columns: {col_count}
+
+COLUMN INFORMATION (with first 2 rows as samples):
+{chr(10).join(column_info)}
+
+MISSING VALUES:
+{chr(10).join(missing_values_summary) if missing_values_summary else "No missing values detected."}
+
+TEMPORAL SCOPE:
+{str(temporal_range) if temporal_range else "No clear temporal columns identified."}
+
+GEOGRAPHIC SCOPE:
+{str(geographic_scope) if geographic_scope else "No clear geographic columns identified."}
+
+CATEGORICAL SUMMARIES (Top values):
+{chr(10).join(categorical_summaries) if categorical_summaries else "No categorical columns analyzed."}
+
+{chr(10).join(relevant_column_info) if relevant_column_info else ""}
+
+{chr(10).join(column_analysis_summary) if column_analysis_summary else ""}
+
+DATA PREVIEW (first 5 rows):
+{df.head(5).to_string()}
+
+IMPORTANT: Before making claims about what data is or isn't in the dataset, carefully check the column information and sample values. The dataset may contain information that isn't immediately obvious from column names. Be especially careful about geographic information - check all columns for location data, not just those with geographic terms in their names.
+
+Please provide a VERY CONCISE analysis of this dataset (maximum 3-4 sentences per section):
+
+1. RELEVANCE: How relevant is this dataset to the user's query? Can it answer the query directly?
+2. DATA QUALITY: Are there any data quality issues that might affect analysis?
+3. SCOPE LIMITATIONS: Is the dataset limited to a specific time period, geographic area, or other scope?
+4. ALTERNATIVE INSIGHTS: If the dataset cannot answer the query directly, what related insights could it provide?
+
+Be extremely concise but accurate. Do not make claims about missing data unless you are certain.
+"""
+
+    # Call OpenAI API
+    client = openai.OpenAI(api_key=openai_api_key)
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": "You are a data analyst who specializes in evaluating dataset quality and relevance. Be extremely concise and accurate. Before making claims about what data is or isn't in the dataset, carefully examine all columns and sample values. Don't assume information is missing just because it's not in an expected column."},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.2
+    )
+    
+    # Parse the response
+    analysis = response.choices[0].message.content
+    
+    # Return the analysis
+    return {
+        "dataset_id": dataset_metadata.get("id", ""),
+        "dataset_title": dataset_metadata.get("title", ""),
+        "row_count": row_count,
+        "column_count": col_count,
+        "missing_values_summary": missing_values_summary,
+        "temporal_scope": temporal_range,
+        "geographic_scope": geographic_scope,
+        "categorical_summaries": categorical_summaries,
+        "relevant_columns": relevant_columns,
+        "column_values_analysis": column_values_analysis,
+        "analysis": analysis
+    }
+
+def generate_extraction_code(
+    df: pd.DataFrame,
+    column_values_analysis: Dict[str, Dict[str, List[Any]]],
+    query: str,
+    openai_api_key: str
+) -> str:
+    """
+    Generate pandas code to extract relevant data based on column analysis.
+    
+    Args:
+        df: The dataset as a pandas DataFrame
+        column_values_analysis: Analysis of relevant columns and values
+        query: The original user query
+        openai_api_key: OpenAI API key
+        
+    Returns:
+        Python code to extract relevant data
+    """
+    # Create a summary of the column analysis
+    column_analysis_summary = []
+    for col_name, analysis in column_values_analysis.items():
+        relevant_values = analysis["relevant_values"]
+        if not relevant_values:
+            column_analysis_summary.append(f"- Column '{col_name}': No relevant values identified")
+        elif len(relevant_values) == len(analysis["unique_values"]):
+            column_analysis_summary.append(f"- Column '{col_name}': All values are relevant")
+        else:
+            # Limit the number of values to display
+            display_values = relevant_values
+            if len(relevant_values) > 10:
+                display_values = relevant_values[:10]
+                column_analysis_summary.append(
+                    f"- Column '{col_name}': {len(relevant_values)} relevant values, including: {display_values}"
+                )
+            else:
+                column_analysis_summary.append(
+                    f"- Column '{col_name}': Relevant values: {relevant_values}"
+                )
+    
+    # Create prompt for OpenAI
+    prompt = f"""
+You are a data analysis expert. Given a dataset and analysis of relevant columns and values, generate pandas code to extract the relevant data.
+
+USER QUERY: "{query}"
+
+DATASET SHAPE: {df.shape[0]} rows × {df.shape[1]} columns
+
+COLUMN ANALYSIS:
+{chr(10).join(column_analysis_summary) if column_analysis_summary else "No relevant columns identified."}
+
+SAMPLE DATA (first 5 rows):
+{df.head(5).to_string()}
+
+Based on the user query and column analysis, generate pandas code to extract the relevant data. The code should:
+1. Filter the dataframe to include only rows with relevant values in the identified columns
+2. If multiple columns have relevant values, combine the filters appropriately
+3. If no relevant columns or values were identified, return a suitable subset of the data that might be relevant
+4. Include any necessary data transformations or aggregations to answer the query
+
+Return ONLY the Python code, with no additional text or explanation. Use 'df' as the variable name for the input DataFrame.
+"""
+
+    # Call OpenAI API
+    client = openai.OpenAI(api_key=openai_api_key)
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": "You are a data analysis expert specializing in pandas code generation."},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.1  # Low temperature for more deterministic responses
+    )
+    
+    # Parse response
+    code = response.choices[0].message.content.strip()
+    
+    # Remove markdown code block markers if present
+    if code.startswith("```") and code.endswith("```"):
+        code = code[3:-3].strip()
+    if code.startswith("```python") and code.endswith("```"):
+        code = code[9:-3].strip()
+    
+    return code
 
 def determine_extraction_strategy(
     df: pd.DataFrame,
@@ -280,7 +780,9 @@ def determine_extraction_strategy(
     column_info: List[Dict],
     dataset_stats: Dict,
     numerical_stats: Dict,
-    openai_api_key: str
+    openai_api_key: str,
+    column_values_analysis: Dict[str, Dict[str, List[Any]]] = None,
+    extraction_code: str = None
 ) -> Dict[str, Any]:
     """
     Use LLM to determine the best strategy for extracting relevant data.
@@ -304,6 +806,28 @@ def determine_extraction_strategy(
             f"median={stats['median']}, std={stats['std']:.2f}"
         )
     
+    # Format column values analysis if available
+    column_analysis_summary = []
+    if column_values_analysis:
+        for col_name, analysis in column_values_analysis.items():
+            relevant_values = analysis["relevant_values"]
+            if not relevant_values:
+                column_analysis_summary.append(f"- Column '{col_name}': No relevant values identified")
+            elif len(relevant_values) == len(analysis["unique_values"]):
+                column_analysis_summary.append(f"- Column '{col_name}': All values are relevant")
+            else:
+                # Limit the number of values to display
+                display_values = relevant_values
+                if len(relevant_values) > 10:
+                    display_values = relevant_values[:10]
+                    column_analysis_summary.append(
+                        f"- Column '{col_name}': {len(relevant_values)} relevant values, including: {display_values}"
+                    )
+                else:
+                    column_analysis_summary.append(
+                        f"- Column '{col_name}': Relevant values: {relevant_values}"
+                    )
+    
     # Create prompt for OpenAI
     prompt = f"""
 You are a data analysis expert. Given a dataset and a user query, your task is to determine the best strategy to extract the relevant data that answers the query.
@@ -324,6 +848,10 @@ COLUMN INFORMATION:
 
 NUMERICAL COLUMN STATISTICS:
 {chr(10).join(numerical_details) if numerical_details else "No numerical columns found."}
+
+{"COLUMN VALUES ANALYSIS:\n" + chr(10).join(column_analysis_summary) if column_analysis_summary else ""}
+
+{"SUGGESTED EXTRACTION CODE:\n" + extraction_code if extraction_code else ""}
 
 SAMPLE DATA (first 5 rows):
 {sample_rows}
@@ -757,160 +1285,3 @@ Your response should -focus on answering the query using all available data.
     
     # Return the summary
     return response.choices[0].message.content
-
-def analyze_dataset_overview(
-    df: pd.DataFrame,
-    query: str,
-    dataset_metadata: Dict[str, Any],
-    openai_api_key: str
-) -> Dict[str, Any]:
-    """
-    Analyze a dataset to provide a concise overview of its relevance to the query,
-    including data quality assessment and scope limitations.
-    
-    Args:
-        df: The dataset as a pandas DataFrame
-        query: The original user query
-        dataset_metadata: Metadata about the dataset
-        openai_api_key: OpenAI API key
-        
-    Returns:
-        Dictionary containing dataset analysis and summary
-    """
-    # Get basic dataset info
-    row_count = len(df)
-    col_count = len(df.columns)
-    
-    # Get column information with sample values and missing value counts
-    column_info = []
-    missing_values_summary = []
-    
-    for col in df.columns:
-        dtype = str(df[col].dtype)
-        missing_count = df[col].isna().sum()
-        missing_percentage = (missing_count / row_count) * 100 if row_count > 0 else 0
-        
-        # Get sample values (first 2 rows)
-        sample_values = df[col].head(2).tolist()
-        
-        column_info.append(f"- {col} ({dtype}): {sample_values}")
-        
-        if missing_count > 0:
-            missing_values_summary.append(f"- {col}: {missing_count} missing values ({missing_percentage:.2f}%)")
-    
-    # Check for temporal and geographic scope
-    temporal_cols = [col for col in df.columns if any(term in col.lower() for term in 
-                    ['year', 'date', 'time', 'month', 'day', 'period'])]
-    
-    geographic_cols = [col for col in df.columns if any(term in col.lower() for term in 
-                      ['city', 'state', 'country', 'region', 'county', 'province', 'location', 
-                       'address', 'zip', 'postal', 'latitude', 'longitude', 'geo'])]
-    
-    # Temporal range analysis
-    temporal_range = {}
-    for col in temporal_cols:
-        if pd.api.types.is_numeric_dtype(df[col]):
-            temporal_range[col] = {
-                "min": df[col].min(),
-                "max": df[col].max()
-            }
-        elif pd.api.types.is_datetime64_dtype(df[col]):
-            temporal_range[col] = {
-                "min": df[col].min().strftime('%Y-%m-%d') if not pd.isna(df[col].min()) else "N/A",
-                "max": df[col].max().strftime('%Y-%m-%d') if not pd.isna(df[col].max()) else "N/A"
-            }
-    
-    # Geographic scope analysis
-    geographic_scope = {}
-    for col in geographic_cols:
-        if pd.api.types.is_string_dtype(df[col]) or pd.api.types.is_object_dtype(df[col]):
-            # Get unique values if there aren't too many
-            unique_values = df[col].dropna().unique()
-            if len(unique_values) <= 10:  # Only include if there's a reasonable number of unique values
-                geographic_scope[col] = unique_values.tolist()
-            else:
-                # Just count the unique values if there are too many
-                geographic_scope[col] = f"{len(unique_values)} unique values"
-    
-    # Identify potential categorical columns (non-numeric with limited unique values)
-    categorical_summaries = []
-    
-    for col in df.columns:
-        # Check if column is non-numeric (string or object type)
-        if pd.api.types.is_string_dtype(df[col]) or pd.api.types.is_object_dtype(df[col]):
-            # Count unique values
-            unique_count = df[col].nunique()
-            # If column has a reasonable number of unique values (not too few, not too many)
-            if 2 <= unique_count <= 100:  # Adjust thresholds as needed
-                # Get value counts for this column
-                value_counts = df[col].value_counts().head(10)  # Top 10 values
-                if not value_counts.empty:
-                    values_summary = ", ".join([f"{val} ({count})" for val, count in value_counts.items()])
-                    categorical_summaries.append(f"- {col} top values: {values_summary}")
-    
-    # Create prompt for OpenAI
-    prompt = f"""
-You are analyzing a dataset to determine its relevance to a user's query.
-
-USER QUERY: "{query}"
-
-DATASET INFORMATION:
-Title: {dataset_metadata.get('title', 'Unknown')}
-Description: {dataset_metadata.get('description', '')}
-Rows: {row_count}
-Columns: {col_count}
-
-COLUMN INFORMATION (with first 2 rows as samples):
-{chr(10).join(column_info)}
-
-MISSING VALUES:
-{chr(10).join(missing_values_summary) if missing_values_summary else "No missing values detected."}
-
-TEMPORAL SCOPE:
-{str(temporal_range) if temporal_range else "No clear temporal columns identified."}
-
-GEOGRAPHIC SCOPE:
-{str(geographic_scope) if geographic_scope else "No clear geographic columns identified."}
-
-CATEGORICAL SUMMARIES (Top values):
-{chr(10).join(categorical_summaries) if categorical_summaries else "No categorical columns analyzed."}
-
-DATA PREVIEW (first 5 rows):
-{df.head(5).to_string()}
-
-Please provide a VERY CONCISE analysis of this dataset (maximum 3-4 sentences per section):
-
-1. RELEVANCE: How relevant is this dataset to the user's query? Can it answer the query directly?
-2. DATA QUALITY: Are there any data quality issues that might affect analysis?
-3. SCOPE LIMITATIONS: Is the dataset limited to a specific time period, geographic area, or other scope?
-4. ALTERNATIVE INSIGHTS: If the dataset cannot answer the query directly, what related insights could it provide?
-
-Be extremely concise but accurate. Do not make claims about missing data unless you are certain.
-"""
-
-    # Call OpenAI API
-    client = openai.OpenAI(api_key=openai_api_key)
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[
-            {"role": "system", "content": "You are a data analyst who specializes in evaluating dataset quality and relevance. Be extremely concise and accurate."},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.2
-    )
-    
-    # Parse the response
-    analysis = response.choices[0].message.content
-    
-    # Return the analysis
-    return {
-        "dataset_id": dataset_metadata.get("id", ""),
-        "dataset_title": dataset_metadata.get("title", ""),
-        "row_count": row_count,
-        "column_count": col_count,
-        "missing_values_summary": missing_values_summary,
-        "temporal_scope": temporal_range,
-        "geographic_scope": geographic_scope,
-        "categorical_summaries": categorical_summaries,
-        "analysis": analysis
-    }

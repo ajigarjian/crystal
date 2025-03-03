@@ -104,12 +104,6 @@ class Command(BaseCommand):
                     "columns": list(df.columns)
                 }
                 
-                # Generate dataset overview analysis
-                self.stdout.write("\nAnalyzing dataset overview...")
-                dataset_analysis = da.analyze_dataset_overview(df, query, dataset_info, openai_api_key)
-                self.display_dataset_analysis(dataset_analysis)
-                dataset_analyses.append(dataset_analysis)  # Store for final summary
-                
                 # Print preview if requested
                 if show_preview:
                     self.stdout.write("\nData Preview:")
@@ -123,7 +117,6 @@ class Command(BaseCommand):
                 
                 dataset_info["relevance_score"] = relevance_score
                 dataset_info["relevance_reasoning"] = reasoning
-                dataset_info["dataset_analysis"] = dataset_analysis["analysis"]
                 
                 if is_relevant:
                     self.stdout.write(self.style.SUCCESS(
@@ -135,10 +128,33 @@ class Command(BaseCommand):
                     extracted_data = da.extract_relevant_data(df, query, dataset_info, openai_api_key)
                     extracted_data_list.append(extracted_data)
                     self.display_extracted_data(extracted_data)
+                    
+                    # Generate dataset overview analysis AFTER extraction
+                    # This ensures the overview has context from the extraction process
+                    self.stdout.write("\nAnalyzing dataset overview...")
+                    dataset_analysis = da.analyze_dataset_overview(
+                        df, 
+                        query, 
+                        dataset_info, 
+                        openai_api_key,
+                        column_values_analysis=extracted_data.get("column_values_analysis"),
+                        relevant_columns=extracted_data.get("relevant_columns")
+                    )
+                    self.display_dataset_analysis(dataset_analysis)
+                    dataset_analyses.append(dataset_analysis)  # Store for final summary
+                    
+                    # Add dataset analysis to dataset_info
+                    dataset_info["dataset_analysis"] = dataset_analysis["analysis"]
                 else:
                     self.stdout.write(self.style.WARNING(
                         f"Dataset is not relevant enough (Score: {relevance_score:.2f})"
                     ))
+                    
+                    # Even for non-relevant datasets, we might want a basic analysis
+                    self.stdout.write("\nAnalyzing dataset overview...")
+                    dataset_analysis = da.analyze_dataset_overview(df, query, dataset_info, openai_api_key)
+                    self.display_dataset_analysis(dataset_analysis)
+                    dataset_info["dataset_analysis"] = dataset_analysis["analysis"]
                 
                 results.append(dataset_info)
                 
