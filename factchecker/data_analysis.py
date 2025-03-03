@@ -622,10 +622,54 @@ def get_data_dimensions(data: Any) -> Dict[str, Any]:
     else:
         return {"type": "scalar"}
 
+def display_extracted_data(self, extracted_data):
+    """Display extracted data in a readable format in the CLI."""
+    self.stdout.write(self.style.SUCCESS("\nEXTRACTED DATA:"))
+    
+    # Display dataset info
+    self.stdout.write(f"\nFrom dataset: {extracted_data.get('dataset_title', 'Unknown')}")
+    
+    # Display extraction strategy
+    self.stdout.write("\nExtraction Strategy:")
+    self.stdout.write(extracted_data.get("extraction_plan", {}).get("strategy", "No strategy provided"))
+    
+    # Display the data itself
+    self.stdout.write("\nData:")
+    data = extracted_data.get("extracted_data")
+    
+    if isinstance(data, pd.DataFrame):
+        # For DataFrames, print all rows without any limit
+        self.stdout.write(data.to_string())
+        self.stdout.write(f"\n[{len(data)} rows x {len(data.columns)} columns]")
+    elif isinstance(data, pd.Series):
+        # For Series, show all values
+        self.stdout.write(data.to_string())
+        self.stdout.write(f"\n[{len(data)} values]")
+    elif isinstance(data, dict):
+        # For dictionaries
+        import json
+        self.stdout.write(json.dumps(data, indent=2, default=str))
+    elif isinstance(data, list):
+        # For lists
+        import json
+        self.stdout.write(json.dumps(data, indent=2, default=str))
+    else:
+        # For other types
+        self.stdout.write(str(data))
+    
+    # Display explanation
+    self.stdout.write("\nExplanation:")
+    self.stdout.write(extracted_data.get("extraction_plan", {}).get("explanation", "No explanation provided"))
+    
+    # Display code used
+    self.stdout.write("\nCode Used:")
+    self.stdout.write(f"```python\n{extracted_data.get('code_used', 'No code provided')}\n```")
+
 def summarize_findings(
     query: str,
     extracted_data_list: List[Dict[str, Any]],
-    openai_api_key: str
+    openai_api_key: str,
+    dataset_analyses: List[Dict[str, Any]] = None
 ) -> str:
     """
     Summarize findings from multiple datasets into a concise response.
@@ -634,6 +678,7 @@ def summarize_findings(
         query: The original user query
         extracted_data_list: List of dictionaries containing extracted data
         openai_api_key: OpenAI API key
+        dataset_analyses: List of dataset analysis results
         
     Returns:
         Concise summary of findings
@@ -652,42 +697,50 @@ def summarize_findings(
         
         # Create a concise summary of the extracted data
         if isinstance(extracted, pd.DataFrame):
-            # For DataFrames, just include the first 3 rows
-            if not extracted.empty:
-                sample = extracted.head(3).to_string()
-                data_summary = f"Data sample:\n{sample}"
-            else:
-                data_summary = "Empty dataset"
+            # For DataFrames, include all rows without any limit
+            sample = extracted.to_string()
+            data_summary = f"Data:\n{sample}"
         elif isinstance(extracted, dict):
-            # For dictionaries, just list the key-value pairs
-            data_summary = "\n".join([f"{k}: {v}" for k, v in list(extracted.items())[:5]])
-            if len(extracted) > 5:
-                data_summary += f"\n... and {len(extracted) - 5} more items"
+            # For dictionaries, include all key-value pairs
+            data_summary = "\n".join([f"{k}: {v}" for k, v in extracted.items()])
         elif isinstance(extracted, list):
-            # For lists, show first few items
-            data_summary = "\n".join([str(item) for item in extracted[:3]])
-            if len(extracted) > 3:
-                data_summary += f"\n... and {len(extracted) - 3} more items"
+            # For lists, include all items
+            data_summary = "\n".join([str(item) for item in extracted])
         else:
             data_summary = str(extracted)
         
         dataset_summaries.append(f"Source: {dataset_title} ({dataset_source})\n{data_summary}")
     
+    # Include dataset analyses if provided
+    dataset_context = ""
+    if dataset_analyses:
+        dataset_context = "DATASET CONTEXT:\n"
+        for analysis in dataset_analyses:
+            dataset_context += f"Dataset: {analysis.get('dataset_title', 'Unknown')}\n"
+            dataset_context += f"Analysis: {analysis.get('analysis', 'No analysis available')}\n\n"
+    
     # Create prompt for OpenAI
     prompt = f"""
 You are analyzing data to answer: "{query}"
+
+{dataset_context}
 
 DATA POINTS:
 {chr(10).join(dataset_summaries)}
 
 INSTRUCTIONS:
-1. Present ONLY the key data points that directly answer the query
-2. Be extremely concise - no lengthy explanations
+1. Present the key data points that directly answer the query
+2. Be concise but thorough - include all relevant data in your analysis
 3. Format as bullet points where appropriate
 4. Always cite the source dataset for each data point
-5. If data is insufficient, briefly state what's missing
+5. If analyzing trends over time, be sure to include the full time range in your analysis
+6. Pay special attention to the most recent data points when analyzing trends
 
-Your response should be no more than 2-3 short paragraphs or 5-7 bullet points.
+Finally, provide a "SEARCH SUMMARY" section with 2 paragraphs that:
+1. Summarizes the overall context of the datasets analyzed (their scope, limitations, quality)
+2. Synthesizes the findings in relation to the query, including any external factors that might be relevant
+
+Your response should -focus on answering the query using all available data.
 """
 
     # Call OpenAI API
@@ -695,12 +748,169 @@ Your response should be no more than 2-3 short paragraphs or 5-7 bullet points.
     response = client.chat.completions.create(
         model="gpt-4o",
         messages=[
-            {"role": "system", "content": "You are a data analyst who provides only essential information with minimal text."},
+            {"role": "system", "content": "You are a data analyst who provides thorough analysis of data, with special attention to recent data points."},
             {"role": "user", "content": prompt}
         ],
         temperature=0.2,
-        max_tokens=300  # Limit response length
+        max_tokens=800  # Increased token limit to allow for more comprehensive analysis
     )
     
     # Return the summary
     return response.choices[0].message.content
+
+def analyze_dataset_overview(
+    df: pd.DataFrame,
+    query: str,
+    dataset_metadata: Dict[str, Any],
+    openai_api_key: str
+) -> Dict[str, Any]:
+    """
+    Analyze a dataset to provide a concise overview of its relevance to the query,
+    including data quality assessment and scope limitations.
+    
+    Args:
+        df: The dataset as a pandas DataFrame
+        query: The original user query
+        dataset_metadata: Metadata about the dataset
+        openai_api_key: OpenAI API key
+        
+    Returns:
+        Dictionary containing dataset analysis and summary
+    """
+    # Get basic dataset info
+    row_count = len(df)
+    col_count = len(df.columns)
+    
+    # Get column information with sample values and missing value counts
+    column_info = []
+    missing_values_summary = []
+    
+    for col in df.columns:
+        dtype = str(df[col].dtype)
+        missing_count = df[col].isna().sum()
+        missing_percentage = (missing_count / row_count) * 100 if row_count > 0 else 0
+        
+        # Get sample values (first 2 rows)
+        sample_values = df[col].head(2).tolist()
+        
+        column_info.append(f"- {col} ({dtype}): {sample_values}")
+        
+        if missing_count > 0:
+            missing_values_summary.append(f"- {col}: {missing_count} missing values ({missing_percentage:.2f}%)")
+    
+    # Check for temporal and geographic scope
+    temporal_cols = [col for col in df.columns if any(term in col.lower() for term in 
+                    ['year', 'date', 'time', 'month', 'day', 'period'])]
+    
+    geographic_cols = [col for col in df.columns if any(term in col.lower() for term in 
+                      ['city', 'state', 'country', 'region', 'county', 'province', 'location', 
+                       'address', 'zip', 'postal', 'latitude', 'longitude', 'geo'])]
+    
+    # Temporal range analysis
+    temporal_range = {}
+    for col in temporal_cols:
+        if pd.api.types.is_numeric_dtype(df[col]):
+            temporal_range[col] = {
+                "min": df[col].min(),
+                "max": df[col].max()
+            }
+        elif pd.api.types.is_datetime64_dtype(df[col]):
+            temporal_range[col] = {
+                "min": df[col].min().strftime('%Y-%m-%d') if not pd.isna(df[col].min()) else "N/A",
+                "max": df[col].max().strftime('%Y-%m-%d') if not pd.isna(df[col].max()) else "N/A"
+            }
+    
+    # Geographic scope analysis
+    geographic_scope = {}
+    for col in geographic_cols:
+        if pd.api.types.is_string_dtype(df[col]) or pd.api.types.is_object_dtype(df[col]):
+            # Get unique values if there aren't too many
+            unique_values = df[col].dropna().unique()
+            if len(unique_values) <= 10:  # Only include if there's a reasonable number of unique values
+                geographic_scope[col] = unique_values.tolist()
+            else:
+                # Just count the unique values if there are too many
+                geographic_scope[col] = f"{len(unique_values)} unique values"
+    
+    # Identify potential categorical columns (non-numeric with limited unique values)
+    categorical_summaries = []
+    
+    for col in df.columns:
+        # Check if column is non-numeric (string or object type)
+        if pd.api.types.is_string_dtype(df[col]) or pd.api.types.is_object_dtype(df[col]):
+            # Count unique values
+            unique_count = df[col].nunique()
+            # If column has a reasonable number of unique values (not too few, not too many)
+            if 2 <= unique_count <= 100:  # Adjust thresholds as needed
+                # Get value counts for this column
+                value_counts = df[col].value_counts().head(10)  # Top 10 values
+                if not value_counts.empty:
+                    values_summary = ", ".join([f"{val} ({count})" for val, count in value_counts.items()])
+                    categorical_summaries.append(f"- {col} top values: {values_summary}")
+    
+    # Create prompt for OpenAI
+    prompt = f"""
+You are analyzing a dataset to determine its relevance to a user's query.
+
+USER QUERY: "{query}"
+
+DATASET INFORMATION:
+Title: {dataset_metadata.get('title', 'Unknown')}
+Description: {dataset_metadata.get('description', '')}
+Rows: {row_count}
+Columns: {col_count}
+
+COLUMN INFORMATION (with first 2 rows as samples):
+{chr(10).join(column_info)}
+
+MISSING VALUES:
+{chr(10).join(missing_values_summary) if missing_values_summary else "No missing values detected."}
+
+TEMPORAL SCOPE:
+{str(temporal_range) if temporal_range else "No clear temporal columns identified."}
+
+GEOGRAPHIC SCOPE:
+{str(geographic_scope) if geographic_scope else "No clear geographic columns identified."}
+
+CATEGORICAL SUMMARIES (Top values):
+{chr(10).join(categorical_summaries) if categorical_summaries else "No categorical columns analyzed."}
+
+DATA PREVIEW (first 5 rows):
+{df.head(5).to_string()}
+
+Please provide a VERY CONCISE analysis of this dataset (maximum 3-4 sentences per section):
+
+1. RELEVANCE: How relevant is this dataset to the user's query? Can it answer the query directly?
+2. DATA QUALITY: Are there any data quality issues that might affect analysis?
+3. SCOPE LIMITATIONS: Is the dataset limited to a specific time period, geographic area, or other scope?
+4. ALTERNATIVE INSIGHTS: If the dataset cannot answer the query directly, what related insights could it provide?
+
+Be extremely concise but accurate. Do not make claims about missing data unless you are certain.
+"""
+
+    # Call OpenAI API
+    client = openai.OpenAI(api_key=openai_api_key)
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": "You are a data analyst who specializes in evaluating dataset quality and relevance. Be extremely concise and accurate."},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.2
+    )
+    
+    # Parse the response
+    analysis = response.choices[0].message.content
+    
+    # Return the analysis
+    return {
+        "dataset_id": dataset_metadata.get("id", ""),
+        "dataset_title": dataset_metadata.get("title", ""),
+        "row_count": row_count,
+        "column_count": col_count,
+        "missing_values_summary": missing_values_summary,
+        "temporal_scope": temporal_range,
+        "geographic_scope": geographic_scope,
+        "categorical_summaries": categorical_summaries,
+        "analysis": analysis
+    }

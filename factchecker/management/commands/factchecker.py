@@ -67,6 +67,7 @@ class Command(BaseCommand):
         # Download and analyze each dataset
         results = []
         extracted_data_list = []
+        dataset_analyses = []  # Store dataset analyses for final summary
         
         for i, dataset in enumerate(relevant_datasets, 1):
             self.stdout.write(f"\n[{i}/{len(relevant_datasets)}] Processing: {dataset['title']} (Query similarity: {dataset['similarity']:.4f})")
@@ -103,10 +104,16 @@ class Command(BaseCommand):
                     "columns": list(df.columns)
                 }
                 
+                # Generate dataset overview analysis
+                self.stdout.write("\nAnalyzing dataset overview...")
+                dataset_analysis = da.analyze_dataset_overview(df, query, dataset_info, openai_api_key)
+                self.display_dataset_analysis(dataset_analysis)
+                dataset_analyses.append(dataset_analysis)  # Store for final summary
+                
                 # Print preview if requested
-                # if show_preview:
-                #     self.stdout.write("\nData Preview:")
-                #     self.stdout.write(str(df.head()))
+                if show_preview:
+                    self.stdout.write("\nData Preview:")
+                    self.stdout.write(str(df.head()))
                 
                 # Assess dataset relevance
                 self.stdout.write("\nAssessing dataset relevance...")
@@ -116,12 +123,12 @@ class Command(BaseCommand):
                 
                 dataset_info["relevance_score"] = relevance_score
                 dataset_info["relevance_reasoning"] = reasoning
+                dataset_info["dataset_analysis"] = dataset_analysis["analysis"]
                 
                 if is_relevant:
                     self.stdout.write(self.style.SUCCESS(
                         f"Dataset is relevant (Score: {relevance_score:.2f})"
                     ))
-                    # self.stdout.write(f"Reasoning: {reasoning}")
                     
                     # Extract relevant data
                     self.stdout.write("Extracting relevant data...")
@@ -132,7 +139,6 @@ class Command(BaseCommand):
                     self.stdout.write(self.style.WARNING(
                         f"Dataset is not relevant enough (Score: {relevance_score:.2f})"
                     ))
-                    # self.stdout.write(f"Reasoning: {reasoning}")
                 
                 results.append(dataset_info)
                 
@@ -155,12 +161,17 @@ class Command(BaseCommand):
         
         if extracted_data_list:
             self.stdout.write("\nGenerating summary of findings...")
-            summary = da.summarize_findings(query, extracted_data_list, openai_api_key)
+            summary = da.summarize_findings(query, extracted_data_list, openai_api_key, dataset_analyses)
             self.stdout.write(self.style.SUCCESS("\nFINDINGS:"))
             self.stdout.write(summary)
         else:
             self.stdout.write(self.style.WARNING("\nNo relevant data found to answer the query."))
 
+    def display_dataset_analysis(self, dataset_analysis):
+        """Display the dataset analysis in a readable format."""
+        self.stdout.write(self.style.SUCCESS("\nDATASET ANALYSIS:"))
+        self.stdout.write(dataset_analysis["analysis"])
+        
     def display_extracted_data(self, extracted_data):
         """Display extracted data in a readable format in the CLI."""
         self.stdout.write(self.style.SUCCESS("\nEXTRACTED DATA:"))
@@ -177,39 +188,21 @@ class Command(BaseCommand):
         data = extracted_data.get("extracted_data")
         
         if isinstance(data, pd.DataFrame):
-            # For DataFrames, print a sample
-            if len(data) > 10:
-                self.stdout.write(data.head(10).to_string())
-                self.stdout.write(f"\n[Showing 10 of {len(data)} rows x {len(data.columns)} columns]")
-            else:
-                self.stdout.write(data.to_string())
-                self.stdout.write(f"\n[{len(data)} rows x {len(data.columns)} columns]")
+            # For DataFrames, print all rows without any limit
+            self.stdout.write(data.to_string())
+            self.stdout.write(f"\n[{len(data)} rows x {len(data.columns)} columns]")
         elif isinstance(data, pd.Series):
-            # For Series
-            if len(data) > 10:
-                self.stdout.write(data.head(10).to_string())
-                self.stdout.write(f"\n[Showing 10 of {len(data)} values]")
-            else:
-                self.stdout.write(data.to_string())
-                self.stdout.write(f"\n[{len(data)} values]")
+            # For Series, show all values
+            self.stdout.write(data.to_string())
+            self.stdout.write(f"\n[{len(data)} values]")
         elif isinstance(data, dict):
             # For dictionaries
             import json
-            if len(str(data)) > 1000:
-                # Truncate very large dictionaries
-                truncated_data = {k: v for i, (k, v) in enumerate(data.items()) if i < 5}
-                self.stdout.write(json.dumps(truncated_data, indent=2, default=str))
-                self.stdout.write(f"\n[Showing 5 of {len(data)} key-value pairs]")
-            else:
-                self.stdout.write(json.dumps(data, indent=2, default=str))
+            self.stdout.write(json.dumps(data, indent=2, default=str))
         elif isinstance(data, list):
             # For lists
             import json
-            if len(data) > 10:
-                self.stdout.write(json.dumps(data[:10], indent=2, default=str))
-                self.stdout.write(f"\n[Showing 10 of {len(data)} items]")
-            else:
-                self.stdout.write(json.dumps(data, indent=2, default=str))
+            self.stdout.write(json.dumps(data, indent=2, default=str))
         else:
             # For other types
             self.stdout.write(str(data))
