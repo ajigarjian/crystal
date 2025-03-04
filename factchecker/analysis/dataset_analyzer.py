@@ -1,12 +1,12 @@
 import pandas as pd
 import os
 import openai
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, Union
 import numpy as np
 import logging
 
 def extract_relevant_data(
-    df: pd.DataFrame,
+    dataset_content: Union[pd.DataFrame, Dict[str, Any]],
     query: str,
     dataset_metadata: Dict[str, Any],
     openai_api_key: str
@@ -15,7 +15,7 @@ def extract_relevant_data(
     Extract relevant data from a dataset based on the user's query.
     
     Args:
-        df: The dataset as a pandas DataFrame
+        dataset_content: The dataset content (either a pandas DataFrame or a dictionary)
         query: The original user query
         dataset_metadata: Metadata about the dataset
         openai_api_key: OpenAI API key
@@ -25,11 +25,11 @@ def extract_relevant_data(
     """
     # Step 1: Analyze dataset structure
     column_info = []
-    for col in df.columns:
-        dtype = str(df[col].dtype)
-        unique_count = df[col].nunique()
-        has_nulls = df[col].isna().any()
-        sample_values = df[col].dropna().head(3).tolist()
+    for col in dataset_content.columns:
+        dtype = str(dataset_content[col].dtype)
+        unique_count = dataset_content[col].nunique()
+        has_nulls = dataset_content[col].isna().any()
+        sample_values = dataset_content[col].dropna().head(3).tolist()
         
         column_info.append({
             "name": col,
@@ -41,29 +41,29 @@ def extract_relevant_data(
     
     # Step 2: Generate dataset statistics
     dataset_stats = {
-        "row_count": len(df),
-        "column_count": len(df.columns),
-        "memory_usage": df.memory_usage(deep=True).sum() / (1024 * 1024),  # MB
+        "row_count": len(dataset_content),
+        "column_count": len(dataset_content.columns),
+        "memory_usage": dataset_content.memory_usage(deep=True).sum() / (1024 * 1024),  # MB
     }
     
     # For numerical columns, calculate basic statistics
     numerical_stats = {}
-    for col in df.select_dtypes(include=['number']).columns:
+    for col in dataset_content.select_dtypes(include=['number']).columns:
         numerical_stats[col] = {
-            "min": df[col].min(),
-            "max": df[col].max(),
-            "mean": df[col].mean(),
-            "median": df[col].median(),
-            "std": df[col].std()
+            "min": dataset_content[col].min(),
+            "max": dataset_content[col].max(),
+            "mean": dataset_content[col].mean(),
+            "median": dataset_content[col].median(),
+            "std": dataset_content[col].std()
         }
     
     # Step 3: Identify relevant feature columns
-    relevant_columns = identify_relevant_columns(df, query, column_info, openai_api_key)
+    relevant_columns = identify_relevant_columns(dataset_content, query, column_info, openai_api_key)
     
     # Step 4: For each relevant column, get unique values and select relevant ones
     column_values_analysis = {}
     for col_name in relevant_columns:
-        unique_values = get_unique_column_values(df, col_name)
+        unique_values = get_unique_column_values(dataset_content, col_name)
         relevant_values = select_relevant_values(unique_values, col_name, query, openai_api_key)
         column_values_analysis[col_name] = {
             "unique_values": unique_values,
@@ -71,16 +71,16 @@ def extract_relevant_data(
         }
     
     # Step 5: Generate extraction code based on relevant columns and values
-    extraction_code = generate_extraction_code(df, column_values_analysis, query, openai_api_key)
+    extraction_code = generate_extraction_code(dataset_content, column_values_analysis, query, openai_api_key)
     
     # Step 6: Ask LLM to determine extraction strategy (including the column analysis)
     extraction_plan = determine_extraction_strategy(
-        df, query, dataset_metadata, column_info, dataset_stats, 
+        dataset_content, query, dataset_metadata, column_info, dataset_stats, 
         numerical_stats, openai_api_key, column_values_analysis, extraction_code
     )
     
     # Step 7: Execute the extraction plan
-    extracted_data, code_used = execute_extraction_plan(df, extraction_plan)
+    extracted_data, code_used = execute_extraction_plan(dataset_content, extraction_plan)
     
     # Step 8: Format and return results
     return {
@@ -99,7 +99,7 @@ def extract_relevant_data(
     }
 
 def identify_relevant_columns(
-    df: pd.DataFrame,
+    dataset_content: Union[pd.DataFrame, Dict[str, Any]],
     query: str,
     column_info: List[Dict],
     openai_api_key: str
@@ -108,7 +108,7 @@ def identify_relevant_columns(
     Identify columns that are most relevant to the user's query.
     
     Args:
-        df: The dataset as a pandas DataFrame
+        dataset_content: The dataset content (either a pandas DataFrame or a dictionary)
         query: The original user query
         column_info: Information about each column
         openai_api_key: OpenAI API key
@@ -134,7 +134,7 @@ DATASET COLUMNS:
 {chr(10).join(column_details)}
 
 SAMPLE DATA (first 5 rows):
-{df.head(5).to_string()}
+{dataset_content.head(5).to_string()}
 
 Based on the user query and dataset information, identify the columns that are most likely to contain relevant information.
 Consider both direct matches (columns that explicitly match query terms) and indirect matches (columns that might contain 
@@ -166,27 +166,27 @@ If no columns seem relevant, return "None".
     relevant_columns = [col.strip() for col in content.split(',')]
     
     # Verify that all returned columns actually exist in the dataframe
-    existing_columns = [col for col in relevant_columns if col in df.columns]
+    existing_columns = [col for col in relevant_columns if col in dataset_content.columns]
     
     return existing_columns
 
-def get_unique_column_values(df: pd.DataFrame, column_name: str, max_values: int = 100) -> List[Any]:
+def get_unique_column_values(dataset_content: Union[pd.DataFrame, Dict[str, Any]], column_name: str, max_values: int = 100) -> List[Any]:
     """
     Get unique values from a column, with a limit to prevent performance issues.
     
     Args:
-        df: The dataset as a pandas DataFrame
+        dataset_content: The dataset content (either a pandas DataFrame or a dictionary)
         column_name: Name of the column to analyze
         max_values: Maximum number of unique values to return
         
     Returns:
         List of unique values from the column
     """
-    if column_name not in df.columns:
+    if column_name not in dataset_content.columns:
         return []
     
     # Get unique values
-    unique_values = df[column_name].dropna().unique()
+    unique_values = dataset_content[column_name].dropna().unique()
     
     # Limit the number of values to prevent performance issues
     if len(unique_values) > max_values:
@@ -300,7 +300,7 @@ If ALL values seem relevant or if filtering by specific values doesn't make sens
     return relevant_values
 
 def analyze_dataset_overview(
-    df: pd.DataFrame,
+    dataset_content: Union[pd.DataFrame, Dict[str, Any]],
     query: str,
     dataset_metadata: Dict[str, Any],
     openai_api_key: str,
@@ -312,7 +312,7 @@ def analyze_dataset_overview(
     including data quality assessment and scope limitations.
     
     Args:
-        df: The dataset as a pandas DataFrame
+        dataset_content: The dataset content (either a pandas DataFrame or a dictionary)
         query: The original user query
         dataset_metadata: Metadata about the dataset
         openai_api_key: OpenAI API key
@@ -323,20 +323,20 @@ def analyze_dataset_overview(
         Dictionary containing dataset analysis and summary
     """
     # Get basic dataset info
-    row_count = len(df)
-    col_count = len(df.columns)
+    row_count = len(dataset_content)
+    col_count = len(dataset_content.columns)
     
     # Get column information with sample values and missing value counts
     column_info = []
     missing_values_summary = []
     
-    for col in df.columns:
-        dtype = str(df[col].dtype)
-        missing_count = df[col].isna().sum()
+    for col in dataset_content.columns:
+        dtype = str(dataset_content[col].dtype)
+        missing_count = dataset_content[col].isna().sum()
         missing_percentage = (missing_count / row_count) * 100 if row_count > 0 else 0
         
         # Get sample values (first 2 rows)
-        sample_values = df[col].head(2).tolist()
+        sample_values = dataset_content[col].head(2).tolist()
         
         column_info.append(f"- {col} ({dtype}): {sample_values}")
         
@@ -344,33 +344,33 @@ def analyze_dataset_overview(
             missing_values_summary.append(f"- {col}: {missing_count} missing values ({missing_percentage:.2f}%)")
     
     # Check for temporal and geographic scope
-    temporal_cols = [col for col in df.columns if any(term in col.lower() for term in 
+    temporal_cols = [col for col in dataset_content.columns if any(term in col.lower() for term in 
                     ['year', 'date', 'time', 'month', 'day', 'period'])]
     
-    geographic_cols = [col for col in df.columns if any(term in col.lower() for term in 
+    geographic_cols = [col for col in dataset_content.columns if any(term in col.lower() for term in 
                       ['city', 'state', 'country', 'region', 'county', 'province', 'location', 
                        'address', 'zip', 'postal', 'latitude', 'longitude', 'geo'])]
     
     # Temporal range analysis
     temporal_range = {}
     for col in temporal_cols:
-        if pd.api.types.is_numeric_dtype(df[col]):
+        if pd.api.types.is_numeric_dtype(dataset_content[col]):
             temporal_range[col] = {
-                "min": df[col].min(),
-                "max": df[col].max()
+                "min": dataset_content[col].min(),
+                "max": dataset_content[col].max()
             }
-        elif pd.api.types.is_datetime64_dtype(df[col]):
+        elif pd.api.types.is_datetime64_dtype(dataset_content[col]):
             temporal_range[col] = {
-                "min": df[col].min().strftime('%Y-%m-%d') if not pd.isna(df[col].min()) else "N/A",
-                "max": df[col].max().strftime('%Y-%m-%d') if not pd.isna(df[col].max()) else "N/A"
+                "min": dataset_content[col].min().strftime('%Y-%m-%d') if not pd.isna(dataset_content[col].min()) else "N/A",
+                "max": dataset_content[col].max().strftime('%Y-%m-%d') if not pd.isna(dataset_content[col].max()) else "N/A"
             }
     
     # Geographic scope analysis
     geographic_scope = {}
     for col in geographic_cols:
-        if pd.api.types.is_string_dtype(df[col]) or pd.api.types.is_object_dtype(df[col]):
+        if pd.api.types.is_string_dtype(dataset_content[col]) or pd.api.types.is_object_dtype(dataset_content[col]):
             # Get unique values if there aren't too many
-            unique_values = df[col].dropna().unique()
+            unique_values = dataset_content[col].dropna().unique()
             if len(unique_values) <= 10:  # Only include if there's a reasonable number of unique values
                 geographic_scope[col] = unique_values.tolist()
             else:
@@ -380,15 +380,15 @@ def analyze_dataset_overview(
     # Identify potential categorical columns (non-numeric with limited unique values)
     categorical_summaries = []
     
-    for col in df.columns:
+    for col in dataset_content.columns:
         # Check if column is non-numeric (string or object type)
-        if pd.api.types.is_string_dtype(df[col]) or pd.api.types.is_object_dtype(df[col]):
+        if pd.api.types.is_string_dtype(dataset_content[col]) or pd.api.types.is_object_dtype(dataset_content[col]):
             # Count unique values
-            unique_count = df[col].nunique()
+            unique_count = dataset_content[col].nunique()
             # If column has a reasonable number of unique values (not too few, not too many)
             if 2 <= unique_count <= 100:  # Adjust thresholds as needed
                 # Get value counts for this column
-                value_counts = df[col].value_counts().head(10)  # Top 10 values
+                value_counts = dataset_content[col].value_counts().head(10)  # Top 10 values
                 if not value_counts.empty:
                     values_summary = ", ".join([f"{val} ({count})" for val, count in value_counts.items()])
                     categorical_summaries.append(f"- {col} top values: {values_summary}")
@@ -452,7 +452,7 @@ CATEGORICAL SUMMARIES (Top values):
 {chr(10).join(column_analysis_summary) if column_analysis_summary else ""}
 
 DATA PREVIEW (first 5 rows):
-{df.head(5).to_string()}
+{dataset_content.head(5).to_string()}
 
 IMPORTANT: Before making claims about what data is or isn't in the dataset, carefully check the column information and sample values. The dataset may contain information that isn't immediately obvious from column names. Be especially careful about geographic information - check all columns for location data, not just those with geographic terms in their names.
 
@@ -496,7 +496,7 @@ Be extremely concise but accurate. Do not make claims about missing data unless 
     }
 
 def generate_extraction_code(
-    df: pd.DataFrame,
+    dataset_content: Union[pd.DataFrame, Dict[str, Any]],
     column_values_analysis: Dict[str, Dict[str, List[Any]]],
     query: str,
     openai_api_key: str
@@ -505,7 +505,7 @@ def generate_extraction_code(
     Generate pandas code to extract relevant data based on column analysis.
     
     Args:
-        df: The dataset as a pandas DataFrame
+        dataset_content: The dataset content (either a pandas DataFrame or a dictionary)
         column_values_analysis: Analysis of relevant columns and values
         query: The original user query
         openai_api_key: OpenAI API key
@@ -540,13 +540,13 @@ You are a data analysis expert. Given a dataset and analysis of relevant columns
 
 USER QUERY: "{query}"
 
-DATASET SHAPE: {df.shape[0]} rows × {df.shape[1]} columns
+DATASET SHAPE: {dataset_content.shape[0]} rows × {dataset_content.shape[1]} columns
 
 COLUMN ANALYSIS:
 {chr(10).join(column_analysis_summary) if column_analysis_summary else "No relevant columns identified."}
 
 SAMPLE DATA (first 5 rows):
-{df.head(5).to_string()}
+{dataset_content.head(5).to_string()}
 
 Based on the user query and column analysis, generate pandas code to extract the relevant data. The code should:
 1. Filter the dataframe to include only rows with relevant values in the identified columns
@@ -580,7 +580,7 @@ Return ONLY the Python code, with no additional text or explanation. Use 'df' as
     return code
 
 def determine_extraction_strategy(
-    df: pd.DataFrame,
+    dataset_content: Union[pd.DataFrame, Dict[str, Any]],
     query: str,
     dataset_metadata: Dict[str, Any],
     column_info: List[Dict],
@@ -594,7 +594,7 @@ def determine_extraction_strategy(
     Use LLM to determine the best strategy for extracting relevant data.
     """
     # Create a sample of the dataset
-    sample_rows = df.head(5).to_string(index=False)
+    sample_rows = dataset_content.head(5).to_string(index=False)
     
     # Format column information for the prompt
     column_details = []

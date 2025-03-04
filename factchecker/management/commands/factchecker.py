@@ -6,8 +6,8 @@ from django.core.management.base import BaseCommand
 from factchecker.search import vector_search_datasets
 from factchecker.search import preprocess_query, search_datasets, filter_relevant_datasets
 
-# For downloading the datasets, we use the download_dataset function for now
-from factchecker.download import download_dataset
+# For downloading the resources in the datasets, we use the download_resource function for now
+from factchecker.download import download_resource
 
 # For analyzing the datasets and extracting the relevant data, we use the following functions
 from factchecker.analysis import (
@@ -142,7 +142,7 @@ class Command(BaseCommand):
                     # Download the dataset
                     with self.stdout_lock:
                         self.stdout.write(f"{dataset_short_id} Downloading dataset...")
-                    output_path = download_dataset(gov_api_key, dataset["id"], output_dir=output_dir)
+                    output_path = download_resource(gov_api_key, dataset["id"], output_dir=output_dir)
                     
                     if not output_path:
                         with self.stdout_lock:
@@ -160,31 +160,68 @@ class Command(BaseCommand):
                 # Load and analyze the dataset
                 with self.stdout_lock:
                     self.stdout.write(f"{dataset_short_id} Loading dataset for analysis...")
-                df = load_dataset(output_path)
+                dataset_content = load_dataset(output_path, openai_api_key)
                 
                 # Record basic dataset info
-                dataset_info = {
-                    "id": dataset["id"],
-                    "title": dataset["title"],
-                    "description": dataset.get("description", ""),
-                    "similarity": similarity_score,
-                    "file_path": output_path,
-                    "row_count": len(df),
-                    "column_count": len(df.columns),
-                    "columns": list(df.columns)
-                }
+                is_pdf = isinstance(dataset_content, dict) and dataset_content.get('type') == 'pdf'
+
+                if is_pdf:
+                    # Handle PDF document
+                    dataset_info = {
+                        "id": dataset["id"],
+                        "title": dataset["title"],
+                        "description": dataset.get("description", ""),
+                        "similarity": similarity_score,
+                        "file_path": output_path,
+                        "document_type": "pdf",
+                        "num_pages": dataset_content.get("num_pages", 0),
+                        "text_sample": dataset_content.get("text_sample", "")[:200] + "..."  # First 200 chars of text sample
+                    }
+                else:
+                    # Handle DataFrame (tabular data)
+                    dataset_info = {
+                        "id": dataset["id"],
+                        "title": dataset["title"],
+                        "description": dataset.get("description", ""),
+                        "similarity": similarity_score,
+                        "file_path": output_path,
+                        "row_count": len(dataset_content),
+                        "column_count": len(dataset_content.columns),
+                        "columns": list(dataset_content.columns)
+                    }
                 
                 # Print preview if requested
                 if show_preview:
                     with self.stdout_lock:
                         self.stdout.write(f"\n{dataset_short_id} Data Preview:")
-                        self.stdout.write(str(df.head()))
+                        # Check if we're dealing with a PDF
+                        if isinstance(dataset_content, dict) and dataset_content.get('type') == 'pdf':
+                            # Display PDF preview with enhanced summary if available
+                            self.stdout.write(f"PDF Document: {dataset_content.get('file_name', '')}")
+                            self.stdout.write(f"Number of Pages: {dataset_content.get('num_pages', 0)}")
+                            
+                            # Check if enhanced summary is available
+                            if "enhanced_summary" in dataset_content:
+                                self.stdout.write("\nSummary:")
+                                self.stdout.write(dataset_content.get('enhanced_summary', ''))
+                                
+                                # Display key points if available
+                                if dataset_content.get('key_points'):
+                                    self.stdout.write("\nKey Points:")
+                                    for point in dataset_content.get('key_points', []):
+                                        self.stdout.write(f"- {point}")
+                            else:
+                                self.stdout.write("\nText Sample:")
+                                self.stdout.write(f"{dataset_content.get('text_sample', '')[:500]}...")
+                        else:
+                            # Display DataFrame preview
+                            self.stdout.write(str(dataset_content.head()))
                 
                 # Assess dataset relevance
                 with self.stdout_lock:
                     self.stdout.write(f"\n{dataset_short_id} Assessing dataset relevance...")
                 is_relevant, relevance_score, reasoning = assess_dataset_relevance(
-                    df, query, dataset_info, openai_api_key, relevance_threshold
+                    dataset_content, query, dataset_info, openai_api_key, relevance_threshold
                 )
                 
                 dataset_info["relevance_score"] = relevance_score
@@ -202,7 +239,7 @@ class Command(BaseCommand):
                     # Extract relevant data
                     with self.stdout_lock:
                         self.stdout.write(f"{dataset_short_id} Extracting relevant data...")
-                    extracted_data = extract_relevant_data(df, query, dataset_info, openai_api_key)
+                    extracted_data = extract_relevant_data(dataset_content, query, dataset_info, openai_api_key)
                     
                     # Add dataset source information to the extracted data
                     if extracted_data:
@@ -218,7 +255,7 @@ class Command(BaseCommand):
                     with self.stdout_lock:
                         self.stdout.write(f"\n{dataset_short_id} Analyzing dataset overview...")
                     dataset_analysis = analyze_dataset_overview(
-                        df, 
+                        dataset_content, 
                         query, 
                         dataset_info, 
                         openai_api_key,
@@ -239,7 +276,7 @@ class Command(BaseCommand):
                     # Even for non-relevant datasets, we might want a basic analysis
                     with self.stdout_lock:
                         self.stdout.write(f"\n{dataset_short_id} Analyzing dataset overview...")
-                    dataset_analysis = analyze_dataset_overview(df, query, dataset_info, openai_api_key)
+                    dataset_analysis = analyze_dataset_overview(dataset_content, query, dataset_info, openai_api_key)
                     with self.stdout_lock:
                         self.display_dataset_analysis(dataset_analysis)
                     dataset_info["dataset_analysis"] = dataset_analysis["analysis"]

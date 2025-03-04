@@ -2,9 +2,9 @@ import requests
 import os
 from typing import Optional
 
-def download_dataset(api_key: str, dataset_id: str, output_dir: str = "downloads") -> Optional[str]:
+def download_resource(api_key: str, dataset_id: str, output_dir: str = "downloads") -> Optional[str]:
     """
-    Download a dataset by its ID and save to CSV or XLSX if possible.
+    Download one of a dataset's resource by its ID and save to CSV, XLSX, or PDF if possible.
     
     Args:
         api_key: Data.gov API key
@@ -35,7 +35,7 @@ def download_dataset(api_key: str, dataset_id: str, output_dir: str = "downloads
         # Remove multiple consecutive underscores and limit length
         clean_title = "_".join(filter(None, clean_title.split("_")))[:100]
         
-        # Look for CSV or XLSX resources
+        # First try to find CSV or Excel resources
         for resource in dataset.get("resources", []):
             resource_format = resource.get("format", "").lower()
             if resource_format in ["csv", "xlsx", "xls", "excel"]:
@@ -64,7 +64,26 @@ def download_dataset(api_key: str, dataset_id: str, output_dir: str = "downloads
                 
                 return output_path
         
-        print(f"No CSV or Excel resource found for dataset {dataset_id}")
+        # If no CSV or Excel found, try to find PDF
+        for resource in dataset.get("resources", []):
+            resource_format = resource.get("format", "").lower()
+            if resource_format == "pdf":
+                url = resource["url"]
+                filename = f"{clean_title}.pdf"
+                output_path = os.path.join(output_dir, filename)
+                
+                # Download the PDF file
+                response = requests.get(url, stream=True)
+                response.raise_for_status()
+                
+                with open(output_path, "wb") as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                
+                print(f"Downloaded PDF file: {filename} (CSV/Excel not available)")
+                return output_path
+        
+        print(f"No CSV, Excel, or PDF resource found for dataset {dataset_id}")
         return None
         
     except requests.exceptions.RequestException as e:

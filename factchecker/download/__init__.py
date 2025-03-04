@@ -1,3 +1,3 @@
-from .download_gov_data import download_dataset
+from .download_gov_data import download_resource
 
-__all__ = ['download_dataset']
+__all__ = ['download_resource']
