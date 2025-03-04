@@ -5,12 +5,12 @@ from typing import Dict, List, Optional, Tuple, Any
 import numpy as np
 import logging
 
-def load_csv_dataset(file_path: str) -> pd.DataFrame:
+def load_dataset(file_path: str) -> pd.DataFrame:
     """
-    Load a CSV dataset with appropriate error handling.
+    Load a dataset (CSV or Excel) with appropriate error handling.
     
     Args:
-        file_path: Path to the CSV file
+        file_path: Path to the dataset file
         
     Returns:
         Pandas DataFrame containing the dataset
@@ -18,30 +18,45 @@ def load_csv_dataset(file_path: str) -> pd.DataFrame:
     logger = logging.getLogger("data_loading")
     logger.info(f"Loading dataset from {file_path}")
     
+    file_extension = os.path.splitext(file_path)[1].lower()
+    
     try:
-        # Try different loading approaches
-        loading_attempts = [
-            # Standard loading
-            lambda: pd.read_csv(file_path),
-            # Try with Latin-1 encoding
-            lambda: pd.read_csv(file_path, encoding='latin1'),
-            # Try with explicit quoting
-            lambda: pd.read_csv(file_path, quoting=pd.io.common.csv.QUOTE_NONNUMERIC),
-            # Try with different engine
-            lambda: pd.read_csv(file_path, engine='python'),
-            # Try with auto delimiter detection
-            lambda: pd.read_csv(file_path, sep=None, engine='python')
-        ]
+        # Handle Excel files
+        if file_extension in ['.xlsx', '.xls']:
+            logger.info(f"Detected Excel file: {file_path}")
+            loading_attempts = [
+                # Standard loading
+                lambda: pd.read_excel(file_path),
+                # Try with explicit engine
+                lambda: pd.read_excel(file_path, engine='openpyxl'),
+                # Try with xlrd engine for older .xls files
+                lambda: pd.read_excel(file_path, engine='xlrd')
+            ]
+        # Handle CSV files
+        else:
+            logger.info(f"Detected CSV file: {file_path}")
+            loading_attempts = [
+                # Standard loading
+                lambda: pd.read_csv(file_path),
+                # Try with Latin-1 encoding
+                lambda: pd.read_csv(file_path, encoding='latin1'),
+                # Try with explicit quoting
+                lambda: pd.read_csv(file_path, quoting=pd.io.common.csv.QUOTE_NONNUMERIC),
+                # Try with different engine
+                lambda: pd.read_csv(file_path, engine='python'),
+                # Try with auto delimiter detection
+                lambda: pd.read_csv(file_path, sep=None, engine='python')
+            ]
         
         df = None
         errors = []
         
         for i, attempt in enumerate(loading_attempts):
             try:
-                logger.info(f"Attempt {i+1} to load CSV")
+                logger.info(f"Attempt {i+1} to load dataset")
                 df = attempt()
                 # If we got here, loading succeeded
-                logger.info(f"Successfully loaded CSV with attempt {i+1}")
+                logger.info(f"Successfully loaded dataset with attempt {i+1}")
                 
                 # Log the DataFrame info
                 logger.info(f"DataFrame shape: {df.shape}")
@@ -58,8 +73,8 @@ def load_csv_dataset(file_path: str) -> pd.DataFrame:
             raise ValueError(f"All loading attempts failed: {errors}")
             
         # Handle common issues
-        if len(df.columns) == 1:
-            # Try different delimiter if only one column detected
+        if len(df.columns) == 1 and file_extension not in ['.xlsx', '.xls']:
+            # Try different delimiter if only one column detected (for CSV only)
             logger.warning("Only one column detected, trying different delimiter")
             df = pd.read_csv(file_path, sep=None, engine='python')
             
@@ -1149,49 +1164,6 @@ def get_data_dimensions(data: Any) -> Dict[str, Any]:
         return {"length": len(data)}
     else:
         return {"type": "scalar"}
-
-def display_extracted_data(self, extracted_data):
-    """Display extracted data in a readable format in the CLI."""
-    self.stdout.write(self.style.SUCCESS("\nEXTRACTED DATA:"))
-    
-    # Display dataset info
-    self.stdout.write(f"\nFrom dataset: {extracted_data.get('dataset_title', 'Unknown')}")
-    
-    # Display extraction strategy
-    self.stdout.write("\nExtraction Strategy:")
-    self.stdout.write(extracted_data.get("extraction_plan", {}).get("strategy", "No strategy provided"))
-    
-    # Display the data itself
-    self.stdout.write("\nData:")
-    data = extracted_data.get("extracted_data")
-    
-    if isinstance(data, pd.DataFrame):
-        # For DataFrames, print all rows without any limit
-        self.stdout.write(data.to_string())
-        self.stdout.write(f"\n[{len(data)} rows x {len(data.columns)} columns]")
-    elif isinstance(data, pd.Series):
-        # For Series, show all values
-        self.stdout.write(data.to_string())
-        self.stdout.write(f"\n[{len(data)} values]")
-    elif isinstance(data, dict):
-        # For dictionaries
-        import json
-        self.stdout.write(json.dumps(data, indent=2, default=str))
-    elif isinstance(data, list):
-        # For lists
-        import json
-        self.stdout.write(json.dumps(data, indent=2, default=str))
-    else:
-        # For other types
-        self.stdout.write(str(data))
-    
-    # Display explanation
-    self.stdout.write("\nExplanation:")
-    self.stdout.write(extracted_data.get("extraction_plan", {}).get("explanation", "No explanation provided"))
-    
-    # Display code used
-    self.stdout.write("\nCode Used:")
-    self.stdout.write(f"```python\n{extracted_data.get('code_used', 'No code provided')}\n```")
 
 def summarize_findings(
     query: str,

@@ -99,7 +99,8 @@ def search_datasets(api_key: str, query: str, rows: int = 10) -> List[Dict]:
                         "name": r.get("name")
                     }
                     for r in dataset.get("resources", [])
-                    if r.get("format", "").lower() in ["csv", "json"]  # Only keep parseable formats
+                    # Include Excel formats along with CSV and JSON
+                    if r.get("format", "").lower() in ["csv", "json", "xlsx", "xls"]
                 ]
             })
         return simplified_results

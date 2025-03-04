@@ -4,7 +4,7 @@ from typing import Optional
 
 def download_dataset(api_key: str, dataset_id: str, output_dir: str = "downloads") -> Optional[str]:
     """
-    Download a dataset by its ID and save to CSV if possible.
+    Download a dataset by its ID and save to CSV or XLSX if possible.
     
     Args:
         api_key: Data.gov API key
@@ -35,14 +35,26 @@ def download_dataset(api_key: str, dataset_id: str, output_dir: str = "downloads
         # Remove multiple consecutive underscores and limit length
         clean_title = "_".join(filter(None, clean_title.split("_")))[:100]
         
-        # Look for CSV resources
+        # Look for CSV or XLSX resources
         for resource in dataset.get("resources", []):
-            if resource.get("format", "").lower() == "csv":
+            resource_format = resource.get("format", "").lower()
+            if resource_format in ["csv", "xlsx", "xls", "excel"]:
                 url = resource["url"]
-                filename = f"{clean_title}.csv"
+                # Determine file extension based on format or mimetype
+                if resource_format == "excel":
+                    # Check mimetype for more specific format
+                    mimetype = resource.get("mimetype", "")
+                    if "openxmlformats" in mimetype:
+                        extension = "xlsx"
+                    else:
+                        extension = "xls"
+                else:
+                    extension = resource_format
+                    
+                filename = f"{clean_title}.{extension}"
                 output_path = os.path.join(output_dir, filename)
                 
-                # Download the CSV file
+                # Download the file
                 response = requests.get(url, stream=True)
                 response.raise_for_status()
                 
@@ -52,7 +64,7 @@ def download_dataset(api_key: str, dataset_id: str, output_dir: str = "downloads
                 
                 return output_path
         
-        print(f"No CSV resource found for dataset {dataset_id}")
+        print(f"No CSV or Excel resource found for dataset {dataset_id}")
         return None
         
     except requests.exceptions.RequestException as e:

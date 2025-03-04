@@ -13,6 +13,7 @@ Django==5.1.4
 django-filter==24.3
 django-tailwind==3.8.0
 djangorestframework==3.15.2
+et_xmlfile==2.0.0
 frozenlist==1.5.0
 gunicorn==23.0.0
 h11==0.14.0
@@ -25,6 +26,7 @@ multidict==6.1.0
 numpy==2.2.1
 openai==1.59.6
 opencv-python==4.10.0.84
+openpyxl==3.1.5
 packaging==24.2
 pandas==2.2.3
 pillow==11.1.0
@@ -44,4 +46,5 @@ typing_extensions==4.12.2
 tzdata==2025.1
 urllib3==2.3.0
 whitenoise==6.8.2
+xlrd==2.0.1
 yarl==1.18.3

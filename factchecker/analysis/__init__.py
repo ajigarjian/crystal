@@ -1,5 +1,5 @@
 from .data_analysis import (
-    load_csv_dataset,
+    load_dataset,
     assess_dataset_relevance,
     extract_relevant_data,
     analyze_dataset_overview,
@@ -7,7 +7,7 @@ from .data_analysis import (
 )
 
 __all__ = [
-    'load_csv_dataset',
+    'load_dataset',
     'assess_dataset_relevance',
     'extract_relevant_data',
     'analyze_dataset_overview',

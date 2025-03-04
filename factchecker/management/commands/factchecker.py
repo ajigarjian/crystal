@@ -11,7 +11,7 @@ from factchecker.download import download_dataset
 
 # For analyzing the datasets and extracting the relevant data, we use the following functions
 from factchecker.analysis import (
-    load_csv_dataset,
+    load_dataset,
     assess_dataset_relevance,
     extract_relevant_data,
     analyze_dataset_overview,
@@ -160,7 +160,7 @@ class Command(BaseCommand):
                 # Load and analyze the dataset
                 with self.stdout_lock:
                     self.stdout.write(f"{dataset_short_id} Loading dataset for analysis...")
-                df = load_csv_dataset(output_path)
+                df = load_dataset(output_path)
                 
                 # Record basic dataset info
                 dataset_info = {
