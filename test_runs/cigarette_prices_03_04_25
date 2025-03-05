@@ -1,0 +1,485 @@
+(venv) (base) cedricfitzgerald@Cedrics-MacBook-Pro crystal % python manage.py factchecker "prices of cigarettes" --top 5 --relevance-threshold .4
+Factchecker query: 'prices of cigarettes'
+Searching for datasets matching 'prices of cigarettes' using vector similarity...
+Found 5 relevant datasets via vector search
+Found 5 relevant datasets
+
+[1/5] Electronic Cigarette... Processing dataset (Query similarity: 0.4599)
+[1/5] Electronic Cigarette... Downloading dataset...
+
+[2/5] Cigarette Tax Stamp ... Processing dataset (Query similarity: 0.4459)
+[2/5] Cigarette Tax Stamp ... Downloading dataset...
+
+[3/5] Adult Tobacco Consum... Processing dataset (Query similarity: 0.4216)
+[3/5] Adult Tobacco Consum... Downloading dataset...
+[3/5] Adult Tobacco Consum... Downloaded to: downloads/Adult_Tobacco_Consumption_In_The_U_S_2000_Present.csv
+[3/5] Adult Tobacco Consum... Loading dataset for analysis...
+[2/5] Cigarette Tax Stamp ... Downloaded to: downloads/Cigarette_Tax_Stamp_Sales.csv
+[2/5] Cigarette Tax Stamp ... Loading dataset for analysis...
+
+[2/5] Cigarette Tax Stamp ... Assessing dataset relevance...
+
+[3/5] Adult Tobacco Consum... Assessing dataset relevance...
+[1/5] Electronic Cigarette... Downloaded to: downloads/Electronic_Cigarette_Products_Tax_Revenue.csv
+[1/5] Electronic Cigarette... Loading dataset for analysis...
+
+[1/5] Electronic Cigarette... Assessing dataset relevance...
+[2/5] Cigarette Tax Stamp ... Dataset is relevant (Score: 0.50)
+[2/5] Cigarette Tax Stamp ... Extracting relevant data...
+[EXTRACT] INFO: Starting data extraction for query: prices of cigarettes
+[EXTRACT] INFO: Dataset: Cigarette Tax Stamp Sales
+[EXTRACT] INFO: Dataset shape: (66, 11)
+[EXTRACT] INFO: Columns: ['Period End Date', 'Month', 'Year', 'Fiscal Year', 'Packs of 20: Tax Rate ', 'Packs of 20: # of Stamps Sold ', 'Packs of 20:  Total Tax ', 'Packs of 25: Tax Rate ', 'Packs of 25: # of Stamps Sold ', 'Packs of 25: Total Tax ', 'Total Cigarette Stamp Tax']
+[EXTRACT] INFO: Identifying relevant columns...
+[3/5] Adult Tobacco Consum... Dataset is relevant (Score: 0.40)
+[3/5] Adult Tobacco Consum... Extracting relevant data...
+[EXTRACT] INFO: Starting data extraction for query: prices of cigarettes
+[EXTRACT] INFO: Dataset: Adult Tobacco Consumption In The U.S., 2000-Present
+[EXTRACT] INFO: Dataset shape: (312, 14)
+[EXTRACT] INFO: Columns: ['Year', 'LocationAbbrev', 'LocationDesc', 'Population', 'Topic', 'Measure', 'Submeasure', 'Data Value Unit', 'Domestic', 'Imports', 'Total', 'Domestic Per Capita', 'Imports Per Capita', 'Total Per Capita']
+[EXTRACT] INFO: Identifying relevant columns...
+[1/5] Electronic Cigarette... Dataset is not relevant enough (Score: 0.20)
+
+[1/5] Electronic Cigarette... Analyzing dataset overview...
+[ANALYSIS] INFO: Starting dataset analysis for query: prices of cigarettes
+[ANALYSIS] INFO: Dataset: Electronic Cigarette Products Tax Revenue
+[ANALYSIS] INFO: Sending analysis prompt to OpenAI
+[EXTRACT] INFO: Identified relevant columns: ['Total Cigarette Stamp Tax']
+[EXTRACT] INFO: Analyzing values in column: Total Cigarette Stamp Tax
+[EXTRACT] INFO: Column Total Cigarette Stamp Tax: Found 57 relevant values out of 57 unique values
+[EXTRACT] INFO: Generating extraction code...
+[EXTRACT] INFO: Identified relevant columns: ['Measure', 'Submeasure', 'Domestic', 'Imports', 'Total', 'Domestic Per Capita', 'Imports Per Capita', 'Total Per Capita']
+[EXTRACT] INFO: Analyzing values in column: Measure
+[EXTRACT] INFO: Column Measure: Found 1 relevant values out of 5 unique values
+[EXTRACT] INFO: Analyzing values in column: Submeasure
+[EXTRACT] INFO: Column Submeasure: Found 1 relevant values out of 10 unique values
+[EXTRACT] INFO: Analyzing values in column: Domestic
+[EXTRACT] INFO: Determining extraction strategy...
+[EXTRACT] INFO: Column Domestic: Found 0 relevant values out of 100 unique values
+[EXTRACT] INFO: Analyzing values in column: Imports
+[EXTRACT] INFO: Column Imports: Found 0 relevant values out of 100 unique values
+[EXTRACT] INFO: Analyzing values in column: Total
+[EXTRACT] INFO: Column Total: Found 0 relevant values out of 100 unique values
+[EXTRACT] INFO: Analyzing values in column: Domestic Per Capita
+[EXTRACT] INFO: Column Domestic Per Capita: Found 0 relevant values out of 100 unique values
+[EXTRACT] INFO: Analyzing values in column: Imports Per Capita
+[ANALYSIS] INFO: Received analysis from OpenAI
+
+DATASET ANALYSIS:
+1. RELEVANCE: This dataset is not directly relevant to the user's query about "prices of cigarettes" as it focuses on tax revenue from electronic cigarette products, not the retail prices of cigarettes or electronic cigarettes.
+
+2. DATA QUALITY: The dataset appears to have no missing values, indicating good data quality. However, it lacks extraction information, which might limit understanding of how data was sourced.
+
+3. SCOPE LIMITATIONS: The dataset is limited to electronic cigarette products in Connecticut from 2021 to 2024. It does not cover traditional cigarettes or other geographic areas.
+
+4. ALTERNATIVE INSIGHTS: While it cannot provide cigarette prices, the dataset offers insights into the tax revenue and sales volume of electronic cigarette products, which could indirectly inform about market trends in the electronic cigarette sector.
+
+[4/5] Maryland Adult Cigar... Processing dataset (Query similarity: 0.4184)
+[4/5] Maryland Adult Cigar... Downloading dataset...
+[EXTRACT] INFO: Column Imports Per Capita: Found 0 relevant values out of 80 unique values
+[EXTRACT] INFO: Analyzing values in column: Total Per Capita
+[EXTRACT] INFO: Column Total Per Capita: Found 0 relevant values out of 100 unique values
+[EXTRACT] INFO: Generating extraction code...
+[4/5] Maryland Adult Cigar... Downloaded to: downloads/Maryland_Adult_Cigarette_Smoking_Status_1995_2010.csv
+[4/5] Maryland Adult Cigar... Loading dataset for analysis...
+
+[4/5] Maryland Adult Cigar... Assessing dataset relevance...
+[EXTRACT] INFO: Determining extraction strategy...
+[4/5] Maryland Adult Cigar... Dataset is not relevant enough (Score: 0.10)
+
+[4/5] Maryland Adult Cigar... Analyzing dataset overview...
+[ANALYSIS] INFO: Starting dataset analysis for query: prices of cigarettes
+[ANALYSIS] INFO: Dataset: Maryland Adult Cigarette Smoking Status, 1995-2010
+[ANALYSIS] INFO: Sending analysis prompt to OpenAI
+[EXTRACT] INFO: Executing extraction plan...
+[EXTRACT] INFO: Extraction attempt 1/3
+[EXTRACT] INFO: Executing code:
+relevant_data = df[['Packs of 20: Tax Rate', 'Packs of 25: Tax Rate']].drop_duplicates()
+[EXTRACT] ERROR: Execution error: "None of [Index(['Packs of 20: Tax Rate', 'Packs of 25: Tax Rate'], dtype='object')] are in the [columns]"
+Traceback (most recent call last):
+  File "/Users/cedricfitzgerald/Documents/Startup/crystal/factchecker/analysis/dataset_analyzer.py", line 1037, in execute_code
+    result = eval(code, {"__builtins__": {}}, local_env)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<string>", line 1
+    relevant_data = df[['Packs of 20: Tax Rate', 'Packs of 25: Tax Rate']].drop_duplicates()
+                  ^
+SyntaxError: invalid syntax
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/cedricfitzgerald/Documents/Startup/crystal/factchecker/analysis/dataset_analyzer.py", line 933, in execute_extraction_plan
+    execution_result, printed_output = execute_code(df, code)
+                                       ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/cedricfitzgerald/Documents/Startup/crystal/factchecker/analysis/dataset_analyzer.py", line 1047, in execute_code
+    exec(code, {"__builtins__": __builtins__}, local_env)
+  File "<string>", line 1, in <module>
+  File "/Users/cedricfitzgerald/Documents/Startup/crystal/venv/lib/python3.12/site-packages/pandas/core/frame.py", line 4108, in __getitem__
+    indexer = self.columns._get_indexer_strict(key, "columns")[1]
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/cedricfitzgerald/Documents/Startup/crystal/venv/lib/python3.12/site-packages/pandas/core/indexes/base.py", line 6200, in _get_indexer_strict
+    self._raise_if_missing(keyarr, indexer, axis_name)
+  File "/Users/cedricfitzgerald/Documents/Startup/crystal/venv/lib/python3.12/site-packages/pandas/core/indexes/base.py", line 6249, in _raise_if_missing
+    raise KeyError(f"None of [{key}] are in the [{axis_name}]")
+KeyError: "None of [Index(['Packs of 20: Tax Rate', 'Packs of 25: Tax Rate'], dtype='object')] are in the [columns]"
+
+[EXTRACT] INFO: Extraction attempt 2/3
+[EXTRACT] INFO: Executing code:
+python
+# Strip any leading or trailing whitespace from column names
+df.columns = df.columns.str.strip()
+
+# Extract the relevant tax rate columns and drop duplicates
+relevant_data = df[['Packs of 20: Tax Rate', 'Packs of 25: Tax Rate']].drop_duplicates()
+
+# Display the extracted data
+print(relevant_data)
+[ANALYSIS] INFO: Received analysis from OpenAI
+
+DATASET ANALYSIS:
+1. RELEVANCE: This dataset is not directly relevant to the user's query about "prices of cigarettes" as it focuses on smoking status among adults in Maryland from 1995 to 2010, without any information on cigarette prices.
+
+2. DATA QUALITY: The dataset appears to have no missing values and provides consistent data across its columns, indicating good data quality for the variables it includes.
+
+3. SCOPE LIMITATIONS: The dataset is limited to the state of Maryland and covers the years 1995 to 2010. It does not include any geographic columns or data beyond this temporal and regional scope.
+
+4. ALTERNATIVE INSIGHTS: While it cannot provide cigarette price information, the dataset can offer insights into smoking trends and behaviors among adults in Maryland over the specified period, which may indirectly relate to price changes if correlated with smoking prevalence.
+
+[5/5] Cigarette Tax Stamp ... Processing dataset (Query similarity: 0.4121)
+[5/5] Cigarette Tax Stamp ... Downloading dataset...
+[5/5] Cigarette Tax Stamp ... Downloaded to: downloads/Cigarette_Tax_Stamp_Sales_Beginning_1999.csv
+[5/5] Cigarette Tax Stamp ... Loading dataset for analysis...
+
+[5/5] Cigarette Tax Stamp ... Assessing dataset relevance...
+[EXTRACT] INFO: Executing extraction plan...
+[EXTRACT] INFO: Extraction attempt 1/3
+[EXTRACT] INFO: Executing code:
+filtered_df = df[(df['Measure'] == 'Cigarettes') & (df['Submeasure'] == 'Cigarette Removals')]
+[EXTRACT] INFO: Validation failed: The extraction result does not directly address the user's query about the "prices of cigarettes." The extracted data provides tax rates for packs of 20 and 25 cigarettes, but it does not provide the actual prices of the cigarettes themselves. The user is likely interested in the retail prices, which would include the base price plus any applicable taxes.
+
+3.
+[5/5] Cigarette Tax Stamp ... Dataset is not relevant enough (Score: 0.20)
+
+[5/5] Cigarette Tax Stamp ... Analyzing dataset overview...
+[ANALYSIS] INFO: Starting dataset analysis for query: prices of cigarettes
+[ANALYSIS] INFO: Dataset: Cigarette Tax Stamp Sales: Beginning 1999
+[ANALYSIS] INFO: Sending analysis prompt to OpenAI
+[EXTRACT] INFO: Validation failed: The extraction result does not directly address the user's query about the "prices of cigarettes." The filtered data provides information on cigarette removals, which relates to consumption quantities, not pricing. While consumption trends can indirectly relate to pricing, they do not provide explicit price data, which is what the user is seeking.
+
+3.
+[EXTRACT] INFO: Extraction attempt 3/3
+[EXTRACT] INFO: Executing code:
+python
+# Strip any leading or trailing whitespace from column names
+df.columns = df.columns.str.strip()
+
+# Calculate the retail price for packs of 20 and 25 cigarettes
+df['Packs of 20: Retail Price'] = df['Packs of 20: Tax Rate'] + (df['Packs of 20: Total Tax'] / df['Packs of 20: # of Stamps Sold'])
+df['Packs of 25: Retail Price'] = df['Packs of 25: Tax Rate'] + (df['Packs of 25: Total Tax'] / df['Packs of 25: # of Stamps Sold'].replace(0, 1))
+
+# Extract the relevant retail price columns and drop duplicates
+relevant_data = df[['Packs of 20: Retail Price', 'Packs of 25: Retail Price']].drop_duplicates()
+
+# Display the extracted data
+print(relevant_data)
+[EXTRACT] ERROR: Execution error: 'Packs of 20: Total Tax'
+Traceback (most recent call last):
+  File "/Users/cedricfitzgerald/Documents/Startup/crystal/factchecker/analysis/dataset_analyzer.py", line 1037, in execute_code
+    result = eval(code, {"__builtins__": {}}, local_env)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<string>", line 2
+    df.columns = df.columns.str.strip()
+               ^
+SyntaxError: invalid syntax
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/cedricfitzgerald/Documents/Startup/crystal/venv/lib/python3.12/site-packages/pandas/core/indexes/base.py", line 3805, in get_loc
+    return self._engine.get_loc(casted_key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "index.pyx", line 167, in pandas._libs.index.IndexEngine.get_loc
+  File "index.pyx", line 196, in pandas._libs.index.IndexEngine.get_loc
+  File "pandas/_libs/hashtable_class_helper.pxi", line 7081, in pandas._libs.hashtable.PyObjectHashTable.get_item
+  File "pandas/_libs/hashtable_class_helper.pxi", line 7089, in pandas._libs.hashtable.PyObjectHashTable.get_item
+KeyError: 'Packs of 20: Total Tax'
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/Users/cedricfitzgerald/Documents/Startup/crystal/factchecker/analysis/dataset_analyzer.py", line 933, in execute_extraction_plan
+    execution_result, printed_output = execute_code(df, code)
+                                       ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/cedricfitzgerald/Documents/Startup/crystal/factchecker/analysis/dataset_analyzer.py", line 1047, in execute_code
+    exec(code, {"__builtins__": __builtins__}, local_env)
+  File "<string>", line 5, in <module>
+  File "/Users/cedricfitzgerald/Documents/Startup/crystal/venv/lib/python3.12/site-packages/pandas/core/frame.py", line 4102, in __getitem__
+    indexer = self.columns.get_loc(key)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/cedricfitzgerald/Documents/Startup/crystal/venv/lib/python3.12/site-packages/pandas/core/indexes/base.py", line 3812, in get_loc
+    raise KeyError(key) from err
+KeyError: 'Packs of 20: Total Tax'
+
+[EXTRACT] INFO: Extracted 10 records
+[2/5] Cigarette Tax Stamp ... EXTRACTED DATA:
+
+From dataset: Cigarette Tax Stamp Sales
+Extraction Strategy:
+Fallback strategy: showing first 10 rows due to error
+
+Data:
+Record 1:
+  Period End Date: March 2024
+  Month: March
+  Year: 2024
+  Fiscal Year: FY2023-24
+  Packs of 20: Tax Rate : 4.35
+  Packs of 20: # of Stamps Sold : 4065000
+  Packs of 20:  Total Tax : 17682750
+  Packs of 25: Tax Rate : 5.44
+  Packs of 25: # of Stamps Sold : 0
+  Packs of 25: Total Tax : 0
+  Total Cigarette Stamp Tax: 17682750
+---
+Record 2:
+  Period End Date: February 2024
+  Month: February
+  Year: 2024
+  Fiscal Year: FY2023-24
+  Packs of 20: Tax Rate : 4.35
+  Packs of 20: # of Stamps Sold : 4110000
+  Packs of 20:  Total Tax : 17878500
+  Packs of 25: Tax Rate : 5.44
+  Packs of 25: # of Stamps Sold : 0
+  Packs of 25: Total Tax : 0
+  Total Cigarette Stamp Tax: 17878500
+---
+Record 3:
+  Period End Date: January 2024
+  Month: January
+  Year: 2024
+  Fiscal Year: FY2023-24
+  Packs of 20: Tax Rate : 4.35
+  Packs of 20: # of Stamps Sold : 4590000
+  Packs of 20:  Total Tax : 19966500
+  Packs of 25: Tax Rate : 5.44
+  Packs of 25: # of Stamps Sold : 0
+  Packs of 25: Total Tax : 0
+  Total Cigarette Stamp Tax: 19966500
+---
+Record 4:
+  Period End Date: December 2023
+  Month: December
+  Year: 2023
+  Fiscal Year: FY2023-24
+  Packs of 20: Tax Rate : 4.35
+  Packs of 20: # of Stamps Sold : 4530000
+  Packs of 20:  Total Tax : 19705500
+  Packs of 25: Tax Rate : 5.44
+  Packs of 25: # of Stamps Sold : 0
+  Packs of 25: Total Tax : 0
+  Total Cigarette Stamp Tax: 19705500
+---
+Record 5:
+  Period End Date: November 2023
+  Month: November
+  Year: 2023
+  Fiscal Year: FY2023-24
+  Packs of 20: Tax Rate : 4.35
+  Packs of 20: # of Stamps Sold : 4710000
+  Packs of 20:  Total Tax : 20488500
+  Packs of 25: Tax Rate : 5.44
+  Packs of 25: # of Stamps Sold : 0
+  Packs of 25: Total Tax : 0
+  Total Cigarette Stamp Tax: 20488500
+... and 5 more records
+
+Printed Output:
+Error occurred: 'Packs of 20: Total Tax'
+
+Explanation:
+Original extraction failed with error: 'Packs of 20: Total Tax'
+
+Code Used:
+```python
+python
+# Strip any leading or trailing whitespace from column names
+df.columns = df.columns.str.strip()
+
+# Calculate the retail price for packs of 20 and 25 cigarettes
+df['Packs of 20: Retail Price'] = df['Packs of 20: Tax Rate'] + (df['Packs of 20: Total Tax'] / df['Packs of 20: # of Stamps Sold'])
+df['Packs of 25: Retail Price'] = df['Packs of 25: Tax Rate'] + (df['Packs of 25: Total Tax'] / df['Packs of 25: # of Stamps Sold'].replace(0, 1))
+
+# Extract the relevant retail price columns and drop duplicates
+relevant_data = df[['Packs of 20: Retail Price', 'Packs of 25: Retail Price']].drop_duplicates()
+
+# Display the extracted data
+print(relevant_data)
+```
+
+Errors encountered:
+Execution error: 'Packs of 20: Total Tax'
+
+[2/5] Cigarette Tax Stamp ... Analyzing dataset overview...
+[ANALYSIS] INFO: Starting dataset analysis for query: prices of cigarettes
+[ANALYSIS] INFO: Dataset: Cigarette Tax Stamp Sales
+[ANALYSIS] INFO: Processing extracted data for analysis
+[ANALYSIS] INFO: Sending analysis prompt to OpenAI
+[ANALYSIS] INFO: Received analysis from OpenAI
+
+DATASET ANALYSIS:
+1. RELEVANCE: This dataset is not directly relevant to the user's query about "prices of cigarettes" as it contains information on the number of cigarette tax stamps sold, not the prices of cigarettes themselves. It does not provide any pricing information.
+
+2. DATA QUALITY: The dataset appears to have no missing values and is well-structured with consistent data types across columns. There are no apparent data quality issues that would affect analysis.
+
+3. SCOPE LIMITATIONS: The dataset is limited to New York State and covers the period from 1999 to 2024. It focuses on the sale of cigarette tax stamps rather than broader geographic or temporal contexts.
+
+4. ALTERNATIVE INSIGHTS: While it cannot provide cigarette prices, the dataset could offer insights into trends in cigarette sales volume over time within New York State, potentially indicating changes in demand or the impact of policy changes on cigarette consumption.
+[EXTRACT] INFO: Extraction attempt 2/3
+[EXTRACT] INFO: Executing code:
+python
+# Since the dataset does not contain explicit price information, we will attempt to infer price trends
+# by calculating the per capita removals, which might indirectly suggest price trends if combined with external price data.
+
+# Filter the dataset for relevant cigarette removal data
+filtered_df = df[(df['Measure'] == 'Cigarettes') & (df['Submeasure'] == 'Cigarette Removals')]
+
+# Calculate per capita removals as a potential proxy for price trends
+filtered_df['Per Capita Removals'] = filtered_df['Total'] / filtered_df['Population']
+
+# Select relevant columns for analysis
+result_df = filtered_df[['Year', 'LocationAbbrev', 'LocationDesc', 'Per Capita Removals']]
+
+# Sort the result by year for trend analysis
+result_df = result_df.sort_values(by='Year').reset_index(drop=True)
+
+result_df
+<string>:8: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+[ANALYSIS] INFO: Received analysis from OpenAI
+
+DATASET ANALYSIS:
+1. RELEVANCE: The dataset is not directly relevant to the user's query about "prices of cigarettes" as it focuses on tax stamp sales and tax revenue rather than retail prices. However, it includes tax rates for packs of 20 and 25 cigarettes, which could be used to estimate prices indirectly.
+
+2. DATA QUALITY: There are no missing values in the dataset, but an extraction error occurred related to calculating retail prices, indicating potential issues with data manipulation or column naming.
+
+3. SCOPE LIMITATIONS: The dataset covers a temporal scope from 2019 to 2024 but lacks geographic information, limiting its applicability to specific regions or markets.
+
+4. ALTERNATIVE INSIGHTS: While it cannot directly provide cigarette prices, the dataset can offer insights into tax rates and the volume of cigarette sales, which may help infer trends in cigarette consumption and taxation impacts.
+[EXTRACT] INFO: Validation failed: The extraction result does not directly address the user's query about the "prices of cigarettes." The data extracted pertains to "Cigarette Removals" and calculates "Per Capita Removals," which are not direct indicators of cigarette prices. While per capita removals might indirectly suggest consumption trends, they do not provide explicit information about pricing. The user's query specifically asks for price data, which is not present in the dataset or the extraction result.
+
+3.
+[EXTRACT] INFO: Extraction attempt 3/3
+[EXTRACT] INFO: Executing code:
+python
+# Since the dataset does not contain explicit price information, we will attempt to infer price trends
+# by calculating the per capita removals, which might indirectly suggest price trends if combined with external price data.
+
+import pandas as pd
+
+# Filter the dataset for relevant cigarette removal data
+filtered_df = df[(df['Measure'] == 'Cigarettes') & (df['Submeasure'] == 'Cigarette Removals')]
+
+# Calculate per capita removals as a potential proxy for price trends
+filtered_df['Per Capita Removals'] = filtered_df['Total'] / filtered_df['Population']
+
+# Select relevant columns for analysis
+result_df = filtered_df[['Year', 'LocationAbbrev', 'LocationDesc', 'Per Capita Removals']]
+
+# Sort the result by year for trend analysis
+result_df = result_df.sort_values(by='Year').reset_index(drop=True)
+
+# Display the result
+result_df
+<string>:10: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+[EXTRACT] INFO: Validation failed: The extraction does not directly address the user's query about the "prices of cigarettes." The data extracted focuses on "Cigarette Removals," which is a measure of consumption, not pricing. While per capita removals might provide some indirect insights into consumption trends, they do not directly reflect price information. The user's query specifically asks for price data, which is not provided or inferred in the extraction.
+
+3.
+[EXTRACT] INFO: Extracted data: <class 'dict'>
+[3/5] Adult Tobacco Consum... EXTRACTED DATA:
+
+From dataset: Adult Tobacco Consumption In The U.S., 2000-Present
+Extraction Strategy:
+To address the user's query as closely as possible with the available data, we should filter the dataset to focus on rows where the 'Measure' is 'Cigarettes' and the 'Submeasure' is 'Cigarette Removals'. This will provide data on the quantities of cigarettes removed for consumption, which is the closest available proxy for understanding consumption trends that might relate to pricing.
+
+Data:
+No data found.
+
+Explanation:
+This extraction method is appropriate because it isolates the data specifically related to cigarettes, focusing on the 'Cigarette Removals' submeasure. This submeasure represents the quantities of cigarettes removed for consumption, which is the most relevant data available in the dataset for understanding trends that could be related to pricing. While the dataset does not directly provide pricing information, analyzing trends in cigarette removals can offer insights into consumption patterns that might correlate with price changes when combined with external pricing data.
+
+Code Used:
+```python
+python
+import pandas as pd
+
+# Filter the dataset for relevant cigarette removal data
+filtered_df = df[(df['Measure'] == 'Cigarettes') & (df['Submeasure'] == 'Cigarette Removals')]
+
+# Since the dataset does not contain explicit price information, we will focus on per capita removals
+# as a potential proxy for understanding consumption trends that might relate to pricing.
+filtered_df['Per Capita Removals'] = filtered_df['Total'] / filtered_df['Population']
+
+# Select relevant columns for analysis
+result_df = filtered_df[['Year', 'LocationAbbrev', 'LocationDesc', 'Per Capita Removals']]
+
+# Sort the result by year for trend analysis
+result_df = result_df.sort_values(by='Year').reset_index(drop=True)
+
+# Display the result
+result_df
+```
+
+[3/5] Adult Tobacco Consum... Analyzing dataset overview...
+[ANALYSIS] INFO: Starting dataset analysis for query: prices of cigarettes
+[ANALYSIS] INFO: Dataset: Adult Tobacco Consumption In The U.S., 2000-Present
+[ANALYSIS] INFO: Processing extracted data for analysis
+[ANALYSIS] INFO: Sending analysis prompt to OpenAI
+[ANALYSIS] INFO: Received analysis from OpenAI
+
+DATASET ANALYSIS:
+1. **RELEVANCE:** The dataset is not directly relevant to the user's query about "prices of cigarettes" as it does not contain explicit pricing information. However, it provides data on cigarette removals, which can be a proxy for consumption trends potentially related to pricing.
+
+2. **DATA QUALITY:** There are no missing values in the dataset, indicating good data quality. The data appears consistent across columns, with clear definitions for each measure and submeasure.
+
+3. **SCOPE LIMITATIONS:** The dataset covers the period from 2000 to 2023 and is limited to national data for the United States. It focuses on adult tobacco consumption trends, specifically for combustible and noncombustible tobacco products.
+
+4. **ALTERNATIVE INSIGHTS:** While it cannot provide direct pricing information, the dataset can offer insights into trends in cigarette consumption through the 'Cigarette Removals' data. These trends might correlate with price changes when combined with external pricing data.
+
+Successfully processed 5 datasets
+1. Electronic Cigarette Products Tax Revenue (Similarity: 0.4599) (Relevance: 0.20) - 42 rows
+2. Cigarette Tax Stamp Sales (Similarity: 0.4459) (Relevance: 0.50) - 66 rows
+3. Adult Tobacco Consumption In The U.S., 2000-Present (Similarity: 0.4216) (Relevance: 0.40) - 312 rows
+4. Maryland Adult Cigarette Smoking Status, 1995-2010 (Similarity: 0.4184) (Relevance: 0.10) - 16 rows
+5. Cigarette Tax Stamp Sales: Beginning 1999 (Similarity: 0.4121) (Relevance: 0.20) - 312 rows
+
+Generating summary of findings...
+
+FINDINGS:
+**Key Data Points:**
+
+- **Cigarette Tax Stamp Sales Dataset:**
+  - This dataset provides information on the number of cigarette tax stamps sold and the associated tax revenue. It includes tax rates for packs of 20 and 25 cigarettes, which can be used to estimate cigarette prices indirectly.
+  - The dataset covers New York State from 1999 to 2024, offering insights into trends in cigarette sales volume and tax rates over time.
+  - While it does not provide direct pricing information, changes in tax rates can influence retail prices, and trends in tax stamp sales can indicate shifts in cigarette consumption.
+
+- **Adult Tobacco Consumption In The U.S., 2000-Present Dataset:**
+  - This dataset tracks adult tobacco consumption trends in the U.S. from 2000 to 2023, focusing on both combustible and noncombustible tobacco products.
+  - It includes data on cigarette removals, which serve as a proxy for consumption trends. These trends can be correlated with price changes when combined with external pricing data.
+  - The dataset does not include explicit pricing information but can offer insights into consumption patterns that might be influenced by price fluctuations.
+
+**SEARCH SUMMARY:**
+
+The datasets analyzed provide indirect insights into cigarette pricing through related metrics such as tax rates, tax stamp sales, and consumption trends. The Cigarette Tax Stamp Sales dataset offers a view of tax rates and sales volume in New York State from 1999 to 2024, which can help infer potential price changes due to taxation. Meanwhile, the Adult Tobacco Consumption dataset provides national consumption trends from 2000 to 2023, which can be linked to pricing dynamics when combined with external data. Both datasets maintain good data quality with no missing values, although they lack direct pricing information and are limited in geographic scope.
+
+In relation to the query about cigarette prices, these datasets suggest that while direct pricing data is unavailable, tax rates and consumption trends can serve as proxies to understand potential price changes. The Cigarette Tax Stamp Sales dataset, in particular, highlights how tax policy might impact retail prices and consumption. Additionally, the Adult Tobacco Consumption dataset offers a broader perspective on how consumption patterns have evolved, potentially in response to price changes. For a comprehensive analysis of cigarette prices, these datasets should be supplemented with external pricing data to provide a complete picture of market dynamics.
+
+Query execution completed in 86.54 seconds
+(venv) (base) cedricfitzgerald@Cedrics-MacBook-Pro crystal % 
