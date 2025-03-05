@@ -259,8 +259,7 @@ class Command(BaseCommand):
                         query, 
                         dataset_info, 
                         openai_api_key,
-                        column_values_analysis=extracted_data.get("column_values_analysis"),
-                        relevant_columns=extracted_data.get("relevant_columns")
+                        extracted_data=extracted_data
                     )
                     with self.stdout_lock:
                         self.display_dataset_analysis(dataset_analysis)
@@ -339,22 +338,53 @@ class Command(BaseCommand):
 
     def display_dataset_analysis(self, dataset_analysis):
         """Display the dataset analysis in a readable format."""
+        if not dataset_analysis:
+            self.stdout.write(self.style.WARNING("\nNo dataset analysis available."))
+            return
+        
         self.stdout.write(self.style.SUCCESS("\nDATASET ANALYSIS:"))
-        self.stdout.write(dataset_analysis["analysis"])
-    
+        self.stdout.write(dataset_analysis.get("analysis", "No analysis available"))
+
     def display_extracted_data(self, extracted_data):
         """Display extracted data in a readable format"""
+        if not extracted_data:
+            self.stdout.write(self.style.WARNING("\nNo extracted data available."))
+            return
+        
         self.stdout.write("\nFrom dataset: " + extracted_data.get("dataset_title", "Unknown Dataset"))
         
         # Display extraction strategy
-        self.stdout.write("\nExtraction Strategy:")
+        self.stdout.write(f"Extraction Strategy:")
         self.stdout.write(extracted_data.get("extraction_strategy", "No strategy provided"))
-        
+
         # Display the data
         self.stdout.write("\nData:")
         data_dict = extracted_data.get("results_dict", {})
-        for key, value in data_dict.items():
-            self.stdout.write(f"{key}: {value}")
+        
+        # Check if data_dict is a list (records format) or a dictionary
+        if isinstance(data_dict, list):
+            # Handle list of records (first 5 records)
+            if not data_dict:
+                self.stdout.write("No data records found.")
+            else:
+                for i, record in enumerate(data_dict[:5]):
+                    self.stdout.write(f"Record {i+1}:")
+                    for key, value in record.items():
+                        self.stdout.write(f"  {key}: {value}")
+                    if i < len(data_dict) - 1 and i < 4:  # Add separator between records
+                        self.stdout.write("---")
+                if len(data_dict) > 5:
+                    self.stdout.write(f"... and {len(data_dict) - 5} more records")
+        elif isinstance(data_dict, dict):
+            # Handle dictionary
+            if not data_dict:
+                self.stdout.write("No data found.")
+            else:
+                for key, value in data_dict.items():
+                    self.stdout.write(f"{key}: {value}")
+        else:
+            self.stdout.write(f"Unexpected data format: {type(data_dict)}")
+            self.stdout.write(str(data_dict)[:500])
         
         # Display printed output if available
         if "printed_output" in extracted_data and extracted_data["printed_output"]:
@@ -366,11 +396,16 @@ class Command(BaseCommand):
         self.stdout.write(extracted_data.get("explanation", "No explanation provided"))
         
         # Display code used
-        if "code" in extracted_data:
+        if "code" in extracted_data and extracted_data["code"]:
             self.stdout.write("\nCode Used:")
             self.stdout.write("```python")
             self.stdout.write(extracted_data["code"])
             self.stdout.write("```")
+        
+        # Display any errors
+        if "error" in extracted_data and extracted_data["error"]:
+            self.stdout.write(self.style.ERROR(f"\nErrors encountered:"))
+            self.stdout.write(self.style.ERROR(extracted_data["error"]))
 
     def init_api_key(self, api_key: Optional[str] = None) -> Dict[str, str]:
         """Initialize the Data.gov API key and OpenAI API key."""

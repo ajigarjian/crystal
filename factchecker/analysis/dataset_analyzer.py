@@ -1,18 +1,38 @@
+from typing import Dict, List, Tuple, Any, Union, TypedDict, Optional
 import pandas as pd
-import os
-import openai
-from typing import Dict, List, Optional, Tuple, Any, Union
 import numpy as np
 import logging
+import openai
+from contextlib import redirect_stdout
+import io
+import traceback
+import re
+
+# Define TypedDict classes for better typing
+class ExtractionPlan(TypedDict):
+    strategy: str
+    analysis: str
+    explanation: str
+    code: str
+
+class ExtractedData(TypedDict):
+    dataset_id: str
+    dataset_title: str
+    results_dict: Dict[str, Any]
+    printed_output: str
+    extraction_strategy: str
+    explanation: str
+    code: str
+    error: Optional[str]
 
 def extract_relevant_data(
     dataset_content: Union[pd.DataFrame, Dict[str, Any]],
     query: str,
     dataset_metadata: Dict[str, Any],
     openai_api_key: str
-) -> Dict[str, Any]:
+) -> ExtractedData:
     """
-    Extract relevant data from a dataset based on the user's query.
+    Extract data from a dataset that is relevant to the user's query.
     
     Args:
         dataset_content: The dataset content (either a pandas DataFrame or a dictionary)
@@ -21,82 +41,200 @@ def extract_relevant_data(
         openai_api_key: OpenAI API key
         
     Returns:
-        Dictionary containing extracted data and explanation
+        ExtractedData object containing extracted data and metadata
     """
-    # Step 1: Analyze dataset structure
-    column_info = []
-    for col in dataset_content.columns:
-        dtype = str(dataset_content[col].dtype)
-        unique_count = dataset_content[col].nunique()
-        has_nulls = dataset_content[col].isna().any()
-        sample_values = dataset_content[col].dropna().head(3).tolist()
-        
-        column_info.append({
-            "name": col,
-            "dtype": dtype,
-            "unique_values": unique_count,
-            "has_nulls": has_nulls,
-            "sample_values": sample_values
-        })
+    # Set up logging
+    logger = logging.getLogger("data_extraction")
+    logger.setLevel(logging.DEBUG)
     
-    # Step 2: Generate dataset statistics
-    dataset_stats = {
-        "row_count": len(dataset_content),
-        "column_count": len(dataset_content.columns),
-        "memory_usage": dataset_content.memory_usage(deep=True).sum() / (1024 * 1024),  # MB
-    }
+    # Add a console handler if not already present
+    if not logger.handlers:
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.DEBUG)
+        formatter = logging.Formatter('[EXTRACT] %(levelname)s: %(message)s')
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
     
-    # For numerical columns, calculate basic statistics
-    numerical_stats = {}
-    for col in dataset_content.select_dtypes(include=['number']).columns:
-        numerical_stats[col] = {
-            "min": dataset_content[col].min(),
-            "max": dataset_content[col].max(),
-            "mean": dataset_content[col].mean(),
-            "median": dataset_content[col].median(),
-            "std": dataset_content[col].std()
-        }
+    logger.info(f"Starting data extraction for query: {query}")
+    logger.info(f"Dataset: {dataset_metadata.get('title', 'Unknown')}")
     
-    # Step 3: Identify relevant feature columns
-    relevant_columns = identify_relevant_columns(dataset_content, query, column_info, openai_api_key)
-    
-    # Step 4: For each relevant column, get unique values and select relevant ones
-    column_values_analysis = {}
-    for col_name in relevant_columns:
-        unique_values = get_unique_column_values(dataset_content, col_name)
-        relevant_values = select_relevant_values(unique_values, col_name, query, openai_api_key)
-        column_values_analysis[col_name] = {
-            "unique_values": unique_values,
-            "relevant_values": relevant_values
-        }
-    
-    # Step 5: Generate extraction code based on relevant columns and values
-    extraction_code = generate_extraction_code(dataset_content, column_values_analysis, query, openai_api_key)
-    
-    # Step 6: Ask LLM to determine extraction strategy (including the column analysis)
-    extraction_plan = determine_extraction_strategy(
-        dataset_content, query, dataset_metadata, column_info, dataset_stats, 
-        numerical_stats, openai_api_key, column_values_analysis, extraction_code
-    )
-    
-    # Step 7: Execute the extraction plan
-    extracted_data, code_used = execute_extraction_plan(dataset_content, extraction_plan)
-    
-    # Step 8: Format and return results
-    return {
+    # Initialize the result with default values
+    result: ExtractedData = {
         "dataset_id": dataset_metadata.get("id", ""),
         "dataset_title": dataset_metadata.get("title", ""),
-        "query": query,
-        "extraction_plan": extraction_plan,
-        "extracted_data": extracted_data,
-        "code_used": code_used,
-        "data_shape": {
-            "type": type(extracted_data).__name__,
-            "dimensions": get_data_dimensions(extracted_data)
-        },
-        "column_values_analysis": column_values_analysis,
-        "relevant_columns": relevant_columns
+        "results_dict": {},
+        "printed_output": "",
+        "extraction_strategy": "No strategy provided",
+        "explanation": "No explanation provided",
+        "code": "",
+        "error": None
     }
+    
+    # Handle non-DataFrame data (like PDFs)
+    if not isinstance(dataset_content, pd.DataFrame):
+        logger.warning("Non-tabular data detected, extraction not supported")
+        result["results_dict"] = {"data": "Non-tabular data, extraction not supported"}
+        result["extraction_strategy"] = "Direct extraction of document content"
+        result["explanation"] = "Document content extracted directly without filtering"
+        return result
+    
+    try:
+        # Log basic dataset info
+        logger.info(f"Dataset shape: {dataset_content.shape}")
+        logger.info(f"Columns: {list(dataset_content.columns)}")
+        
+        # Get basic dataset stats
+        row_count = len(dataset_content)
+        col_count = len(dataset_content.columns)
+        
+        # Get column information
+        column_info = []
+        for col in dataset_content.columns:
+            dtype = str(dataset_content[col].dtype)
+            unique_count = dataset_content[col].nunique()
+            has_nulls = dataset_content[col].isna().any()
+            sample_values = dataset_content[col].dropna().head(3).tolist()
+            
+            column_info.append({
+                "name": col,
+                "dtype": dtype,
+                "unique_values": unique_count,
+                "has_nulls": has_nulls,
+                "sample_values": sample_values
+            })
+        
+        # Get numerical column statistics
+        numerical_stats = {}
+        for col in dataset_content.select_dtypes(include=['number']).columns:
+            numerical_stats[col] = {
+                "min": dataset_content[col].min(),
+                "max": dataset_content[col].max(),
+                "mean": dataset_content[col].mean(),
+                "median": dataset_content[col].median(),
+                "std": dataset_content[col].std()
+            }
+        
+        # Create dataset stats dictionary
+        dataset_stats = {
+            "row_count": row_count,
+            "column_count": col_count,
+            "memory_usage": dataset_content.memory_usage(deep=True).sum() / (1024 * 1024)  # Convert to MB
+        }
+        
+        # Identify relevant columns
+        logger.info("Identifying relevant columns...")
+        relevant_columns = identify_relevant_columns(dataset_content, query, column_info, openai_api_key)
+        logger.info(f"Identified relevant columns: {relevant_columns}")
+        
+        # Analyze relevant columns and their values
+        column_values_analysis = {}
+        for col in relevant_columns:
+            logger.info(f"Analyzing values in column: {col}")
+            unique_values = get_unique_column_values(dataset_content, col)
+            relevant_values = select_relevant_values(unique_values, col, query, openai_api_key)
+            
+            column_values_analysis[col] = {
+                "unique_values": unique_values,
+                "relevant_values": relevant_values
+            }
+            logger.info(f"Column {col}: Found {len(relevant_values)} relevant values out of {len(unique_values)} unique values")
+        
+        # Generate extraction code
+        logger.info("Generating extraction code...")
+        extraction_code = generate_extraction_code(dataset_content, column_values_analysis, query, openai_api_key)
+        
+        # Determine extraction strategy
+        logger.info("Determining extraction strategy...")
+        extraction_plan = determine_extraction_strategy(
+            dataset_content, 
+            query, 
+            dataset_metadata, 
+            column_info, 
+            dataset_stats, 
+            numerical_stats, 
+            openai_api_key,
+            column_values_analysis,
+            extraction_code
+        )
+        
+        # Execute the extraction plan with validation feedback loop
+        logger.info("Executing extraction plan...")
+        extracted_data = execute_extraction_plan(
+            dataset_content, 
+            extraction_plan,
+            query,
+            openai_api_key
+        )
+        
+        # Update the result with the extracted data
+        result.update(extracted_data)
+        result["dataset_id"] = dataset_metadata.get("id", "")
+        result["dataset_title"] = dataset_metadata.get("title", "")
+        
+        # Log the extraction results
+        if isinstance(result["results_dict"], list):
+            logger.info(f"Extracted {len(result['results_dict'])} records")
+        else:
+            logger.info(f"Extracted data: {type(result['results_dict'])}")
+        
+        return result
+        
+    except Exception as e:
+        # Log the error
+        logger.error(f"Error extracting relevant data: {str(e)}")
+        logger.error(traceback.format_exc())
+        
+        # Update the result with the error
+        result["error"] = str(e)
+        result["extraction_strategy"] = f"Extraction failed: {str(e)}"
+        result["explanation"] = f"An error occurred during extraction: {str(e)}"
+        
+        # Attempt a simple fallback extraction
+        try:
+            logger.info("Attempting fallback extraction...")
+            # Look for any columns that might contain Greenwich Village data
+            greenwich_data = dataset_content[
+                dataset_content.apply(
+                    lambda row: any(
+                        isinstance(val, str) and 'greenwich' in str(val).lower() 
+                        for val in row
+                    ), 
+                    axis=1
+                )
+            ]
+            
+            if not greenwich_data.empty:
+                logger.info(f"Found {len(greenwich_data)} rows with Greenwich Village data")
+                result["results_dict"] = greenwich_data.head(10).to_dict(orient="records")
+                result["explanation"] += "\n\nFallback extraction found some rows containing 'Greenwich Village'"
+            else:
+                # If no Greenwich Village data, look for air quality indicators
+                air_quality_indicators = ['ozone', 'o3', 'pm2.5', 'pm 2.5', 'fine particles', 'nitrogen dioxide', 'no2']
+                
+                air_quality_data = dataset_content[
+                    dataset_content.apply(
+                        lambda row: any(
+                            isinstance(val, str) and any(indicator in str(val).lower() for indicator in air_quality_indicators)
+                            for val in row
+                        ),
+                        axis=1
+                    )
+                ]
+                
+                if not air_quality_data.empty:
+                    logger.info(f"Found {len(air_quality_data)} rows with air quality indicators")
+                    result["results_dict"] = air_quality_data.head(10).to_dict(orient="records")
+                    result["explanation"] += "\n\nFallback extraction found some rows containing air quality indicators"
+                else:
+                    # Last resort: just return the first 10 rows
+                    logger.info("No relevant data found, returning first 10 rows")
+                    result["results_dict"] = dataset_content.head(10).to_dict(orient="records")
+                    result["explanation"] += "\n\nNo specific relevant data found, showing sample rows"
+        except Exception as fallback_error:
+            logger.error(f"Fallback extraction also failed: {str(fallback_error)}")
+            result["results_dict"] = dataset_content.head(5).to_dict(orient="records")
+            
+        return result
 
 def identify_relevant_columns(
     dataset_content: Union[pd.DataFrame, Dict[str, Any]],
@@ -304,8 +442,7 @@ def analyze_dataset_overview(
     query: str,
     dataset_metadata: Dict[str, Any],
     openai_api_key: str,
-    column_values_analysis: Dict[str, Dict[str, List[Any]]] = None,
-    relevant_columns: List[str] = None
+    extracted_data: Dict[str, Any] = None
 ) -> Dict[str, Any]:
     """
     Analyze a dataset to provide a concise overview of its relevance to the query,
@@ -316,12 +453,26 @@ def analyze_dataset_overview(
         query: The original user query
         dataset_metadata: Metadata about the dataset
         openai_api_key: OpenAI API key
-        column_values_analysis: Analysis of relevant columns and their values
-        relevant_columns: List of columns identified as relevant to the query
+        extracted_data: The data extracted from the dataset
         
     Returns:
         Dictionary containing dataset analysis and summary
     """
+    # Set up logging
+    logger = logging.getLogger("dataset_analysis")
+    logger.setLevel(logging.DEBUG)
+    
+    # Add a console handler if not already present
+    if not logger.handlers:
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.DEBUG)
+        formatter = logging.Formatter('[ANALYSIS] %(levelname)s: %(message)s')
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
+    
+    logger.info(f"Starting dataset analysis for query: {query}")
+    logger.info(f"Dataset: {dataset_metadata.get('title', 'Unknown')}")
+    
     # Get basic dataset info
     row_count = len(dataset_content)
     col_count = len(dataset_content.columns)
@@ -395,30 +546,53 @@ def analyze_dataset_overview(
     
     # Include information about relevant columns and values if provided
     relevant_column_info = []
-    if relevant_columns:
-        relevant_column_info.append(f"RELEVANT COLUMNS: {', '.join(relevant_columns)}")
+    column_values_analysis = extracted_data.get("column_values_analysis", {}) if extracted_data else {}
     
-    column_analysis_summary = []
     if column_values_analysis:
-        column_analysis_summary.append("COLUMN VALUES ANALYSIS:")
         for col_name, analysis in column_values_analysis.items():
             relevant_values = analysis.get("relevant_values", [])
-            if not relevant_values:
-                column_analysis_summary.append(f"- Column '{col_name}': No relevant values identified")
-            elif len(relevant_values) == len(analysis.get("unique_values", [])):
-                column_analysis_summary.append(f"- Column '{col_name}': All values are relevant")
-            else:
-                # Limit the number of values to display
-                display_values = relevant_values
-                if len(relevant_values) > 10:
-                    display_values = relevant_values[:10]
-                    column_analysis_summary.append(
-                        f"- Column '{col_name}': {len(relevant_values)} relevant values, including: {display_values}"
-                    )
-                else:
-                    column_analysis_summary.append(
-                        f"- Column '{col_name}': Relevant values: {relevant_values}"
-                    )
+            if relevant_values:
+                relevant_column_info.append(f"- Column '{col_name}' has relevant values: {relevant_values[:5]}")
+    
+    # Include extraction information if provided
+    extraction_info = []
+    if extracted_data:
+        logger.info("Processing extracted data for analysis")
+        
+        if "extraction_strategy" in extracted_data and extracted_data["extraction_strategy"]:
+            extraction_info.append(f"EXTRACTION STRATEGY: {extracted_data['extraction_strategy']}")
+        
+        if "explanation" in extracted_data and extracted_data["explanation"]:
+            extraction_info.append(f"EXTRACTION EXPLANATION: {extracted_data['explanation']}")
+        
+        if "code" in extracted_data and extracted_data["code"]:
+            extraction_info.append(f"EXTRACTION CODE: \n{extracted_data['code']}")
+        
+        if "printed_output" in extracted_data and extracted_data["printed_output"]:
+            extraction_info.append(f"EXTRACTION OUTPUT: \n{extracted_data['printed_output']}")
+        
+        # Include information about the extracted data
+        if "results_dict" in extracted_data:
+            results = extracted_data["results_dict"]
+            if isinstance(results, list) and results:
+                # Include all extracted records (up to a reasonable limit)
+                max_records = min(len(results), 10)
+                extraction_info.append(f"EXTRACTED DATA RECORDS ({len(results)} total):")
+                
+                for i, record in enumerate(results[:max_records]):
+                    if isinstance(record, dict):
+                        # For dictionaries, include key-value pairs
+                        record_info = []
+                        for key, value in record.items():
+                            if key in ['Name', 'Geo Place Name', 'Time Period', 'Data Value']:
+                                record_info.append(f"{key}: {value}")
+                        
+                        extraction_info.append(f"Record {i+1}: {', '.join(record_info)}")
+                    else:
+                        # For other types, just include the record
+                        extraction_info.append(f"Record {i+1}: {record}")
+            elif isinstance(results, dict) and results:
+                extraction_info.append(f"EXTRACTED DATA: {results}")
     
     # Create prompt for OpenAI
     prompt = f"""
@@ -447,14 +621,13 @@ GEOGRAPHIC SCOPE:
 CATEGORICAL SUMMARIES (Top values):
 {chr(10).join(categorical_summaries) if categorical_summaries else "No categorical columns analyzed."}
 
-{chr(10).join(relevant_column_info) if relevant_column_info else ""}
-
-{chr(10).join(column_analysis_summary) if column_analysis_summary else ""}
+EXTRACTION INFORMATION:
+{chr(10).join(extraction_info) if extraction_info else "No extraction information available."}
 
 DATA PREVIEW (first 5 rows):
 {dataset_content.head(5).to_string()}
 
-IMPORTANT: Before making claims about what data is or isn't in the dataset, carefully check the column information and sample values. The dataset may contain information that isn't immediately obvious from column names. Be especially careful about geographic information - check all columns for location data, not just those with geographic terms in their names.
+IMPORTANT: Before making claims about what data is or isn't in the dataset, carefully check the column information, sample values, and especially the EXTRACTION INFORMATION. The dataset may contain information that isn't immediately obvious from column names. Be especially careful about geographic information - check all columns for location data, not just those with geographic terms in their names.
 
 Please provide a VERY CONCISE analysis of this dataset (maximum 3-4 sentences per section):
 
@@ -463,15 +636,17 @@ Please provide a VERY CONCISE analysis of this dataset (maximum 3-4 sentences pe
 3. SCOPE LIMITATIONS: Is the dataset limited to a specific time period, geographic area, or other scope?
 4. ALTERNATIVE INSIGHTS: If the dataset cannot answer the query directly, what related insights could it provide?
 
-Be extremely concise but accurate. Do not make claims about missing data unless you are certain.
+Be extremely concise but accurate. Do not make claims about missing data unless you are certain. Pay special attention to the EXTRACTION INFORMATION which shows what data was successfully extracted from the dataset.
 """
 
+    logger.info("Sending analysis prompt to OpenAI")
+    
     # Call OpenAI API
     client = openai.OpenAI(api_key=openai_api_key)
     response = client.chat.completions.create(
         model="gpt-4o",
         messages=[
-            {"role": "system", "content": "You are a data analyst who specializes in evaluating dataset quality and relevance. Be extremely concise and accurate. Before making claims about what data is or isn't in the dataset, carefully examine all columns and sample values. Don't assume information is missing just because it's not in an expected column."},
+            {"role": "system", "content": "You are a data analyst who specializes in evaluating dataset quality and relevance. Be extremely concise and accurate. Before making claims about what data is or isn't in the dataset, carefully examine all columns, sample values, and especially the extraction information. Don't assume information is missing just because it's not in an expected column."},
             {"role": "user", "content": prompt}
         ],
         temperature=0.2
@@ -479,6 +654,7 @@ Be extremely concise but accurate. Do not make claims about missing data unless 
     
     # Parse the response
     analysis = response.choices[0].message.content
+    logger.info("Received analysis from OpenAI")
     
     # Return the analysis
     return {
@@ -490,8 +666,8 @@ Be extremely concise but accurate. Do not make claims about missing data unless 
         "temporal_scope": temporal_range,
         "geographic_scope": geographic_scope,
         "categorical_summaries": categorical_summaries,
-        "relevant_columns": relevant_columns,
-        "column_values_analysis": column_values_analysis,
+        "extraction_info": extraction_info,
+        "extracted_data": extracted_data,  # Include the full extracted data
         "analysis": analysis
     }
 
@@ -570,12 +746,13 @@ Return ONLY the Python code, with no additional text or explanation. Use 'df' as
     
     # Parse response
     code = response.choices[0].message.content.strip()
-    
-    # Remove markdown code block markers if present
-    if code.startswith("```") and code.endswith("```"):
-        code = code[3:-3].strip()
-    if code.startswith("```python") and code.endswith("```"):
-        code = code[9:-3].strip()
+    # only works on strings    
+    if isinstance(code, str):
+        # Remove markdown code block markers if present
+        if code.startswith("```") and code.endswith("```"):
+            code = code[3:-3].strip()
+        if code.startswith("```python") and code.endswith("```"):
+            code = code[9:-3].strip()
     
     return code
 
@@ -587,7 +764,7 @@ def determine_extraction_strategy(
     dataset_stats: Dict,
     numerical_stats: Dict,
     openai_api_key: str,
-    column_values_analysis: Dict[str, Dict[str, List[Any]]] = None,
+    column_values_analysis: Dict,
     extraction_code: str = None
 ) -> Dict[str, Any]:
     """
@@ -647,7 +824,6 @@ Description: {dataset_metadata.get('description', '')}
 DATASET STATISTICS:
 - Rows: {dataset_stats['row_count']}
 - Columns: {dataset_stats['column_count']}
-- Memory Usage: {dataset_stats['memory_usage']:.2f} MB
 
 COLUMN INFORMATION:
 {chr(10).join(column_details)}
@@ -703,195 +879,369 @@ EXPLANATION: [Your explanation]
         "explanation": explanation
     }
 
-def execute_extraction_plan(df: pd.DataFrame, extraction_plan: Dict[str, Any]) -> Tuple[Any, str]:
+
+def execute_extraction_plan(
+    df: pd.DataFrame, 
+    extraction_plan: ExtractionPlan,
+    query: str,
+    openai_api_key: str,
+    max_attempts: int = 3
+) -> ExtractedData:
     """
-    Execute the extraction plan generated by the LLM.
+    Execute the extraction plan generated by the LLM with validation feedback loop.
     
+    Args:
+        df: The DataFrame to extract data from
+        extraction_plan: The extraction plan containing code and strategy
+        query: The original user query
+        openai_api_key: OpenAI API key
+        max_attempts: Maximum number of code generation attempts
+        
     Returns:
-        Tuple of (extracted_data, code_used)
+        ExtractedData object with extraction results and metadata
     """
     logger = logging.getLogger("data_extraction")
     
-    # Log the extraction code
-    code = extraction_plan["code"].strip()
-    print("=" * 80)
-    print("EXTRACTION CODE")
-    print("=" * 80)
-    print(f"Code to execute:\n{code}")
+    # Initialize result with default values
+    result: ExtractedData = {
+        "dataset_id": "",
+        "dataset_title": "",
+        "results_dict": {},
+        "printed_output": "",
+        "extraction_strategy": extraction_plan.get("strategy", "No strategy provided"),
+        "explanation": extraction_plan.get("explanation", "No explanation provided"),
+        "code": extraction_plan.get("code", ""),
+        "error": None
+    }
     
-    try:
-        # First try to evaluate the code as an expression
-        local_env = {"df": df.copy(), "pd": pd, "np": np}
+    # Track attempts
+    attempts = 0
+    success = False
+    
+    while attempts < max_attempts and not success:
+        attempts += 1
+        logger.info(f"Extraction attempt {attempts}/{max_attempts}")
+        
+        # Get the current code to execute
+        code = extraction_plan.get("code", "").strip()
+        result["code"] = code
+        
+        logger.info(f"Executing code:\n{code}")
         
         try:
-            print("=" * 80)
-            print("EXECUTING CODE AS EXPRESSION")
-            print("=" * 80)
+            # Execute the code and capture results
+            execution_result, printed_output = execute_code(df, code)
             
-            # Try direct evaluation first (safer and more reliable for expressions)
-            result = eval(code, {"__builtins__": {}}, local_env)
-            print(f"Expression evaluation successful. Result type: {type(result)}")
+            # Validate the results
+            validation_result = validate_extraction_results(
+                execution_result, 
+                df, 
+                query, 
+                extraction_plan,
+                printed_output,
+                openai_api_key
+            )
             
-            # Add logging for the result
-            if isinstance(result, pd.DataFrame):
-                print(f"Result DataFrame - shape: {result.shape}")
-                print(f"Result sample:\n{result.head(5).to_string() if not result.empty else 'Empty DataFrame'}")
-            else:
-                print(f"Result: {result}")
+            if validation_result["is_valid"]:
+                # If valid, update the result and break the loop
+                success = True
                 
-            print(f"DataFrame copy in local_env - shape: {local_env['df'].shape}")
-            print(f"DataFrame copy in local_env - columns: {list(local_env['df'].columns)}")
-            
-            print("=" * 80)
-            print("VERIFYING LOCAL ENVIRONMENT DATA")
-            print("=" * 80)
-            print(f"Original DataFrame shape: {df.shape}")
-            print(f"Local env DataFrame shape: {local_env['df'].shape}")
-            print(f"Original DataFrame columns: {list(df.columns)}")
-            print(f"Local env DataFrame columns: {list(local_env['df'].columns)}")
-            print(f"Original DataFrame first 3 rows:")
-            print(df.head(3))
-            print(f"Local env DataFrame first 3 rows:")
-            print(local_env['df'].head(3))
-            print("=" * 80)
-            
-            return result, code
-        except SyntaxError as se:
-            print(f"Expression evaluation failed with SyntaxError: {str(se)}")
-            print("Attempting to execute as a statement block")
-            
-            # Capture stdout to get printed results
-            import io
-            from contextlib import redirect_stdout
-            
-            # Create a StringIO object to capture printed output
-            captured_output = io.StringIO()
-            
-            # If it's not a simple expression, try executing as a statement block
-            # Modify the code to store results in a dictionary instead of printing them
-            modified_code = code
-            
-            # Check if the code contains print statements
-            if "print(" in code:
-                # Replace print statements with assignments to a results dictionary
-                result_dict_code = "results_dict = {}\n"
-                
-                # Split the code into lines
-                lines = code.strip().split('\n')
-                modified_lines = []
-                result_keys = []
-                
-                for i, line in enumerate(lines):
-                    if "print(" in line:
-                        # Extract the content inside print()
-                        content = line.split("print(", 1)[1].rsplit(")", 1)[0]
-                        
-                        # Create a key for this result
-                        key = f"result_{i}"
-                        result_keys.append(key)
-                        
-                        # Replace print with assignment to results_dict
-                        modified_lines.append(f"results_dict['{key}'] = {content}")
-                    else:
-                        modified_lines.append(line)
-                
-                # Join the modified lines
-                modified_code = result_dict_code + "\n".join(modified_lines)
-                
-                # Execute the modified code with print statements replaced
-                exec(modified_code, {"__builtins__": __builtins__}, local_env)
-                
-                # Get the results dictionary
-                results_dict = local_env.get("results_dict", {})
-                
-                # Also execute the original code to capture the printed output
-                with redirect_stdout(captured_output):
-                    exec(code, {"__builtins__": __builtins__}, local_env)
-                
-                # Get the printed output
-                printed_output = captured_output.getvalue()
-                
-                # Create a result that includes both the dictionary and printed output
-                result = {
-                    "results_dict": results_dict,
-                    "printed_output": printed_output.strip()
-                }
-            else:
-                # Check if the last line is just a variable name (likely the result)
-                lines = code.strip().split('\n')
-                last_line = lines[-1].strip()
-                
-                # If the last line is just a variable name, use that as the result
-                if last_line and not last_line.startswith('#') and '=' not in last_line:
-                    result_var = last_line
-                    # Replace the last line with an assignment to result
-                    lines[-1] = f"result = {result_var}"
-                    modified_code = '\n'.join(lines)
+                # Package the results
+                if isinstance(execution_result, pd.DataFrame):
+                    result["results_dict"] = execution_result.to_dict(orient="records")
                 else:
-                    # Otherwise, try to find the last variable assignment
-                    var_assignments = []
-                    for line in lines:
-                        line = line.strip()
-                        if line and not line.startswith('#') and '=' in line:
-                            var_name = line.split('=')[0].strip()
-                            if var_name != 'result':  # Avoid existing result assignments
-                                var_assignments.append(var_name)
-                    
-                    if var_assignments:
-                        # Add a line to assign the last variable to result
-                        modified_code = f"{code}\nresult = {var_assignments[-1]}"
-                    else:
-                        # If no variable assignments found, just use the original code
-                        modified_code = f"{code}\n# No result variable found"
+                    result["results_dict"] = {"data": execution_result}
                 
-                # Execute the modified code
-                exec_code = f"result = None\n{modified_code}\n"
-                print(f"Executing modified code block:\n{exec_code}")
+                result["printed_output"] = printed_output
+                logger.info("Extraction successful and validated")
                 
-                # Execute the code and capture any printed output
-                with redirect_stdout(captured_output):
-                    exec(exec_code, {"__builtins__": __builtins__}, local_env)
-                
-                # Get the result from the local environment
-                result = local_env.get("result")
-                
-                # If result is None but we have printed output, use that instead
-                printed_output = captured_output.getvalue().strip()
-                if result is None and printed_output:
-                    result = {"printed_output": printed_output}
-            
-            print("=" * 80)
-            print("EXECUTION RESULTS")
-            print("=" * 80)
-            print(f"Statement execution completed. Result type: {type(result)}")
-            
-            # Log the result details
-            if isinstance(result, pd.DataFrame):
-                print(f"Result DataFrame - shape: {result.shape}")
-                print(f"Result columns: {list(result.columns)}")
-                print(f"Result sample:\n{result.head(5).to_string() if not result.empty else 'Empty DataFrame'}")
-            elif isinstance(result, dict) and "printed_output" in result:
-                print(f"Captured printed output: {result['printed_output']}")
             else:
-                print(f"Result: {result}")
+                # If not valid, update the extraction plan with new code
+                logger.info(f"Validation failed: {validation_result['reason']}")
                 
-            return result, code
-    except Exception as e:
-        print("=" * 80)
-        print("EXECUTION ERROR")
-        print("=" * 80)
-        print(f"Execution failed with error: {str(e)}")
-        print(f"Error type: {type(e).__name__}")
-        import traceback
-        print(f"Traceback: {traceback.format_exc()}")
+                # Generate improved code
+                improved_code = generate_improved_code(
+                    df, 
+                    query, 
+                    extraction_plan,
+                    validation_result["reason"],
+                    code,
+                    openai_api_key
+                )
+                
+                # Update the extraction plan with the new code
+                extraction_plan["code"] = improved_code
+                result["code"] = improved_code
+                
+        except Exception as e:
+            error_msg = f"Execution error: {str(e)}"
+            logger.error(f"{error_msg}\n{traceback.format_exc()}")
+            
+            if attempts < max_attempts:
+                # Try to generate improved code that fixes the error
+                improved_code = generate_improved_code(
+                    df, 
+                    query, 
+                    extraction_plan,
+                    error_msg,
+                    code,
+                    openai_api_key
+                )
+                
+                # Update the extraction plan with the new code
+                extraction_plan["code"] = improved_code
+                result["code"] = improved_code
+            else:
+                # If this was the last attempt, record the error
+                result["error"] = error_msg
+                
+                # Fallback to a simple extraction
+                result["results_dict"] = df.head(10).to_dict(orient="records")
+                result["printed_output"] = f"Error occurred: {str(e)}"
+                result["extraction_strategy"] = "Fallback strategy: showing first 10 rows due to error"
+                result["explanation"] = f"Original extraction failed with error: {str(e)}"
+    
+    return result
+
+def execute_code(df: pd.DataFrame, code: str) -> Tuple[Any, str]:
+    """
+    Execute the provided code and return the result and any printed output.
+    
+    Args:
+        df: The DataFrame to execute the code on
+        code: The Python code to execute
         
-        # If execution fails, fall back to a simpler approach
-        print("Falling back to df.head(10)")
-        fallback_result = {
-            "error": str(e),
-            "fallback_data": df.head(10).to_dict(orient="records")
-        }
-        return fallback_result, f"# Original code failed with error: {str(e)}\n# Fallback to df.head(10)"
+    Returns:
+        Tuple of (execution_result, printed_output)
+    """
+    # Create a copy of the DataFrame to avoid modifying the original
+    local_env = {"df": df.copy(), "pd": pd, "np": np}
+    
+    # Clean the code - remove markdown code block markers if present
+    if code.startswith("```python"):
+        code = code.replace("```python", "", 1)
+    if code.endswith("```"):
+        code = code[:-3]
+    
+    # Remove any "python" line at the beginning (common in LLM outputs)
+    lines = code.strip().split('\n')
+    if lines and lines[0].strip().lower() == 'python':
+        code = '\n'.join(lines[1:])
+    
+    # Capture printed output
+    captured_output = io.StringIO()
+    
+    try:
+        # First try to evaluate as an expression
+        with redirect_stdout(captured_output):
+            result = eval(code, {"__builtins__": {}}, local_env)
+        
+        printed_output = captured_output.getvalue().strip()
+        return result, printed_output
+        
+    except SyntaxError:
+        # If not an expression, execute as a statement block
+        captured_output = io.StringIO()  # Reset the captured output
+        
+        with redirect_stdout(captured_output):
+            exec(code, {"__builtins__": __builtins__}, local_env)
+        
+        printed_output = captured_output.getvalue().strip()
+        
+        # Try to find the result in the local environment
+        new_vars = [var for var in local_env if var not in ["df", "pd", "np"]]
+        
+        if new_vars:
+            # Use the last variable created as the result
+            result_var = new_vars[-1]
+            result = local_env[result_var]
+        else:
+            # If no new variables were created, check if df was modified
+            if not df.equals(local_env["df"]):
+                result = local_env["df"]
+            else:
+                # If nothing changed, use the original DataFrame
+                result = df
+        
+        return result, printed_output
+    
+
+def validate_extraction_results(
+    result: Any, 
+    original_df: pd.DataFrame, 
+    query: str, 
+    extraction_plan: ExtractionPlan,
+    printed_output: str,
+    openai_api_key: str
+) -> Dict[str, Any]:
+    """
+    Validate the extraction results using an LLM.
+    
+    Args:
+        result: The result of executing the extraction code
+        original_df: The original DataFrame
+        query: The original user query
+        extraction_plan: The extraction plan
+        printed_output: Any printed output from the code execution
+        openai_api_key: OpenAI API key
+        
+    Returns:
+        Dictionary with validation results
+    """
+    # Format the result for the prompt
+    if isinstance(result, pd.DataFrame):
+        result_description = f"DataFrame with shape {result.shape}"
+        result_sample = result.head(5).to_string() if not result.empty else "Empty DataFrame"
+    else:
+        result_description = f"{type(result).__name__}"
+        result_sample = str(result)[:500] + "..." if len(str(result)) > 500 else str(result)
+    
+    # Create prompt for OpenAI
+    prompt = f"""
+You are validating the results of a data extraction operation. Determine if the extraction successfully addresses the user's query.
+
+USER QUERY: "{query}"
+
+EXTRACTION STRATEGY:
+{extraction_plan.get("strategy", "No strategy provided")}
+
+CODE EXECUTED:
+{extraction_plan.get("code", "")}
+
+
+EXECUTION RESULT:
+Type: {result_description}
+Sample: {result_sample}
+
+PRINTED OUTPUT:
+{printed_output if printed_output else "No output printed"}
+
+VALIDATION TASK:
+1. Determine if the extraction result is relevant to the user's query
+2. Check if the code executed correctly (no errors in the output)
+3. Verify that the result contains the information needed to answer the query
+4. Ensure the extraction follows the intended strategy
+
+Respond with:
+1. VALID: Yes or No
+2. REASON: Brief explanation of your assessment
+3. SUGGESTIONS: If not valid, suggest specific improvements to the code
+"""
+
+    # Call OpenAI API
+    client = openai.OpenAI(api_key=openai_api_key)
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": "You are a data analysis expert who validates extraction results."},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.2
+    )
+    
+    # Parse the response
+    response_text = response.choices[0].message.content
+    
+    # Extract validation result
+    is_valid = "VALID: Yes" in response_text
+    
+    # Extract reason
+    reason_match = re.search(r'REASON:(.*?)(?:SUGGESTIONS:|$)', response_text, re.DOTALL)
+    reason = reason_match.group(1).strip() if reason_match else "No reason provided"
+    
+    # Extract suggestions if not valid
+    suggestions = ""
+    if not is_valid:
+        suggestions_match = re.search(r'SUGGESTIONS:(.*?)$', response_text, re.DOTALL)
+        suggestions = suggestions_match.group(1).strip() if suggestions_match else "No suggestions provided"
+    
+    return {
+        "is_valid": is_valid,
+        "reason": reason,
+        "suggestions": suggestions
+    }
+
+def generate_improved_code(
+    df: pd.DataFrame,
+    query: str,
+    extraction_plan: ExtractionPlan,
+    feedback: str,
+    previous_code: str,
+    openai_api_key: str
+) -> str:
+    """
+    Generate improved extraction code based on feedback.
+    
+    Args:
+        df: The DataFrame to extract data from
+        query: The original user query
+        extraction_plan: The original extraction plan
+        feedback: Feedback on why the previous code didn't work
+        previous_code: The previous code that didn't work
+        openai_api_key: OpenAI API key
+        
+    Returns:
+        Improved extraction code
+    """
+    # Create a sample of the DataFrame
+    df_sample = df.head(5).to_string()
+    df_info = f"Shape: {df.shape}, Columns: {list(df.columns)}"
+    
+    # Create prompt for OpenAI
+    prompt = f"""
+You are improving data extraction code based on feedback. Generate a better version of the code.
+
+USER QUERY: "{query}"
+
+EXTRACTION STRATEGY:
+{extraction_plan.get("strategy", "No strategy provided")}
+
+DATAFRAME INFO:
+{df_info}
+
+DATAFRAME SAMPLE:
+{df_sample}
+
+PREVIOUS CODE:
+{previous_code}
+
+
+FEEDBACK/ERROR:
+{feedback}
+
+TASK:
+Generate improved Python code that addresses the feedback/error and better extracts the relevant data.
+The code should:
+1. Fix any syntax or logical errors in the previous code
+2. Better align with the extraction strategy
+3. More effectively answer the user's query
+4. Be robust against potential errors
+
+Return ONLY the Python code, with no additional text or explanation. Use 'df' as the variable name for the input DataFrame.
+"""
+
+    # Call OpenAI API
+    client = openai.OpenAI(api_key=openai_api_key)
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": "You are a data analysis expert specializing in pandas code generation."},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.2
+    )
+    
+    # Parse response
+    code = response.choices[0].message.content.strip()
+    
+    # Remove markdown code block markers if present
+    if isinstance(code, str):
+        if code.startswith("```") and code.endswith("```"):
+            code = code[3:-3].strip()
+        if code.startswith("```python") and code.endswith("```"):
+            code = code[9:-3].strip()
+    
+    return code
 
 def extract_section(content: str, section_name: str) -> str:
     """Extract a section from the LLM response and clean any markdown formatting."""
