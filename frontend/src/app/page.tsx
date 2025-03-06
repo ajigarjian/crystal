@@ -328,7 +328,7 @@ export default function Home() {
                   <button
                     key={i}
                     onClick={() => setInputValue(sampleQuery)}
-                    className="text-sm bg-white/10 hover:bg-white/20 text-white/80 hover:text-white px-3 py-1 rounded-full transition-colors"
+                    className="text-sm bg-white/10 hover:bg-white/20 text-white px-3 py-1 rounded-full transition-colors"
                   >
                     {sampleQuery}
                   </button>
