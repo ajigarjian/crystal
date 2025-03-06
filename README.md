@@ -154,6 +154,30 @@ This will:
 - Save downloaded files to the "data_files" directory
 - Show a preview of the data
 
+### Running the Application
+
+To run the application, you need to start both the frontend and backend servers. Open two terminal windows or tabs and execute the following commands:
+
+1. **Backend (Django server):**
+
+   In the first terminal, navigate to the project root and run:
+
+   ```bash
+   python manage.py runserver
+   ```
+
+   This will start the Django development server.
+
+2. **Frontend (Next.js server):**
+
+   In the second terminal, navigate to the `frontend` directory and run:
+
+   ```bash
+   npm run dev
+   ```
+
+   This will start the Next.js development server. You can then access the frontend at [http://localhost:3000](http://localhost:3000).
+
 ## Project Structure
 
 - `crystalproject/` - Main Django project settings
