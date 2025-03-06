@@ -29,6 +29,22 @@ export default function Home() {
     transform: string;
   }>>([]);
   
+  // Add these state variables to your Home component
+  const [chatMode, setChatMode] = useState(false);
+  const [messages, setMessages] = useState<Array<{
+    role: 'user' | 'assistant';
+    content: string;
+    loading?: boolean;
+    response?: any; // To store the full API response
+  }>>([]);
+  
+  const contentRef = useRef(null);
+  const [thumbHeight, setThumbHeight] = useState(0);
+  const [thumbTop, setThumbTop] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const [startY, setStartY] = useState(0);
+  const [startScrollTop, setStartScrollTop] = useState(0);
+  
   // Initialize trail positions
   useEffect(() => {
     // Initialize with 5 points at the center
@@ -166,13 +182,27 @@ export default function Home() {
   };
   
   useEffect(() => {
+    if (chatMode) {
+      // If in chat mode, cancel any existing animation frame
+      if (requestRef.current) {
+        cancelAnimationFrame(requestRef.current);
+        requestRef.current = undefined;
+      }
+      return;
+    }
+    
+    // Only run animation when not in chat mode
     requestRef.current = requestAnimationFrame(animate);
-    return () => cancelAnimationFrame(requestRef.current as number);
-  }, [mousePosition]);
+    return () => {
+      if (requestRef.current) {
+        cancelAnimationFrame(requestRef.current as number);
+      }
+    };
+  }, [mousePosition, chatMode]);
   
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
-      if (!containerRef.current) return;
+      if (!containerRef.current || chatMode) return; // Skip if in chat mode
       
       const rect = containerRef.current.getBoundingClientRect();
       const x = e.clientX - rect.left;
@@ -191,7 +221,7 @@ export default function Home() {
         container.removeEventListener('mousemove', handleMouseMove);
       }
     };
-  }, []);
+  }, [chatMode]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInputValue(e.target.value);
@@ -200,31 +230,55 @@ export default function Home() {
   const handleSubmit = async () => {
     if (!inputValue.trim()) return;
     
-    console.log("Submitting query:", inputValue);
+    // Add user message to the chat
+    const userMessage = inputValue;
+    setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
+    
+    // Add a loading message from the assistant
+    setMessages(prev => [...prev, { role: 'assistant', content: '', loading: true }]);
+    
+    // Switch to chat mode if not already
+    if (!chatMode) {
+      setChatMode(true);
+    }
+    
     setIsLoading(true);
+    setInputValue("");
     
     try {
-      const response = await processQuery(inputValue);
-      console.log("API Response:", response);
+      const response = await processQuery(userMessage);
       
-      // You can access specific parts of the response:
-      if (response.summary) {
-        console.log("Summary:", response.summary);
-      }
-      
-      if (response.datasets) {
-        console.log("Datasets:", response.datasets.length);
-        response.datasets.forEach((dataset, index) => {
-          console.log(`Dataset ${index + 1}: ${dataset.title}`);
-          console.log(`Relevance: ${dataset.relevance_score}`);
-        });
-      }
+      // Update the loading message with the actual response
+      setMessages(prev => {
+        const newMessages = [...prev];
+        const loadingIndex = newMessages.findIndex(m => m.loading);
+        if (loadingIndex !== -1) {
+          newMessages[loadingIndex] = {
+            role: 'assistant',
+            content: response.summary || "No summary available",
+            response: response
+          };
+        }
+        return newMessages;
+      });
       
     } catch (error) {
       console.error("Error processing query:", error);
+      
+      // Update the loading message with an error
+      setMessages(prev => {
+        const newMessages = [...prev];
+        const loadingIndex = newMessages.findIndex(m => m.loading);
+        if (loadingIndex !== -1) {
+          newMessages[loadingIndex] = {
+            role: 'assistant',
+            content: "Sorry, I encountered an error processing your query. Please try again."
+          };
+        }
+        return newMessages;
+      });
     } finally {
       setIsLoading(false);
-      setInputValue("");
     }
   };
 
@@ -235,11 +289,71 @@ export default function Home() {
     }
   };
 
+  useEffect(() => {
+    const content = contentRef.current;
+    if (!content) return;
+    
+    const updateThumb = () => {
+      const { scrollHeight, clientHeight, scrollTop } = content;
+      const scrollRatio = clientHeight / scrollHeight;
+      const newThumbHeight = Math.max(scrollRatio * clientHeight, 30); // Minimum thumb height
+      const newThumbTop = (scrollTop / scrollHeight) * clientHeight;
+      
+      setThumbHeight(newThumbHeight);
+      setThumbTop(newThumbTop);
+    };
+    
+    content.addEventListener('scroll', updateThumb);
+    window.addEventListener('resize', updateThumb);
+    updateThumb();
+    
+    return () => {
+      content.removeEventListener('scroll', updateThumb);
+      window.addEventListener('resize', updateThumb);
+    };
+  }, []);
+
+  const handleThumbMouseDown = (e) => {
+    setIsDragging(true);
+    setStartY(e.clientY);
+    setStartScrollTop(contentRef.current.scrollTop);
+  };
+
+  useEffect(() => {
+    const handleMouseMove = (e) => {
+      if (!isDragging) return;
+      
+      const content = contentRef.current;
+      const { scrollHeight, clientHeight } = content;
+      const deltaY = e.clientY - startY;
+      const deltaRatio = deltaY / clientHeight;
+      const newScrollTop = startScrollTop + deltaRatio * scrollHeight;
+      
+      content.scrollTop = newScrollTop;
+    };
+    
+    const handleMouseUp = () => {
+      setIsDragging(false);
+    };
+    
+    if (isDragging) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+    }
+    
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDragging, startY, startScrollTop]);
+
   return (
     <div className="flex items-center justify-center min-h-screen bg-neutral-50 dark:bg-neutral-50 p-4">
       <div
         ref={containerRef}
-        className="w-full h-[calc(100vh-2rem)] rounded-lg bg-cover bg-center flex flex-col items-center justify-center relative overflow-hidden"
+        className={`w-full h-[calc(100vh-2rem)] rounded-lg bg-cover bg-center flex flex-col ${
+          chatMode ? 'justify-start' : 'justify-center'
+        } relative overflow-hidden`}
         style={{
           backgroundImage: "url('/images/crystal-bg0.png')",
           '--mouse-x': '50%',
@@ -268,7 +382,7 @@ export default function Home() {
         </div>
 
         {/* Data Text Background Layer */}
-        <div className="absolute inset-0 z-0 data-text-background">
+        <div className={`absolute inset-0 z-0 data-text-background ${chatMode ? 'opacity-0' : ''} transition-opacity duration-300`}>
           {DATA_TEXTS.map((text, i) => (
             <div 
               key={i} 
@@ -293,72 +407,129 @@ export default function Home() {
         
         {/* Background Image Layer with trail effect */}
         <div 
-          className="absolute inset-0 z-10 bg-cover bg-center trail-mask" 
+          className={`absolute inset-0 z-10 bg-cover bg-center ${
+            chatMode ? 'after:absolute after:inset-0 after:bg-black/70 after:backdrop-blur-sm' : 'trail-mask'
+          }`} 
           style={{ backgroundImage: "url('/images/crystal-bg0.png')" }}
         ></div>
         
-        {/* Content */}
-        <div className="flex items-center z-20 relative">
-          <img 
-            src="/images/gem.svg" 
-            alt="Crystal Gem Logo" 
-            className="h-12 w-12 mr-3" 
-            style={{ filter: "brightness(0) invert(1)" }}
-          />
-          <h1 className="text-6xl font-bold text-white" style={{ fontFamily: 'var(--font-geist-sans)' }}>
-            Crystal
-          </h1>
-        </div>
-        <div className="relative mt-2 z-20">
-          <div
-            className="absolute inset-0 bg-black opacity-25"
-            style={{ filter: "blur(15px)" }}
-          ></div>
-          <h2 className="relative text-xl sm:text-2xl text-white" style={{ fontFamily: 'var(--font-geist-sans)' }}>
-            Connect your queries to government data.
-          </h2>
-        </div>
+        {/* Content - Show differently based on chat mode */}
+        {!chatMode ? (
+          // Landing page content
+          <>
+            <div className="flex items-center justify-center z-20 relative w-full">
+              <img 
+                src="/images/gem.svg" 
+                alt="Crystal Gem Logo" 
+                className="h-12 w-12 mr-3" 
+                style={{ filter: "brightness(0) invert(1)" }}
+              />
+              <h1 className="text-6xl font-bold text-white" style={{ fontFamily: 'var(--font-geist-sans)' }}>
+                Crystal
+              </h1>
+            </div>
+            <div className="relative mt-2 z-20 text-center w-full">
+              <h2 className="relative text-xl sm:text-2xl text-white" style={{ fontFamily: 'var(--font-geist-sans)' }}>
+                Connect your queries to government data.
+              </h2>
+            </div>
+          </>
+        ) : (
+          // Chat mode header - smaller version of the logo
+          <div className="flex items-center z-20 relative pt-6 px-6">
+            <img 
+              src="/images/gem.svg" 
+              alt="Crystal Gem Logo" 
+              className="h-8 w-8 mr-2" 
+              style={{ filter: "brightness(0) invert(1)" }}
+            />
+            <h1 className="text-2xl font-bold text-white" style={{ fontFamily: 'var(--font-geist-sans)' }}>
+              Crystal
+            </h1>
+          </div>
+        )}
         
-        {/* Chat Interface */}
-        <div className="mt-8 z-20 relative w-full max-w-3xl">
-          <Card className="bg-white/10 backdrop-blur-xl border-white/20">
-            <CardContent className="pt-3 pb-0">
-              <div className="flex flex-wrap gap-2">
-                {["Air quality in Greenwich Village", "Seattle Section 8 vacancy rates", "Orange grove emissions factors"].map((sampleQuery, i) => (
-                  <button
-                    key={i}
-                    onClick={() => setInputValue(sampleQuery)}
-                    className="text-sm bg-white/10 hover:bg-white/20 text-white px-3 py-1 rounded-full transition-colors"
-                  >
-                    {sampleQuery}
-                  </button>
-                ))}
-              </div>
-            </CardContent>
-            <CardFooter className="pt-1 pb-3">
-              <div className="flex w-full items-end gap-2">
-                <Textarea
-                  placeholder="Ask a question about government data..."
-                  className="min-h-[60px] bg-white/10 border-white/20 text-white placeholder:text-white/90 resize-none text-base"
-                  value={inputValue}
-                  onChange={handleInputChange}
-                  onKeyDown={handleKeyDown}
-                />
-                <Button 
-                  size="icon" 
-                  className="shrink-0 bg-white/20 hover:bg-white/30 text-white h-[60px] w-[60px]"
-                  onClick={handleSubmit}
-                  disabled={isLoading || !inputValue.trim()}
+        {/* Chat Interface - Position differently based on mode */}
+        <div className={`${chatMode ? 'mt-4' : 'mt-8'} z-20 relative w-full max-w-3xl mx-auto px-4 ${chatMode ? 'h-[calc(100vh-180px)] flex flex-col' : ''}`}>
+          {/* Chat Messages - Only show in chat mode */}
+          {chatMode && messages.length > 0 && (
+            <div className="flex-grow overflow-y-auto mb-4 pb-4">
+              {messages.map((message, index) => (
+                <div 
+                  key={index} 
+                  className={`mb-4 ${message.role === 'user' ? 'text-right' : 'text-left'}`}
                 >
-                  {isLoading ? (
-                    <div className="h-6 w-6 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                  ) : (
-                    <Send className="h-6 w-6" />
-                  )}
-                </Button>
-              </div>
-            </CardFooter>
-          </Card>
+                  <div 
+                    className={`inline-block max-w-[80%] rounded-lg p-3 ${
+                      message.role === 'user' 
+                        ? 'bg-white/30 text-white'
+                        : 'bg-white/20 backdrop-blur-xl text-white'
+                    }`}
+                  >
+                    {message.loading ? (
+                      <div className="flex items-center space-x-2">
+                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                        <span>Analyzing data...</span>
+                      </div>
+                    ) : (
+                      <div className="whitespace-pre-wrap">{message.content}</div>
+                    )}
+                    
+                    {/* If there's dataset info, show it */}
+                    {message.role === 'assistant' && message.response?.datasets && (
+                      <div className="mt-2 pt-2 border-t border-white/20">
+                        <p className="text-sm text-white/80">Based on {message.response.datasets.length} datasets</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          
+          {/* Input area */}
+          <div className={`${chatMode ? 'fixed bottom-6 left-0 right-0 px-4 z-50 max-w-3xl mx-auto w-full' : ''}`}>
+            <Card className="bg-white/10 backdrop-blur-xl border-white/20">
+              {!chatMode && (
+                <CardContent className="pt-3 pb-0">
+                  <div className="flex flex-wrap gap-2">
+                    {["Air quality in Greenwich Village", "Seattle Section 8 vacancy rates", "Orange grove emissions factors"].map((sampleQuery, i) => (
+                      <button
+                        key={i}
+                        onClick={() => setInputValue(sampleQuery)}
+                        className="text-sm bg-white/10 hover:bg-white/20 text-white px-3 py-1 rounded-full transition-colors"
+                      >
+                        {sampleQuery}
+                      </button>
+                    ))}
+                  </div>
+                </CardContent>
+              )}
+              <CardFooter className="pt-1 pb-3">
+                <div className="flex w-full items-end gap-2">
+                  <Textarea
+                    placeholder="Ask a question about government data..."
+                    className="min-h-[60px] bg-white/10 border-white/20 text-white placeholder:text-white/90 resize-none text-base"
+                    value={inputValue}
+                    onChange={handleInputChange}
+                    onKeyDown={handleKeyDown}
+                  />
+                  <Button 
+                    size="icon" 
+                    className="shrink-0 bg-white/20 hover:bg-white/30 text-white h-[60px] w-[60px]"
+                    onClick={handleSubmit}
+                    disabled={isLoading || !inputValue.trim()}
+                  >
+                    {isLoading ? (
+                      <div className="h-6 w-6 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                    ) : (
+                      <Send className="h-6 w-6" />
+                    )}
+                  </Button>
+                </div>
+              </CardFooter>
+            </Card>
+          </div>
         </div>
       </div>
     </div>
