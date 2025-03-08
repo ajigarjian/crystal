@@ -154,6 +154,50 @@ This will:
 - Save downloaded files to the "data_files" directory
 - Show a preview of the data
 
+**Sequential Processing**
+
+Process datasets one by one instead of in parallel (useful for debugging):
+
+```bash
+python manage.py factchecker "unemployment rates" --sequential
+```
+
+This flag disables parallel processing, which makes the logs easier to follow during development since they won't be interleaved. This is particularly helpful when debugging issues with the data extraction process.
+
+**JSON Output Format**
+
+Generate comprehensive JSON output with complete extracted data:
+
+```bash
+python manage.py factchecker "unemployment rates" --json-output
+```
+
+This generates a detailed JSON file containing:
+- Full query information
+- List of relevant datasets with metadata
+- Complete extracted data for each dataset
+- Statistical summaries for numerical data
+- A concise summary of findings with confidence score
+
+The JSON output is both displayed as a summary in the console and saved to a timestamped file (e.g., `results_1741412854.json`).
+
+**Combining Options**
+
+You can combine these new flags with existing options:
+
+```bash
+python manage.py factchecker "unemployment rates" --top 10 --output data_files --preview --relevance-threshold 0.7 --sequential --json-output
+```
+
+This will:
+- Search for datasets related to unemployment rates
+- Get up to 10 most relevant datasets
+- Save downloaded files to the "data_files" directory
+- Show a preview of the data
+- Use a relevance threshold of 0.7
+- Process datasets sequentially
+- Generate comprehensive JSON output
+
 ### Running the Application
 
 To run the application, you need to start both the frontend and backend servers. Open two terminal windows or tabs and execute the following commands:
