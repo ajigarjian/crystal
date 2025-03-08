@@ -1329,28 +1329,36 @@ def summarize_findings(
     
     # Prepare information about each dataset and its extracted data
     dataset_summaries = []
+    dataset_ids = []  # Track dataset IDs for the summary
+    
     for data in extracted_data_list:
         dataset_title = data.get("dataset_title", "Unnamed Dataset")
-        dataset_source = data.get("dataset_source", "Unknown Source")
+        dataset_id = data.get("dataset_id", "Unknown ID")
         
-        # Get the extracted data
+        # Get the extracted data - this is what's missing from the final output
         extracted = data.get("extracted_data")
+        extraction_explanation = data.get("explanation", "")
         
-        # Create a concise summary of the extracted data
+        # Create a formatted sample of actual data values
+        data_sample = ""
         if isinstance(extracted, pd.DataFrame):
-            # For DataFrames, include all rows without any limit
-            sample = extracted.to_string()
-            data_summary = f"Data:\n{sample}"
-        elif isinstance(extracted, dict):
-            # For dictionaries, include all key-value pairs
-            data_summary = "\n".join([f"{k}: {v}" for k, v in extracted.items()])
-        elif isinstance(extracted, list):
-            # For lists, include all items
-            data_summary = "\n".join([str(item) for item in extracted])
-        else:
-            data_summary = str(extracted)
+            # For DataFrames, take a sample of rows to include in the summary
+            if len(extracted) > 0:
+                data_sample = "KEY DATA POINTS:\n"
+                # Take up to 5 representative rows
+                sample_df = extracted.head(5)
+                for idx, row in sample_df.iterrows():
+                    data_sample += f"- {', '.join([f'{col}: {val}' for col, val in row.items() if pd.notna(val)])}\n"
+                
+                # Add summary statistics if numeric columns exist
+                numeric_cols = sample_df.select_dtypes(include=[np.number]).columns
+                if len(numeric_cols) > 0:
+                    data_sample += "\nSTATISTICAL SUMMARY:\n"
+                    for col in numeric_cols:
+                        if "unemploy" in col.lower():
+                            data_sample += f"- {col}: min={extracted[col].min()}, max={extracted[col].max()}, avg={extracted[col].mean():.2f}\n"
         
-        dataset_summaries.append(f"Source: {dataset_title} ({dataset_source})\n{data_summary}")
+        dataset_summaries.append(f"Source: {dataset_title} (ID: {dataset_id})\n{extraction_explanation}\n{data_sample}")
     
     # Include dataset analyses if provided
     dataset_context = ""
@@ -1358,6 +1366,7 @@ def summarize_findings(
         dataset_context = "DATASET CONTEXT:\n"
         for analysis in dataset_analyses:
             dataset_context += f"Dataset: {analysis.get('dataset_title', 'Unknown')}\n"
+            dataset_context += f"Dataset ID: {analysis.get('dataset_id', 'Unknown ID')}\n"
             dataset_context += f"Analysis: {analysis.get('analysis', 'No analysis available')}\n\n"
     
     # Create prompt for OpenAI
@@ -1370,18 +1379,18 @@ DATA POINTS:
 {chr(10).join(dataset_summaries)}
 
 INSTRUCTIONS:
-1. Present the key data points that directly answer the query
+1. Present the KEY DATA POINTS that directly answer the query - include SPECIFIC NUMBERS and VALUES
 2. Be concise but thorough - include all relevant data in your analysis
 3. Format as bullet points where appropriate
 4. Always cite the source dataset for each data point
-5. If analyzing trends over time, be sure to include the full time range in your analysis
+5. If analyzing trends over time, be sure to include the full time range and specific values in your analysis
 6. Pay special attention to the most recent data points when analyzing trends
 
 Finally, provide a "SEARCH SUMMARY" section with 2 paragraphs that:
 1. Summarizes the overall context of the datasets analyzed (their scope, limitations, quality)
 2. Synthesizes the findings in relation to the query, including any external factors that might be relevant
 
-Your response should -focus on answering the query using all available data.
+Your response should focus on answering the query using SPECIFIC VALUES and NUMBERS from the available data.
 """
 
     # Call OpenAI API

@@ -50,6 +50,11 @@ class Command(BaseCommand):
             default='vector',
             help='Search method to use: vector (default) or keyword'
         )
+        parser.add_argument(
+            '--sequential',
+            action='store_true',
+            help='Process datasets sequentially instead of in parallel (useful for debugging)'
+        )
     
     def handle(self, *args, **options):
         # Start timing the execution
@@ -63,6 +68,7 @@ class Command(BaseCommand):
         force_datasets = options.get('force')
         workers = options.get('workers', 3)
         search_method = options['search_method']
+        sequential = options.get('sequential', False)
         
         self.stdout.write(f"Factchecker query: '{query}'")
         
@@ -125,8 +131,8 @@ class Command(BaseCommand):
             dataset_num = dataset_index + 1
             dataset_id = dataset['id']
             dataset_title = dataset['title']
-            # Create a short identifier for this dataset
-            dataset_short_id = f"[{dataset_num}/{len(relevant_datasets)}] {dataset_title[:20]}..."
+            # Create an identifier for this dataset (no truncation)
+            dataset_short_id = f"[{dataset_num}/{len(relevant_datasets)}] {dataset_title}"
             
             similarity_score = dataset.get('similarity', 1.0)
             with self.stdout_lock:
@@ -294,26 +300,37 @@ class Command(BaseCommand):
                     "error": str(e)
                 }, None, None
         
-        # Use ThreadPoolExecutor to process datasets in parallel
-        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
-            # Submit all tasks and store the futures
-            future_to_index = {
-                executor.submit(process_dataset, i, dataset): i 
-                for i, dataset in enumerate(relevant_datasets)
-            }
-            
-            # Process results as they complete
-            for future in concurrent.futures.as_completed(future_to_index):
-                dataset_info, dataset_analysis, extracted_data = future.result()
-                
-                # Add results to our lists
+        if sequential:
+            self.stdout.write(self.style.NOTICE("Processing datasets sequentially (parallel processing disabled)"))
+            results = []
+            for i, dataset in enumerate(relevant_datasets):
+                dataset_info, dataset_analysis, extracted_data = process_dataset(i, dataset)
                 results.append(dataset_info)
-                
                 if dataset_analysis:
                     dataset_analyses.append(dataset_analysis)
-                
                 if extracted_data:
                     extracted_data_list.append(extracted_data)
+        else:
+            # Use ThreadPoolExecutor to process datasets in parallel
+            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+                # Submit all tasks and store the futures
+                future_to_index = {
+                    executor.submit(process_dataset, i, dataset): i 
+                    for i, dataset in enumerate(relevant_datasets)
+                }
+                
+                # Process results as they complete
+                for future in concurrent.futures.as_completed(future_to_index):
+                    dataset_info, dataset_analysis, extracted_data = future.result()
+                    
+                    # Add results to our lists
+                    results.append(dataset_info)
+                    
+                    if dataset_analysis:
+                        dataset_analyses.append(dataset_analysis)
+                    
+                    if extracted_data:
+                        extracted_data_list.append(extracted_data)
         
         # Sort results to maintain the original order
         results.sort(key=lambda x: next((i for i, d in enumerate(relevant_datasets) if d['id'] == x['id']), 999))

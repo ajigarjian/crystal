@@ -118,8 +118,8 @@ def process_query(request):
             dataset_num = dataset_index + 1
             dataset_id = dataset['id']
             dataset_title = dataset['title']
-            # Create a short identifier for this dataset
-            dataset_short_id = f"[{dataset_num}/{len(datasets)}] {dataset_title[:20]}..."
+            # Create an identifier for this dataset (no truncation)
+            dataset_short_id = f"[{dataset_num}/{len(datasets)}] {dataset_title}"
             
             similarity_score = dataset.get('similarity', 1.0)
             with stdout_lock:
