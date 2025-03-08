@@ -450,10 +450,10 @@ export default function Home() {
         )}
         
         {/* Chat Interface - Position differently based on mode */}
-        <div className={`${chatMode ? 'mt-4' : 'mt-8'} z-20 relative w-full max-w-3xl mx-auto px-4 ${chatMode ? 'h-[calc(100vh-180px)] flex flex-col' : ''}`}>
+        <div className={`${chatMode ? 'mt-4' : 'mt-8'} z-20 relative w-full max-w-3xl mx-auto px-4 ${chatMode ? 'flex flex-col' : ''}`}>
           {/* Chat Messages - Only show in chat mode */}
           {chatMode && messages.length > 0 && (
-            <div className="flex-grow overflow-y-auto mb-4 pb-4">
+            <div className="flex-grow overflow-y-auto mb-4 pb-4" style={{ height: 'calc(100vh - 180px)' }}>
               {messages.map((message, index) => (
                 <div 
                   key={index} 
@@ -487,48 +487,44 @@ export default function Home() {
             </div>
           )}
           
-          {/* Input area */}
+          {/* Input area - simplified without Card wrapper */}
           <div className={`${chatMode ? 'fixed bottom-6 left-0 right-0 px-4 z-50 max-w-3xl mx-auto w-full' : ''}`}>
-            <Card className="bg-white/10 backdrop-blur-xl border-white/20">
-              {!chatMode && (
-                <CardContent className="pt-3 pb-0">
-                  <div className="flex flex-wrap gap-2">
-                    {["Air quality in Greenwich Village", "Seattle Section 8 vacancy rates", "Orange grove emissions factors"].map((sampleQuery, i) => (
-                      <button
-                        key={i}
-                        onClick={() => setInputValue(sampleQuery)}
-                        className="text-sm bg-white/10 hover:bg-white/20 text-white px-3 py-1 rounded-full transition-colors"
-                      >
-                        {sampleQuery}
-                      </button>
-                    ))}
-                  </div>
-                </CardContent>
-              )}
-              <CardFooter className="pt-1 pb-3">
-                <div className="flex w-full items-end gap-2">
-                  <Textarea
-                    placeholder="Ask a question about government data..."
-                    className="min-h-[60px] bg-white/10 border-white/20 text-white placeholder:text-white/90 resize-none text-base"
-                    value={inputValue}
-                    onChange={handleInputChange}
-                    onKeyDown={handleKeyDown}
-                  />
-                  <Button 
-                    size="icon" 
-                    className="shrink-0 bg-white/20 hover:bg-white/30 text-white h-[60px] w-[60px]"
-                    onClick={handleSubmit}
-                    disabled={isLoading || !inputValue.trim()}
-                  >
-                    {isLoading ? (
-                      <div className="h-6 w-6 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                    ) : (
-                      <Send className="h-6 w-6" />
-                    )}
-                  </Button>
+            {!chatMode && (
+              <div className="mb-4">
+                <div className="flex flex-wrap gap-2">
+                  {["Air quality in Greenwich Village", "Seattle Section 8 vacancy rates", "Orange grove emissions factors"].map((sampleQuery, i) => (
+                    <button
+                      key={i}
+                      onClick={() => setInputValue(sampleQuery)}
+                      className="text-sm bg-white/10 hover:bg-white/20 text-white px-3 py-1 rounded-full transition-colors"
+                    >
+                      {sampleQuery}
+                    </button>
+                  ))}
                 </div>
-              </CardFooter>
-            </Card>
+              </div>
+            )}
+            <div className="flex w-full items-end gap-2">
+              <Textarea
+                placeholder="Ask a question about government data..."
+                className="min-h-[60px] bg-white/10 border-white/20 text-white placeholder:text-white/90 resize-none text-base rounded-lg"
+                value={inputValue}
+                onChange={handleInputChange}
+                onKeyDown={handleKeyDown}
+              />
+              <Button 
+                size="icon" 
+                className="shrink-0 bg-white/20 hover:bg-white/30 text-white h-[60px] w-[60px]"
+                onClick={handleSubmit}
+                disabled={isLoading || !inputValue.trim()}
+              >
+                {isLoading ? (
+                  <div className="h-6 w-6 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                ) : (
+                  <Send className="h-6 w-6" />
+                )}
+              </Button>
+            </div>
           </div>
         </div>
       </div>
