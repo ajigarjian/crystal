@@ -12,6 +12,7 @@ import os
 import time
 import uuid
 import datetime
+from factchecker.models import DatasetCatalog  # Import here to avoid circular imports
 
 # Define TypedDict classes for better typing
 class ExtractionPlan(TypedDict):
@@ -23,6 +24,7 @@ class ExtractionPlan(TypedDict):
 class ExtractedData(TypedDict):
     dataset_id: str
     dataset_title: str
+    file_path: str
     results_dict: Dict[str, Any]
     printed_output: str
     extraction_strategy: str
@@ -67,6 +69,7 @@ def extract_relevant_data(
     result: ExtractedData = {
         "dataset_id": dataset_metadata.get("id", ""),
         "dataset_title": dataset_metadata.get("title", ""),
+        "file_path": dataset_metadata.get("file_path", ""),
         "results_dict": {},
         "printed_output": "",
         "extraction_strategy": "No strategy provided",
@@ -911,6 +914,7 @@ def execute_extraction_plan(
     result: ExtractedData = {
         "dataset_id": "",
         "dataset_title": "",
+        "file_path": "",
         "results_dict": {},
         "printed_output": "",
         "extraction_strategy": extraction_plan.get("strategy", "No strategy provided"),
@@ -1420,7 +1424,7 @@ def summarize_findings_alternate(
     dataset_analyses: List[Dict[str, Any]] = None
 ) -> str:
     """
-    Alternative version that generates a comprehensive JSON output with full extracted data.
+    Alternative version that generates JSON output with full extracted data.
     
     Args:
         query: The original user query
@@ -1454,28 +1458,75 @@ def summarize_findings_alternate(
     # Add relevant_datasets info
     start_time = time.time()
     
+    # Add debug logging
+    debug_file_paths = True  # Always log for now
+    
+    # Create dictionaries to store dataset metadata fetched from the database
+    dataset_descriptions = {}
+    dataset_org_names = {}
+    
+    # Fetch all needed dataset metadata in one query for efficiency
+    dataset_ids = [data.get("dataset_id", "") for data in extracted_data_list]
+    try:
+        db_datasets = DatasetCatalog.objects.filter(dataset_id__in=dataset_ids)
+        
+        # Create lookup dictionaries for quick access
+        for db_dataset in db_datasets:
+            dataset_descriptions[db_dataset.dataset_id] = db_dataset.description
+            dataset_org_names[db_dataset.dataset_id] = db_dataset.organization_name
+        
+        # Debug log the information found
+        if debug_file_paths:  # Reuse existing debug flag
+            print(f"\n[DEBUG] Found {len(db_datasets)} datasets in database")
+            for dataset_id in dataset_ids:
+                if dataset_id in dataset_descriptions:
+                    org_name = dataset_org_names.get(dataset_id, "Unknown")
+                    print(f"  Dataset {dataset_id}: Org={org_name}")
+                else:
+                    print(f"  Dataset {dataset_id}: Not found in database")
+    except Exception as e:
+        print(f"[ERROR] Failed to fetch dataset metadata: {e}")
+        # Continue with empty dictionaries
+    
+    # Process each dataset with the metadata
     for data in extracted_data_list:
         dataset_id = data.get("dataset_id", "unknown-id")
         dataset_title = data.get("dataset_title", "Unnamed Dataset")
         
+        # Get description from our cached lookup
+        description = dataset_descriptions.get(dataset_id, "")
+        
+        # Get organization name
+        organization_name = dataset_org_names.get(dataset_id, "")
+        
+        # If not found in database, try the existing fields or fall back to defaults
+        if not description:
+            description = data.get("description", "")
+            if not description and "dataset_metadata" in data:
+                description = data.get("dataset_metadata", {}).get("description", "")
+        
         # Try multiple paths to get the file_path
-        file_path = None
-        possible_path_keys = ["file_path", "local_path", "file", "path", "dataset_path"]
-        for key in possible_path_keys:
-            if key in data and data[key]:
-                file_path = data[key]
-                break
-                
-        # Also check if there might be a nested structure
-        if not file_path and "dataset_info" in data:
-            for key in possible_path_keys:
-                if key in data["dataset_info"] and data["dataset_info"][key]:
-                    file_path = data["dataset_info"][key]
-                    break
-                    
-        # LOG what we found to debug
-        print(f"Dataset {dataset_id}: file_path = {file_path}")
-        print(f"Available keys: {data.keys()}")
+        file_path = data.get("file_path", "")
+        
+        # If file_path is missing but we have dataset_id, try to reconstruct
+        if not file_path and data.get("dataset_id"):
+            # Use default data directory - can be updated to match your command
+            output_dir = "data_files"  # This should match the --output parameter
+            possible_files = []
+            
+            # Try to find files in output directory that might match
+            if os.path.exists(output_dir):
+                for filename in os.listdir(output_dir):
+                    # Look for files that contain dataset id or have a name similar to the title
+                    if (data.get("dataset_id") in filename or 
+                        any(word in filename.lower() for word in data.get("dataset_title", "").lower().split())):
+                        possible_files.append(os.path.join(output_dir, filename))
+            
+            if possible_files:
+                # Use the first matching file
+                file_path = possible_files[0]
+                if debug_file_paths:
+                    print(f"    Reconstructed file_path: {file_path}")
         
         # Determine filename and format
         filename = "unknown"
@@ -1487,12 +1538,13 @@ def summarize_findings_alternate(
             if ext:
                 file_format = ext.lstrip(".").lower()
         
-        # Add to relevant_datasets section
+        # Add to relevant_datasets section with flat organization_name field
         dataset_info = {
             "dataset_id": dataset_id,
             "title": dataset_title,
-            "description": data.get("description", "No description available"),
-            "score": data.get("relevance_score", data.get("similarity", 1.0)),  # Try both keys
+            "description": description or "No description available",
+            "organization_name": organization_name or "Unknown",
+            "score": data.get("relevance_score", data.get("similarity", 1.0)),
             "files": [{
                 "file_id": f"{dataset_id}-file-1",
                 "filename": filename,

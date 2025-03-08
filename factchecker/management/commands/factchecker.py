@@ -81,6 +81,7 @@ class Command(BaseCommand):
         search_method = options.get('search_method', None)
         sequential = options.get('sequential', False)
         json_output = options.get('json_output', False)
+        debug_file_paths = options.get('debug', False)
         
         self.stdout.write(f"Factchecker query: '{query}'")
         
@@ -300,6 +301,13 @@ class Command(BaseCommand):
                     # Extract relevant data
                     with self.stdout_lock:
                         self.stdout.write(f"{dataset_short_id} Extracting relevant data...")
+                    if debug_file_paths:
+                        self.stdout.write(f"\n[DEBUG] Before extract_relevant_data:")
+                        self.stdout.write(f"  dataset_info keys: {list(dataset_info.keys())}")
+                        if 'file_path' in dataset_info:
+                            self.stdout.write(f"  file_path: {dataset_info['file_path']}")
+                        else:
+                            self.stdout.write(f"  file_path missing from dataset_info!")
                     extracted_data = extract_relevant_data(dataset_content, query, dataset_info, openai_api_key)
                     
                     # Add dataset source information to the extracted data
