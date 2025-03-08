@@ -55,14 +55,14 @@ def preprocess_query(query: str, openai_api_key: str) -> str:
         # Fall back to the original query if there's an error
         return query
 
-def search_datasets(api_key: str, query: str, rows: int = 10) -> List[Dict]:
+def search_datasets(query: str, api_key: str, top_n: int = 10) -> List[Dict]:
     """
     Search for datasets using a query string.
     
     Args:
         api_key: Data.gov API key
         query: Search terms
-        rows: Number of results to return (default: 10)
+        top_n: Number of results to return
     
     Returns:
         List of dataset metadata
@@ -70,7 +70,7 @@ def search_datasets(api_key: str, query: str, rows: int = 10) -> List[Dict]:
     base_url = "https://catalog.data.gov/api/3"
     params = {
         "q": query,
-        "rows": rows
+        "rows": top_n
     }
     headers = {
         "Authorization": api_key
@@ -101,9 +101,14 @@ def search_datasets(api_key: str, query: str, rows: int = 10) -> List[Dict]:
                     for r in dataset.get("resources", [])
                     # Include Excel formats along with CSV and JSON
                     if r.get("format", "").lower() in ["csv", "json", "xlsx", "xls"]
-                ]
+                ],
+                "similarity": 1.0,  # Default similarity for keyword matches
+                "search_source": "keyword"  # Add this line
             })
-        return simplified_results
+            
+        # Only return top_n results
+        return simplified_results[:top_n]
+        
     except requests.exceptions.RequestException as e:
         print(f"Error searching datasets: {e}")
         return []

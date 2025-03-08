@@ -51,7 +51,9 @@ def vector_search_datasets(query: str, openai_api_key: str, top_n: int = 5) -> L
                     "description": dataset.description[:200] if dataset.description else "",
                     "similarity": float(similarity),
                     # Add empty resources list to maintain compatibility with the original function
-                    "resources": []
+                    "resources": [],
+                    # Add search source attribute
+                    "search_source": "vector"
                 })
         
         # Sort by similarity (highest first) and return top_n

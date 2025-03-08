@@ -2,7 +2,8 @@ from factchecker.analysis.dataset_loader import load_dataset, assess_dataset_rel
 from factchecker.analysis.dataset_analyzer import (
     extract_relevant_data,
     analyze_dataset_overview,
-    summarize_findings
+    summarize_findings,
+    summarize_findings_alternate
 )
 
 __all__ = [
@@ -10,5 +11,6 @@ __all__ = [
     'assess_dataset_relevance',
     'extract_relevant_data',
     'analyze_dataset_overview',
-    'summarize_findings'
+    'summarize_findings',
+    'summarize_findings_alternate'
 ]

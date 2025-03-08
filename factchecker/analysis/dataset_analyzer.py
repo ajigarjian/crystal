@@ -7,6 +7,11 @@ from contextlib import redirect_stdout
 import io
 import traceback
 import re
+import json
+import os
+import time
+import uuid
+import datetime
 
 # Define TypedDict classes for better typing
 class ExtractionPlan(TypedDict):
@@ -1407,3 +1412,261 @@ Your response should focus on answering the query using SPECIFIC VALUES and NUMB
     
     # Return the summary
     return response.choices[0].message.content
+
+def summarize_findings_alternate(
+    query: str,
+    extracted_data_list: List[Dict[str, Any]],
+    openai_api_key: str,
+    dataset_analyses: List[Dict[str, Any]] = None
+) -> str:
+    """
+    Alternative version that generates a comprehensive JSON output with full extracted data.
+    
+    Args:
+        query: The original user query
+        extracted_data_list: List of dictionaries containing extracted data
+        openai_api_key: OpenAI API key
+        dataset_analyses: List of dataset analysis results
+        
+    Returns:
+        JSON-formatted string containing comprehensive findings and extracted data
+    """
+    if not extracted_data_list:
+        return json.dumps({"error": "No relevant data was found to answer your query."})
+    
+    # Initialize the result structure
+    result = {
+        "query": query,
+        "status": "completed",
+        "request_id": str(uuid.uuid4())[:8],
+        "timestamp": datetime.datetime.now().isoformat(),
+        "relevant_datasets": [],
+        "extracted_data": [],
+        "summary": {},
+        "analysis_steps": {
+            "processing_notes": ""
+        }
+    }
+    
+    # Debug information - log what fields are available
+    logging.debug(f"Keys in first extracted_data item: {extracted_data_list[0].keys() if extracted_data_list else 'None'}")
+    
+    # Add relevant_datasets info
+    start_time = time.time()
+    
+    for data in extracted_data_list:
+        dataset_id = data.get("dataset_id", "unknown-id")
+        dataset_title = data.get("dataset_title", "Unnamed Dataset")
+        
+        # Try multiple paths to get the file_path
+        file_path = None
+        possible_path_keys = ["file_path", "local_path", "file", "path", "dataset_path"]
+        for key in possible_path_keys:
+            if key in data and data[key]:
+                file_path = data[key]
+                break
+                
+        # Also check if there might be a nested structure
+        if not file_path and "dataset_info" in data:
+            for key in possible_path_keys:
+                if key in data["dataset_info"] and data["dataset_info"][key]:
+                    file_path = data["dataset_info"][key]
+                    break
+                    
+        # LOG what we found to debug
+        print(f"Dataset {dataset_id}: file_path = {file_path}")
+        print(f"Available keys: {data.keys()}")
+        
+        # Determine filename and format
+        filename = "unknown"
+        file_format = "unknown"
+        
+        if file_path:
+            filename = os.path.basename(file_path)
+            _, ext = os.path.splitext(file_path)
+            if ext:
+                file_format = ext.lstrip(".").lower()
+        
+        # Add to relevant_datasets section
+        dataset_info = {
+            "dataset_id": dataset_id,
+            "title": dataset_title,
+            "description": data.get("description", "No description available"),
+            "score": data.get("relevance_score", data.get("similarity", 1.0)),  # Try both keys
+            "files": [{
+                "file_id": f"{dataset_id}-file-1",
+                "filename": filename,
+                "format": file_format,
+                "description": data.get("dataset_analysis", "Extracted data file")
+            }]
+        }
+        result["relevant_datasets"].append(dataset_info)
+        
+        # Get the actual extracted data - try multiple possible keys
+        extracted = None
+        for extracted_key in ["extracted_data", "results_dict", "data", "result"]:
+            if extracted_key in data and data[extracted_key]:
+                extracted = data[extracted_key]
+                break
+                
+        # Get printed output if available
+        printed_output = data.get("printed_output", "")
+                
+        # Add to extracted_data section
+        extraction_data = {
+            "dataset_id": dataset_id,
+            "dataset_title": dataset_title,
+            "file_extractions": []
+        }
+        
+        file_extraction = {
+            "file_id": f"{dataset_id}-file-1",
+            "filename": filename,
+        }
+        
+        # Format the extracted data based on its type
+        if isinstance(extracted, pd.DataFrame):
+            # For DataFrames, include column info and sample rows
+            file_extraction["columns"] = extracted.columns.tolist()
+            
+            # Get up to 10 sample rows
+            sample_rows = min(10, len(extracted))
+            rows_data = []
+            
+            for i in range(sample_rows):
+                row = extracted.iloc[i]
+                # Convert to a simple dict instead of a list for better readability
+                row_dict = {col: row[col] for col in extracted.columns}
+                rows_data.append(row_dict)
+            
+            file_extraction["rows"] = rows_data
+            
+            # Add statistics for numerical columns
+            stats = {}
+            numeric_cols = extracted.select_dtypes(include=[np.number]).columns
+            for col in numeric_cols:
+                stats[col] = {
+                    "min": float(extracted[col].min()) if not pd.isna(extracted[col].min()) else None,
+                    "max": float(extracted[col].max()) if not pd.isna(extracted[col].max()) else None,
+                    "mean": float(extracted[col].mean()) if not pd.isna(extracted[col].mean()) else None,
+                }
+            
+            if stats:
+                file_extraction["statistics"] = stats
+                
+        elif isinstance(extracted, dict):
+            # For dictionaries, include as key-value pairs
+            file_extraction["key_value_data"] = extracted
+        elif isinstance(extracted, (list, tuple)):
+            # For lists of data
+            file_extraction["array_data"] = extracted
+        else:
+            # For other formats or None
+            file_extraction["extraction_notes"] = f"Data format: {type(extracted).__name__}"
+            if extracted:
+                file_extraction["data_preview"] = str(extracted)[:500]
+            elif printed_output:
+                file_extraction["data_preview"] = printed_output[:500]
+            else:
+                file_extraction["data_preview"] = "No data extracted"
+        
+        # Add code used for extraction if available
+        if "code" in data:
+            file_extraction["extraction_code"] = data.get("code", "")
+            
+        # Add extraction strategy from multiple possible sources
+        explanation = ""
+        for exp_key in ["explanation", "extraction_strategy", "strategy", "extraction_explanation"]:
+            if exp_key in data and data[exp_key]:
+                explanation = data[exp_key]
+                break
+                
+        file_extraction["relevance_notes"] = explanation
+        
+        # Add any error information
+        if "error" in data and data["error"]:
+            file_extraction["error"] = data["error"]
+            
+        extraction_data["file_extractions"].append(file_extraction)
+        result["extracted_data"].append(extraction_data)
+    
+    # Create a prompt for OpenAI to generate the text summary
+    prompt = f"""
+    You are analyzing data to answer: "{query}"
+    
+    The following datasets were analyzed:
+    {chr(10).join([f"- {data.get('dataset_title', 'Unnamed Dataset')}" for data in extracted_data_list])}
+    
+    Based on the extracted data, please provide:
+    1. A concise summary paragraph of the findings (max 3 sentences)
+    2. A confidence score (0-1) representing how well the data answers the query
+    
+    Format your response as a JSON object with these fields:
+    {{
+      "text": "Your summary paragraph here",
+      "confidence": 0.XX
+    }}
+    
+    Only return the JSON object, nothing else.
+    """
+    
+    # Call OpenAI API for summary
+    client = openai.OpenAI(api_key=openai_api_key)
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": "You are a data analyst who provides concise data summaries in JSON format."},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.2,
+        max_tokens=400
+    )
+    
+    try:
+        # Parse the JSON response - handle the case where it might include ```json wrapping
+        content = response.choices[0].message.content.strip()
+        if content.startswith('```json'):
+            content = content.replace('```json', '', 1).strip()
+        if content.endswith('```'):
+            content = content[:-3].strip()
+        
+        # Parse the cleaned JSON
+        summary_json = json.loads(content)
+        result["summary"] = summary_json
+    except Exception as e:
+        # Log the error
+        logging.error(f"Error parsing summary JSON: {e}")
+        # Fallback if JSON parsing fails
+        result["summary"] = {
+            "text": response.choices[0].message.content,
+            "confidence": 0.7
+        }
+    
+    # Add analysis steps info
+    result["analysis_steps"]["extraction_time_sec"] = round(time.time() - start_time, 1)
+    
+    # Include dataset IDs in processing notes
+    dataset_ids = [data.get("dataset_id", "unknown") for data in extracted_data_list]
+    result["analysis_steps"]["processing_notes"] = f"Analysis based on {len(dataset_ids)} datasets: {', '.join(dataset_ids)}"
+    
+    # Return formatted JSON string
+    return json.dumps(result, indent=2, cls=ExtendedJSONEncoder)
+
+# Add a custom JSON encoder to handle numpy types and other non-serializable objects
+class ExtendedJSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        if isinstance(obj, pd.Timestamp):
+            return obj.isoformat()
+        if isinstance(obj, datetime.datetime):
+            return obj.isoformat()
+        if isinstance(obj, datetime.date):
+            return obj.isoformat()
+        if pd.isna(obj):
+            return None
+        return super().default(obj)

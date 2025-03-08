@@ -15,7 +15,8 @@ from factchecker.analysis import (
     assess_dataset_relevance,
     extract_relevant_data,
     analyze_dataset_overview,
-    summarize_findings
+    summarize_findings,
+    summarize_findings_alternate
 )
 
 import pandas as pd
@@ -25,9 +26,10 @@ import time
 import concurrent.futures
 from threading import Lock
 import os
+import json
 
 class Command(BaseCommand):
-    help = 'Search, download, and analyze datasets from Data.gov'
+    help = 'Search for and analyze datasets based on a user query. Uses hybrid search (combination of vector and keyword) by default.'
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -47,13 +49,22 @@ class Command(BaseCommand):
         parser.add_argument(
             '--search-method',
             choices=['vector', 'keyword'],
-            default='vector',
-            help='Search method to use: vector (default) or keyword'
+            help='Specify a single search method to use instead of the default hybrid search'
         )
         parser.add_argument(
             '--sequential',
             action='store_true',
             help='Process datasets sequentially instead of in parallel (useful for debugging)'
+        )
+        parser.add_argument(
+            '--json-output',
+            action='store_true',
+            help='Generate comprehensive JSON output with full extracted data instead of text summary'
+        )
+        parser.add_argument(
+            '--debug',
+            action='store_true',
+            help='Print debug information about data flow'
         )
     
     def handle(self, *args, **options):
@@ -67,8 +78,9 @@ class Command(BaseCommand):
         relevance_threshold = options['relevance_threshold']
         force_datasets = options.get('force')
         workers = options.get('workers', 3)
-        search_method = options['search_method']
+        search_method = options.get('search_method', None)
         sequential = options.get('sequential', False)
+        json_output = options.get('json_output', False)
         
         self.stdout.write(f"Factchecker query: '{query}'")
         
@@ -81,8 +93,7 @@ class Command(BaseCommand):
             self.stderr.write(self.style.ERROR(f"Error initializing API keys: {e}"))
             return
         
-        # Process forced datasets if specified, otherwise do search
-        relevant_datasets = []
+        # Modified dataset search logic
         if force_datasets:
             self.stdout.write(f"Skipping search and using specified datasets: {force_datasets}")
             dataset_paths = [path.strip() for path in force_datasets.split(',')]
@@ -97,22 +108,66 @@ class Command(BaseCommand):
                     "similarity": 1.0,  # Assume perfect similarity since user specified it
                     "local_path": path  # Add the local path directly
                 })
-        else:
+        elif search_method:
+            # User explicitly specified a single search method
+            self.stdout.write(f"Searching for datasets matching '{query}' using {search_method} search...")
+            
             if search_method == 'vector':
-                # Use vector search to find relevant datasets
-                self.stdout.write(f"Searching for datasets matching '{query}' using vector similarity...")
+                # Vector search (existing code)
                 relevant_datasets = vector_search_datasets(query, openai_api_key, top_n=top_n)
             else:
-                # Use keyword search to find relevant datasets
-                self.stdout.write(f"Searching for datasets matching '{query}' using keyword search...")
-                # Preprocess the query for better results
-                generalized_query = preprocess_query(query, openai_api_key)
-                # Search for datasets
-                search_results = search_datasets(gov_api_key, generalized_query, rows=top_n*2)
-                # Filter to most relevant
-                relevant_datasets = filter_relevant_datasets(query, search_results, openai_api_key, top_n=top_n)
+                # Keyword search (existing code) 
+                relevant_datasets = search_datasets(query, gov_api_key, top_n=top_n)
+        else:
+            # DEFAULT: Use hybrid search approach
+            self.stdout.write(f"Searching for datasets matching '{query}' using hybrid search (vector + keyword)...")
             
-            self.stdout.write(f"Found {len(relevant_datasets)} relevant datasets")
+            # Get top_n results from vector search
+            self.stdout.write(f"Performing vector search for top {top_n} datasets...")
+            vector_datasets = vector_search_datasets(query, openai_api_key, top_n=top_n)
+            self.stdout.write(f"Found {len(vector_datasets)} datasets via vector search")
+            
+            # Get top_n results from keyword search
+            self.stdout.write(f"Performing keyword search for top {top_n} datasets...")
+            keyword_datasets = search_datasets(query, gov_api_key, top_n=top_n)
+            self.stdout.write(f"Found {len(keyword_datasets)} datasets via keyword search")
+            
+            # Get IDs from both search methods
+            vector_ids = {dataset['id'] for dataset in vector_datasets}
+            keyword_ids = {dataset['id'] for dataset in keyword_datasets}
+
+            # Find overlap (datasets found by both methods)
+            overlap_ids = vector_ids.intersection(keyword_ids)
+            self.stdout.write(f"Found {len(overlap_ids)} datasets in both search results")
+            
+            # Merge results, removing duplicates
+            all_datasets = []
+            seen_ids = set()
+            
+            # Process vector datasets first
+            for dataset in vector_datasets:
+                dataset_id = dataset['id']
+                if dataset_id in overlap_ids:
+                    dataset['search_source'] = 'both'
+                else:
+                    dataset['search_source'] = 'vector'
+                all_datasets.append(dataset)
+                seen_ids.add(dataset_id)
+            
+            # Then process keyword datasets, skipping duplicates
+            for dataset in keyword_datasets:
+                dataset_id = dataset['id'] 
+                if dataset_id not in seen_ids:
+                    dataset['search_source'] = 'keyword'
+                    all_datasets.append(dataset)
+                    seen_ids.add(dataset_id)
+            
+            self.stdout.write(f"Combined into {len(all_datasets)} unique datasets after deduplication")
+            
+            # Sort by similarity score (higher is better)
+            all_datasets.sort(key=lambda x: x.get('similarity', 0), reverse=True)
+            
+            relevant_datasets = all_datasets
         
         if not relevant_datasets:
             self.stdout.write("No datasets found. Try a different query.")
@@ -339,13 +394,72 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(f"\nSuccessfully processed {len(results)} datasets"))
         for i, result in enumerate(results, 1):
             relevance_info = f"(Relevance: {result.get('relevance_score', 0):.2f})" if 'relevance_score' in result else ""
-            self.stdout.write(f"{i}. {result['title']} (Similarity: {result.get('similarity', 0):.4f}) {relevance_info} - {result.get('row_count', 'ERROR')} rows")
+            
+            # Add a visual indicator for the search source
+            search_source = result.get('search_source', 'unknown')
+            if search_source == 'vector':
+                source_indicator = "[VECTOR]"
+            elif search_source == 'keyword':
+                source_indicator = "[KEYWORD]"
+            elif search_source == 'both':  # For datasets found by both methods
+                source_indicator = "[BOTH]"
+            else:
+                source_indicator = ""
+            
+            self.stdout.write(f"{i}. {source_indicator} {result['title']} (Similarity: {result.get('similarity', 0):.4f}) {relevance_info} - {result.get('row_count', 'ERROR')} rows")
         
         if extracted_data_list:
             self.stdout.write("\nGenerating summary of findings...")
-            summary = summarize_findings(query, extracted_data_list, openai_api_key, dataset_analyses)
-            self.stdout.write(self.style.SUCCESS("\nFINDINGS:"))
-            self.stdout.write(summary)
+            
+            # Check if JSON output is requested
+            if options.get('json_output'):
+                # Use alternate function for JSON output
+                self.stdout.write("Using comprehensive JSON output format...")
+                output = summarize_findings_alternate(query, extracted_data_list, openai_api_key, dataset_analyses)
+                
+                # For command line, print a readable summary version
+                try:
+                    output_dict = json.loads(output)
+                    
+                    self.stdout.write(self.style.SUCCESS("\nSUMMARY:"))
+                    
+                    # Handle case where 'text' might be nested inside summary or directly present
+                    if isinstance(output_dict["summary"], dict) and "text" in output_dict["summary"]:
+                        summary_text = output_dict["summary"]["text"]
+                    else:
+                        summary_text = str(output_dict["summary"])
+                    self.stdout.write(summary_text)
+                    
+                    # Handle case where confidence score might be nested or directly present
+                    if isinstance(output_dict["summary"], dict) and "confidence" in output_dict["summary"]:
+                        confidence = output_dict["summary"]["confidence"] 
+                        self.stdout.write(f"Confidence: {confidence:.2f}")
+                    
+                    # Display datasets analyzed
+                    self.stdout.write(self.style.SUCCESS("\nDATASETS ANALYZED:"))
+                    for dataset in output_dict["relevant_datasets"]:
+                        format_info = ""
+                        if dataset["files"] and "format" in dataset["files"][0]:
+                            format_info = f" ({dataset['files'][0]['format']})"
+                        
+                        self.stdout.write(f"- {dataset['title']} (ID: {dataset['dataset_id']}){format_info}")
+                    
+                    # Save JSON to file
+                    output_file = f"results_{int(time.time())}.json"
+                    with open(output_file, 'w') as f:
+                        f.write(output)
+                    self.stdout.write(f"\nFull JSON output saved to: {output_file}")
+                    
+                except Exception as e:
+                    # Log the error
+                    self.stderr.write(self.style.ERROR(f"Error processing JSON output: {str(e)}"))
+                    self.stdout.write(self.style.SUCCESS("\nRAW OUTPUT:"))
+                    self.stdout.write(output)
+            else:
+                # Use original function for text output
+                summary = summarize_findings(query, extracted_data_list, openai_api_key, dataset_analyses)
+                self.stdout.write(self.style.SUCCESS("\nFINDINGS:"))
+                self.stdout.write(summary)
         else:
             self.stdout.write(self.style.WARNING("\nNo relevant data found to answer the query."))
         
