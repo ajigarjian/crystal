@@ -29,6 +29,7 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        # TODO: Add support for Azure OpenAI for creating embeddings
         batch_size = options['batch_size']
         force = options['force']
         limit = options['limit']

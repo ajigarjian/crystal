@@ -9,19 +9,20 @@ import PyPDF2
 from io import StringIO
 import json
 
+from factchecker.utils.openai_client import chat_completion
+
 """
 This module handles loading and processing datasets for the factchecker application.
 It provides utilities for loading datasets from various file formats, assessing their
 relevance to user queries, and preparing them for further analysis.
 """
 
-def load_dataset(file_path: str, openai_api_key: str = None) -> Union[pd.DataFrame, Dict[str, Any]]:
+def load_dataset(file_path: str) -> Union[pd.DataFrame, Dict[str, Any]]:
     """
     Load a dataset (CSV, Excel, or PDF) with appropriate error handling.
     
     Args:
         file_path: Path to the dataset file
-        openai_api_key: Optional OpenAI API key for enhanced PDF summary
         
     Returns:
         For CSV/Excel: Pandas DataFrame containing the dataset
@@ -35,7 +36,7 @@ def load_dataset(file_path: str, openai_api_key: str = None) -> Union[pd.DataFra
     # Handle PDF files
     if file_extension == '.pdf':
         logger.info(f"Detected PDF file: {file_path}")
-        return load_pdf_document(file_path, openai_api_key)
+        return load_pdf_document(file_path)
     
     try:
         # Handle Excel files
@@ -100,13 +101,12 @@ def load_dataset(file_path: str, openai_api_key: str = None) -> Union[pd.DataFra
         logger.error(f"Error loading dataset: {str(e)}")
         raise ValueError(f"Error loading dataset: {e}")
 
-def load_pdf_document(file_path: str, openai_api_key: str = None) -> Dict[str, Any]:
+def load_pdf_document(file_path: str) -> Dict[str, Any]:
     """
     Extract text and metadata from a PDF file.
     
     Args:
         file_path: Path to the PDF file
-        openai_api_key: Optional OpenAI API key for enhanced summary generation
         
     Returns:
         Dictionary containing extracted text and metadata
@@ -169,12 +169,9 @@ def load_pdf_document(file_path: str, openai_api_key: str = None) -> Dict[str, A
             pdf_data["dataframe"] = text_df
             
             # Generate enhanced summary if OpenAI API key is provided
-            if openai_api_key:
+            if os.environ.get("OPENAI_API_KEY") or os.environ.get("AZURE_OPENAI_API_KEY"):
                 logger.info("Generating enhanced summary with OpenAI API")
-                try:
-                    # Direct implementation of summary generation
-                    client = openai.OpenAI(api_key=openai_api_key)
-                    
+                try:                    
                     # Create a simplified prompt for testing
                     prompt = f"""
 Create a summary of this PDF document:
@@ -191,17 +188,15 @@ Please provide:
 Format as JSON with fields: "summary" and "key_points" (array)
 """
                     
-                    response = client.chat.completions.create(
-                        model="gpt-3.5-turbo",
-                        messages=[
-                            {"role": "system", "content": "You are a document analysis expert."},
-                            {"role": "user", "content": prompt}
-                        ],
-                        response_format={"type": "json_object"},
-                        temperature=0.3
+                    # Call OpenAI API for summary
+                    response = chat_completion(
+                    prompt,
+                    system_message="You are a document analysis expert.",
+                    temperature=0.3
+                    # TODO: Add response format here
                     )
                     
-                    summary_content = response.choices[0].message.content
+                    summary_content = response
                     summary_data = json.loads(summary_content)
                     
                     # Add the summary data to the PDF data
@@ -234,7 +229,6 @@ def assess_dataset_relevance(
     df_or_pdf: Union[pd.DataFrame, Dict[str, Any]], 
     query: str, 
     dataset_metadata: Dict[str, Any],
-    openai_api_key: str,
     relevance_threshold: float = 0.7
 ) -> Tuple[bool, float, str]:
     """
@@ -244,8 +238,10 @@ def assess_dataset_relevance(
         df_or_pdf: The dataset as a pandas DataFrame or PDF data as a dictionary
         query: The original user query
         dataset_metadata: Metadata about the dataset (title, description, etc.)
-        openai_api_key: OpenAI API key
         relevance_threshold: Threshold for considering a dataset relevant (0-1)
+        use_azure: Whether to use Azure OpenAI
+        azure_endpoint: The Azure OpenAI endpoint URL
+        azure_deployment: The Azure OpenAI deployment name
         
     Returns:
         Tuple of (is_relevant, relevance_score, reasoning)
@@ -389,21 +385,17 @@ SCORE: [score]
 REASONING: [your reasoning]
 """
 
-    # Call OpenAI API
-    client = openai.OpenAI(api_key=openai_api_key)
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[
-            {"role": "system", "content": "You are a data analyst who specializes in evaluating dataset relevance. Be concise and accurate."},
-            {"role": "user", "content": prompt}
-        ],
+
+    
+    system_message = "You are a data analyst who specializes in evaluating dataset relevance. Be concise and accurate."
+    
+    response_text = chat_completion(
+        prompt=prompt,
+        system_message=system_message,
         temperature=0.2
     )
     
     # Parse the response
-    response_text = response.choices[0].message.content
-    
-    # Extract score and reasoning
     score_match = re.search(r'SCORE:\s*([\d.]+)', response_text)
     reasoning_match = re.search(r'REASONING:\s*(.*)', response_text, re.DOTALL)
     
@@ -416,13 +408,12 @@ REASONING: [your reasoning]
         # Fallback if parsing fails
         return (False, 0.0, "Failed to parse relevance assessment")
 
-def generate_pdf_summary(pdf_data: Dict[str, Any], openai_api_key: str) -> Dict[str, Any]:
+def generate_pdf_summary(pdf_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Generate an enhanced summary of a PDF document using an LLM.
     
     Args:
         pdf_data: Dictionary containing PDF text and metadata
-        openai_api_key: OpenAI API key
         
     Returns:
         Dictionary with summary, section titles, and key points
@@ -431,7 +422,7 @@ def generate_pdf_summary(pdf_data: Dict[str, Any], openai_api_key: str) -> Dict[
     logger.info(f"Starting enhanced summary generation for PDF: {pdf_data.get('file_name', 'unknown')}")
     
     # Debug log to confirm we have an API key
-    if openai_api_key:
+    if os.environ.get("OPENAI_API_KEY") or os.environ.get("AZURE_OPENAI_API_KEY"):
         logger.info("OpenAI API key is provided")
     else:
         logger.warning("No OpenAI API key provided for summary generation")
@@ -482,21 +473,17 @@ Format your response as JSON with the following structure:
     try:
         logger.info("Calling OpenAI API for summary generation")
         # Call OpenAI API
-        client = openai.OpenAI(api_key=openai_api_key)
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": "You are a document analysis expert specializing in creating concise, accurate summaries of PDF documents."},
-                {"role": "user", "content": prompt}
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.3
+
+        response = chat_completion(
+        prompt,
+        system_message="You are a document analysis expert specializing in creating concise, accurate summaries of PDF documents.",
+        temperature=0.3
         )
         
         logger.info("Received response from OpenAI API")
         
         # Parse the response
-        summary_content = response.choices[0].message.content
+        summary_content = response
         logger.info(f"Response content length: {len(summary_content)} characters")
         
         try:

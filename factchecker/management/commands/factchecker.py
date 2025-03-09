@@ -10,14 +10,17 @@ from factchecker.search import preprocess_query, search_datasets, filter_relevan
 from factchecker.download import download_resource
 
 # For analyzing the datasets and extracting the relevant data, we use the following functions
-from factchecker.analysis import (
+from factchecker.processing.analysis import (
     load_dataset,
     assess_dataset_relevance,
     extract_relevant_data,
-    analyze_dataset_overview,
-    summarize_findings,
-    summarize_findings_alternate
+    analyze_dataset_overview
 )
+
+from factchecker.presentation.cli_tool_functions import summarize_findings, summarize_findings_alternate
+
+# Import Django settings including API keys
+from django.conf import settings
 
 import pandas as pd
 from typing import Dict, Tuple, List, Any, Optional
@@ -82,13 +85,12 @@ class Command(BaseCommand):
         sequential = options.get('sequential', False)
         json_output = options.get('json_output', False)
         debug_file_paths = options.get('debug', False)
-        
+                
         self.stdout.write(f"Factchecker query: '{query}'")
         
         # Initialize API keys
         try:
             api_keys = self.init_api_key()
-            openai_api_key = api_keys["openai"]
             gov_api_key = api_keys["data_gov"]
         except ValueError as e:
             self.stderr.write(self.style.ERROR(f"Error initializing API keys: {e}"))
@@ -99,6 +101,8 @@ class Command(BaseCommand):
             self.stdout.write(f"Skipping search and using specified datasets: {force_datasets}")
             dataset_paths = [path.strip() for path in force_datasets.split(',')]
             
+            relevant_datasets = []
+
             for path in dataset_paths:
                 # Create a minimal dataset info dict for each forced dataset
                 dataset_name = path.split('/')[-1] if '/' in path else path
@@ -115,7 +119,7 @@ class Command(BaseCommand):
             
             if search_method == 'vector':
                 # Vector search (existing code)
-                relevant_datasets = vector_search_datasets(query, openai_api_key, top_n=top_n)
+                relevant_datasets = vector_search_datasets(query, top_n=top_n)
             else:
                 # Keyword search (existing code) 
                 relevant_datasets = search_datasets(query, gov_api_key, top_n=top_n)
@@ -125,7 +129,7 @@ class Command(BaseCommand):
             
             # Get top_n results from vector search
             self.stdout.write(f"Performing vector search for top {top_n} datasets...")
-            vector_datasets = vector_search_datasets(query, openai_api_key, top_n=top_n)
+            vector_datasets = vector_search_datasets(query, top_n=top_n)
             self.stdout.write(f"Found {len(vector_datasets)} datasets via vector search")
             
             # Get top_n results from keyword search
@@ -198,15 +202,19 @@ class Command(BaseCommand):
                 # Handle the dataset - either use local path or download
                 if 'local_path' in dataset:
                     output_path = dataset['local_path']
+                    output_paths = [output_path]  # Single file for local datasets
                     with self.stdout_lock:
                         self.stdout.write(f"{dataset_short_id} Using local dataset: {output_path}")
                 else:
-                    # Download the dataset
+                    # Download all CSV/XLSX resources in the dataset
                     with self.stdout_lock:
-                        self.stdout.write(f"{dataset_short_id} Downloading dataset...")
-                    output_path = download_resource(gov_api_key, dataset["id"], output_dir=output_dir)
+                        self.stdout.write(f"{dataset_short_id} Downloading dataset resources...")
                     
-                    if not output_path:
+                    # Modified to download all CSV/XLSX resources
+                    from factchecker.download.download_gov_data import download_all_resources
+                    output_paths = download_all_resources(gov_api_key, dataset["id"], output_dir=output_dir)
+                    
+                    if not output_paths:
                         with self.stdout_lock:
                             self.stdout.write(self.style.WARNING(f"{dataset_short_id} Download failed. Skipping dataset."))
                         return {
@@ -217,12 +225,50 @@ class Command(BaseCommand):
                         }, None, None
                         
                     with self.stdout_lock:
-                        self.stdout.write(f"{dataset_short_id} Downloaded to: {output_path}")
+                        self.stdout.write(f"{dataset_short_id} Downloaded {len(output_paths)} files")
+                        for i, path in enumerate(output_paths):
+                            self.stdout.write(f"  File {i+1}: {path}")
                 
-                # Load and analyze the dataset
-                with self.stdout_lock:
-                    self.stdout.write(f"{dataset_short_id} Loading dataset for analysis...")
-                dataset_content = load_dataset(output_path, openai_api_key)
+                # If multiple files, analyze them together
+                if len(output_paths) > 1:
+                    with self.stdout_lock:
+                        self.stdout.write(f"{dataset_short_id} Analyzing multiple dataset files...")
+                    
+                    # Use the new function to analyze all files with Azure options
+                    from factchecker.processing.analysis.dataset_analyzer import analyze_dataset_files
+                    file_analysis = analyze_dataset_files(
+                        output_paths, 
+                        query, 
+                        dataset
+                    )
+                    
+                    # Display file summaries
+                    with self.stdout_lock:
+                        self.stdout.write(f"\n{dataset_short_id} Dataset contains {len(output_paths)} files:")
+                        for summary in file_analysis["file_summaries"]:
+                            if "row_count" in summary:
+                                self.stdout.write(f"  - {summary['file_name']}: {summary['row_count']} rows, {summary['column_count']} columns")
+                            else:
+                                self.stdout.write(f"  - {summary['file_name']}: PDF with {summary.get('num_pages', 'N/A')} pages")
+                        
+                        # Display combined analysis if available
+                        if file_analysis.get("combined_analysis"):
+                            self.stdout.write(self.style.SUCCESS("\nCOMBINED FILE ANALYSIS:"))
+                            self.stdout.write(file_analysis["combined_analysis"])
+                    
+                    # Use the first file for further processing
+                    primary_file_path = output_paths[0]
+                    with self.stdout_lock:
+                        self.stdout.write(f"\n{dataset_short_id} Using {os.path.basename(primary_file_path)} as primary file for detailed analysis")
+                    
+                    # Load the primary dataset file
+                    dataset_content = load_dataset(primary_file_path)
+                else:
+                    # Single file - load it directly
+                    with self.stdout_lock:
+                        self.stdout.write(f"{dataset_short_id} Loading dataset for analysis...")
+                    dataset_content = load_dataset(output_paths[0])
+                    file_analysis = None  # No multi-file analysis needed
                 
                 # Record basic dataset info
                 is_pdf = isinstance(dataset_content, dict) and dataset_content.get('type') == 'pdf'
@@ -234,7 +280,9 @@ class Command(BaseCommand):
                         "title": dataset["title"],
                         "description": dataset.get("description", ""),
                         "similarity": similarity_score,
-                        "file_path": output_path,
+                        "file_path": output_paths[0] if output_paths else None,
+                        "all_file_paths": output_paths,
+                        "file_analysis": file_analysis,
                         "document_type": "pdf",
                         "num_pages": dataset_content.get("num_pages", 0),
                         "text_sample": dataset_content.get("text_sample", "")[:200] + "..."  # First 200 chars of text sample
@@ -246,7 +294,9 @@ class Command(BaseCommand):
                         "title": dataset["title"],
                         "description": dataset.get("description", ""),
                         "similarity": similarity_score,
-                        "file_path": output_path,
+                        "file_path": output_paths[0] if output_paths else None,
+                        "all_file_paths": output_paths,
+                        "file_analysis": file_analysis,
                         "row_count": len(dataset_content),
                         "column_count": len(dataset_content.columns),
                         "columns": list(dataset_content.columns)
@@ -279,11 +329,14 @@ class Command(BaseCommand):
                             # Display DataFrame preview
                             self.stdout.write(str(dataset_content.head()))
                 
-                # Assess dataset relevance
+                # Assess dataset relevance with Azure options
                 with self.stdout_lock:
                     self.stdout.write(f"\n{dataset_short_id} Assessing dataset relevance...")
                 is_relevant, relevance_score, reasoning = assess_dataset_relevance(
-                    dataset_content, query, dataset_info, openai_api_key, relevance_threshold
+                    dataset_content, 
+                    query, 
+                    dataset_info,
+                    relevance_threshold
                 )
                 
                 dataset_info["relevance_score"] = relevance_score
@@ -298,7 +351,7 @@ class Command(BaseCommand):
                             f"{dataset_short_id} Dataset is relevant (Score: {relevance_score:.2f})"
                         ))
                     
-                    # Extract relevant data
+                    # Extract relevant data with Azure options
                     with self.stdout_lock:
                         self.stdout.write(f"{dataset_short_id} Extracting relevant data...")
                     if debug_file_paths:
@@ -308,7 +361,11 @@ class Command(BaseCommand):
                             self.stdout.write(f"  file_path: {dataset_info['file_path']}")
                         else:
                             self.stdout.write(f"  file_path missing from dataset_info!")
-                    extracted_data = extract_relevant_data(dataset_content, query, dataset_info, openai_api_key)
+                    extracted_data = extract_relevant_data(
+                        dataset_content, 
+                        query, 
+                        dataset_info
+                    )
                     
                     # Add dataset source information to the extracted data
                     if extracted_data:
@@ -320,14 +377,13 @@ class Command(BaseCommand):
                         self.stdout.write(f"{dataset_short_id} EXTRACTED DATA:")
                         self.display_extracted_data(extracted_data)
                     
-                    # Generate dataset overview analysis AFTER extraction
+                    # Generate dataset overview analysis with Azure options
                     with self.stdout_lock:
                         self.stdout.write(f"\n{dataset_short_id} Analyzing dataset overview...")
                     dataset_analysis = analyze_dataset_overview(
                         dataset_content, 
                         query, 
                         dataset_info, 
-                        openai_api_key,
                         extracted_data=extracted_data
                     )
                     with self.stdout_lock:
@@ -341,10 +397,14 @@ class Command(BaseCommand):
                             f"{dataset_short_id} Dataset is not relevant enough (Score: {relevance_score:.2f})"
                         ))
                     
-                    # Even for non-relevant datasets, we might want a basic analysis
+                    # Even for non-relevant datasets, get a basic analysis with Azure options
                     with self.stdout_lock:
                         self.stdout.write(f"\n{dataset_short_id} Analyzing dataset overview...")
-                    dataset_analysis = analyze_dataset_overview(dataset_content, query, dataset_info, openai_api_key)
+                    dataset_analysis = analyze_dataset_overview(
+                        dataset_content, 
+                        query, 
+                        dataset_info
+                    )
                     with self.stdout_lock:
                         self.display_dataset_analysis(dataset_analysis)
                     dataset_info["dataset_analysis"] = dataset_analysis["analysis"]
@@ -359,7 +419,7 @@ class Command(BaseCommand):
                     "id": dataset["id"],
                     "title": dataset["title"],
                     "similarity": dataset.get("similarity", 0),
-                    "file_path": output_path if 'output_path' in locals() else None,
+                    "file_path": output_paths[0] if output_paths else None,
                     "error": str(e)
                 }, None, None
         
@@ -419,11 +479,15 @@ class Command(BaseCommand):
         if extracted_data_list:
             self.stdout.write("\nGenerating summary of findings...")
             
-            # Check if JSON output is requested
+            # Use Azure options for summarizing findings
             if options.get('json_output'):
                 # Use alternate function for JSON output
                 self.stdout.write("Using comprehensive JSON output format...")
-                output = summarize_findings_alternate(query, extracted_data_list, openai_api_key, dataset_analyses)
+                output = summarize_findings_alternate(
+                    query, 
+                    extracted_data_list,
+                    dataset_analyses
+                )
                 
                 # For command line, print a readable summary version
                 try:
@@ -465,7 +529,11 @@ class Command(BaseCommand):
                     self.stdout.write(output)
             else:
                 # Use original function for text output
-                summary = summarize_findings(query, extracted_data_list, openai_api_key, dataset_analyses)
+                summary = summarize_findings(
+                    query, 
+                    extracted_data_list,
+                    dataset_analyses
+                )
                 self.stdout.write(self.style.SUCCESS("\nFINDINGS:"))
                 self.stdout.write(summary)
         else:
@@ -548,14 +616,20 @@ class Command(BaseCommand):
 
     def init_api_key(self, api_key: Optional[str] = None) -> Dict[str, str]:
         """Initialize the Data.gov API key and OpenAI API key."""
-        data_gov_key = api_key or os.environ.get("DATA_GOV_API_KEY")
-        openai_key = os.environ.get("OPENAI_API_KEY")
+        data_gov_key = settings.DATA_GOV_API_KEY or os.environ.get("DATA_GOV_API_KEY")
+
+        if settings.AZURE_OPENAI_API_KEY:
+            openai_key = settings.AZURE_OPENAI_API_KEY
+
+        else:
+            "Azure OpenAI key not found. Falling back to native OpenAI key in .env."
+            openai_key = settings.OPENAI_API_KEY
         
         if not data_gov_key:
-            raise ValueError("Data.gov API key is required. Set DATA_GOV_API_KEY environment variable or pass it directly.")
+            raise ValueError("Data.gov API key is required. Set Put DATA_GOV_API_KEY environment variable in .env.")
         
         if not openai_key:
-            raise ValueError("OpenAI API key is required. Set OPENAI_API_KEY environment variable.")
+            raise ValueError("OpenAI API key is required. Set OPENAI_API_KEY or AZURE_OPENAI_API_KEY environment variable in .env.")
         
         return {
             "data_gov": data_gov_key,
