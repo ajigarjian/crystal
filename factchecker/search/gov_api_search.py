@@ -3,13 +3,14 @@ import openai
 import re
 from typing import Dict, List, Optional
 
-def preprocess_query(query: str, openai_api_key: str) -> str:
+from factchecker.utils.openai_client import chat_completion
+
+def preprocess_query(query: str) -> str:
     """
     Preprocess a specific query into a more general form suitable for Data.gov search.
     
     Args:
         query: The original specific query (e.g., "college graduation rate in 2022")
-        openai_api_key: OpenAI API key
         
     Returns:
         A generalized query suitable for dataset discovery (e.g., "college graduation rate")
@@ -34,18 +35,13 @@ def preprocess_query(query: str, openai_api_key: str) -> str:
         Return ONLY the generalized query text with no explanation or additional text.
         """
         
-        # Call OpenAI API
-        client = openai.OpenAI(api_key=openai_api_key)
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant that extracts the core subject from search queries without adding any extra terms."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0
+        response = chat_completion(
+        prompt,
+        system_message="You are a helpful assistant that extracts the core subject from search queries without adding any extra terms.",
+        temperature=0 # Highest determinism
         )
         
-        generalized_query = response.choices[0].message.content.strip()
+        generalized_query = response.strip()
         print(f"Original query: '{query}'")
         print(f"Generalized query: '{generalized_query}'")
         return generalized_query
@@ -113,14 +109,13 @@ def search_datasets(query: str, api_key: str, top_n: int = 10) -> List[Dict]:
         print(f"Error searching datasets: {e}")
         return []
 
-def filter_relevant_datasets(query: str, datasets: List[Dict], openai_api_key: str, top_n: int = 5) -> List[Dict]:
+def filter_relevant_datasets(query: str, datasets: List[Dict], top_n: int = 5) -> List[Dict]:
     """
     Filter datasets to only the most relevant ones using LLM.
     
     Args:
         query: Original search query
         datasets: List of dataset metadata from search_datasets
-        openai_api_key: OpenAI API key for LLM access
         top_n: Number of most relevant datasets to return
         
     Returns:
@@ -157,19 +152,14 @@ def filter_relevant_datasets(query: str, datasets: List[Dict], openai_api_key: s
         Base your selection on how well each dataset matches the query intent and data needs.
         """
         
-        # Call OpenAI API directly with provided key
-        client = openai.OpenAI(api_key=openai_api_key)
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant that identifies relevant datasets."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0
+        response = chat_completion(
+        prompt,
+        system_message="You are a helpful assistant that identifies relevant datasets.",
+        temperature=0 #As high determinism as possible.
         )
         
         # Extract content from response
-        content = response.choices[0].message.content
+        content = response
         
         # Parse the response to get dataset indices
         numbers = re.findall(r'\d+', content)
