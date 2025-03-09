@@ -9,13 +9,14 @@ import time
 import uuid
 import datetime
 
+from factchecker.models import DatasetCatalog
 from factchecker.processing.analysis.dataset_analyzer import ExtendedJSONEncoder
+from factchecker.utils.openai_client import chat_completion
 
 
 def summarize_findings(
     query: str,
     extracted_data_list: List[Dict[str, Any]],
-    openai_api_key: str,
     dataset_analyses: List[Dict[str, Any]] = None
 ) -> str:
     """
@@ -24,7 +25,6 @@ def summarize_findings(
     Args:
         query: The original user query
         extracted_data_list: List of dictionaries containing extracted data
-        openai_api_key: OpenAI API key
         dataset_analyses: List of dataset analysis results
         
     Returns:
@@ -98,26 +98,18 @@ Finally, provide a "SEARCH SUMMARY" section with 2 paragraphs that:
 
 Your response should focus on answering the query using SPECIFIC VALUES and NUMBERS from the available data.
 """
-
-    # Call OpenAI API
-    client = openai.OpenAI(api_key=openai_api_key)
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[
-            {"role": "system", "content": "You are a data analyst who provides thorough analysis of data, with special attention to recent data points."},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.2,
-        max_tokens=800  # Increased token limit to allow for more comprehensive analysis
-    )
     
+    response = chat_completion(
+        prompt,
+        system_message="You are a data analyst who provides thorough analysis of data, with special attention to recent data points.",
+        max_tokens=2048
+        )
     # Return the summary
-    return response.choices[0].message.content
+    return response
 
 def summarize_findings_alternate(
     query: str,
     extracted_data_list: List[Dict[str, Any]],
-    openai_api_key: str,
     dataset_analyses: List[Dict[str, Any]] = None
 ) -> str:
     """
@@ -126,7 +118,6 @@ def summarize_findings_alternate(
     Args:
         query: The original user query
         extracted_data_list: List of dictionaries containing extracted data
-        openai_api_key: OpenAI API key
         dataset_analyses: List of dataset analysis results
         
     Returns:
@@ -360,20 +351,15 @@ def summarize_findings_alternate(
     """
     
     # Call OpenAI API for summary
-    client = openai.OpenAI(api_key=openai_api_key)
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[
-            {"role": "system", "content": "You are a data analyst who provides concise data summaries in JSON format."},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.2,
-        max_tokens=400
+    response = chat_completion(
+    prompt,
+    system_message="You are a data analyst who provides concise data summaries in JSON format.",
+    max_tokens=400
     )
-    
+
     try:
         # Parse the JSON response - handle the case where it might include ```json wrapping
-        content = response.choices[0].message.content.strip()
+        content = response.strip()
         if content.startswith('```json'):
             content = content.replace('```json', '', 1).strip()
         if content.endswith('```'):
@@ -387,7 +373,7 @@ def summarize_findings_alternate(
         logging.error(f"Error parsing summary JSON: {e}")
         # Fallback if JSON parsing fails
         result["summary"] = {
-            "text": response.choices[0].message.content,
+            "text": response,
             "confidence": 0.7
         }
     
