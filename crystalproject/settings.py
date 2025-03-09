@@ -19,7 +19,19 @@ load_dotenv()
 
 # Then access the environment variables
 DATA_GOV_API_KEY = os.getenv('DATA_GOV_API_KEY')
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+
+try:
+    AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY")
+    AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
+    AZURE_OPENAI_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT")
+    provider = "azure"
+
+except KeyError:
+    print("Error loading Azure OpenAI provider. Falling back to native OpenAI.")
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    provider = "openai"
+
+print("Using provider", provider, "for all OpenAI calls.")
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
