@@ -9,6 +9,8 @@ from contextlib import redirect_stdout
 import io
 import traceback
 import re
+
+from factchecker.utils.openai_client import chat_completion
 # Define TypedDict classes for better typing
 class ExtractionPlan(TypedDict):
     strategy: str
@@ -30,8 +32,7 @@ class ExtractedData(TypedDict):
 def extract_relevant_data(
     dataset_content: Union[pd.DataFrame, Dict[str, Any]],
     query: str,
-    dataset_metadata: Dict[str, Any],
-    openai_api_key: str
+    dataset_metadata: Dict[str, Any]
 ) -> ExtractedData:
     """
     Extract data from a dataset that is relevant to the user's query.
@@ -40,7 +41,6 @@ def extract_relevant_data(
         dataset_content: The dataset content (either a pandas DataFrame or a dictionary)
         query: The original user query
         dataset_metadata: Metadata about the dataset
-        openai_api_key: OpenAI API key
         
     Returns:
         ExtractedData object containing extracted data and metadata
@@ -126,7 +126,7 @@ def extract_relevant_data(
         
         # Identify relevant columns
         logger.info("Identifying relevant columns...")
-        relevant_columns = identify_relevant_columns(dataset_content, query, column_info, openai_api_key)
+        relevant_columns = identify_relevant_columns(dataset_content, query, column_info)
         logger.info(f"Identified relevant columns: {relevant_columns}")
         
         # Analyze relevant columns and their values
@@ -134,7 +134,7 @@ def extract_relevant_data(
         for col in relevant_columns:
             logger.info(f"Analyzing values in column: {col}")
             unique_values = get_unique_column_values(dataset_content, col)
-            relevant_values = select_relevant_values(unique_values, col, query, openai_api_key)
+            relevant_values = select_relevant_values(unique_values, col, query)
             
             column_values_analysis[col] = {
                 "unique_values": unique_values,
@@ -144,7 +144,7 @@ def extract_relevant_data(
         
         # Generate extraction code
         logger.info("Generating extraction code...")
-        extraction_code = generate_extraction_code(dataset_content, column_values_analysis, query, openai_api_key)
+        extraction_code = generate_extraction_code(dataset_content, column_values_analysis, query)
         
         # Determine extraction strategy
         logger.info("Determining extraction strategy...")
@@ -154,8 +154,7 @@ def extract_relevant_data(
             dataset_metadata, 
             column_info, 
             dataset_stats, 
-            numerical_stats, 
-            openai_api_key,
+            numerical_stats,
             column_values_analysis,
             extraction_code
         )
@@ -165,8 +164,7 @@ def extract_relevant_data(
         extracted_data = execute_extraction_plan(
             dataset_content, 
             extraction_plan,
-            query,
-            openai_api_key
+            query
         )
         
         # Update the result with the extracted data
@@ -197,8 +195,7 @@ def extract_relevant_data(
 def identify_relevant_columns(
     dataset_content: Union[pd.DataFrame, Dict[str, Any]],
     query: str,
-    column_info: List[Dict],
-    openai_api_key: str
+    column_info: List[Dict]
 ) -> List[str]:
     """
     Identify columns that are most relevant to the user's query.
@@ -207,7 +204,6 @@ def identify_relevant_columns(
         dataset_content: The dataset content (either a pandas DataFrame or a dictionary)
         query: The original user query
         column_info: Information about each column
-        openai_api_key: OpenAI API key
         
     Returns:
         List of column names that are relevant to the query
@@ -239,20 +235,15 @@ information related to the query even if the names don't match directly).
 Return ONLY a comma-separated list of the most relevant column names, with no additional text or explanation.
 If no columns seem relevant, return "None".
 """
-
-    # Call OpenAI API
-    client = openai.OpenAI(api_key=openai_api_key)
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[
-            {"role": "system", "content": "You are a data analysis expert specializing in identifying relevant columns in datasets."},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.1  # Low temperature for more deterministic responses
-    )
     
+    response = chat_completion(
+    prompt,
+    system_message="You are a data analysis expert specializing in identifying relevant columns in datasets.",
+    temperature=0.1 # Low temperature for more deterministic responses
+    )
+
     # Parse response
-    content = response.choices[0].message.content.strip()
+    content = response.strip()
     
     # Handle the case where no columns are relevant
     if content.lower() == "none":
@@ -302,8 +293,7 @@ def get_unique_column_values(dataset_content: Union[pd.DataFrame, Dict[str, Any]
 def select_relevant_values(
     unique_values: List[Any],
     column_name: str,
-    query: str,
-    openai_api_key: str
+    query: str
 ) -> List[Any]:
     """
     Select values from a column that are relevant to the user's query.
@@ -312,7 +302,6 @@ def select_relevant_values(
         unique_values: List of unique values from the column
         column_name: Name of the column
         query: The original user query
-        openai_api_key: OpenAI API key
         
     Returns:
         List of values that are relevant to the query
@@ -344,20 +333,14 @@ Return ONLY a comma-separated list of the relevant values, with no additional te
 If no values seem relevant, return "None".
 If ALL values seem relevant or if filtering by specific values doesn't make sense for this column, return "All".
 """
-
-    # Call OpenAI API
-    client = openai.OpenAI(api_key=openai_api_key)
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[
-            {"role": "system", "content": "You are a data analysis expert specializing in identifying relevant values in datasets."},
-            {"role": "user", "content": prompt}
-        ],
+    response = chat_completion(
+        prompt,
+        system_message="You are a data analysis expert specializing in identifying relevant values in datasets.",
         temperature=0.1  # Low temperature for more deterministic responses
-    )
+        )
     
     # Parse response
-    content = response.choices[0].message.content.strip()
+    content = response.strip()
     
     # Handle special cases
     if content.lower() == "none":
@@ -398,8 +381,7 @@ If ALL values seem relevant or if filtering by specific values doesn't make sens
 def generate_extraction_code(
     dataset_content: Union[pd.DataFrame, Dict[str, Any]],
     column_values_analysis: Dict[str, Dict[str, List[Any]]],
-    query: str,
-    openai_api_key: str
+    query: str
 ) -> str:
     """
     Generate pandas code to extract relevant data based on column analysis.
@@ -408,7 +390,6 @@ def generate_extraction_code(
         dataset_content: The dataset content (either a pandas DataFrame or a dictionary)
         column_values_analysis: Analysis of relevant columns and values
         query: The original user query
-        openai_api_key: OpenAI API key
         
     Returns:
         Python code to extract relevant data
@@ -457,19 +438,14 @@ Based on the user query and column analysis, generate pandas code to extract the
 Return ONLY the Python code, with no additional text or explanation. Use 'df' as the variable name for the input DataFrame.
 """
 
-    # Call OpenAI API
-    client = openai.OpenAI(api_key=openai_api_key)
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[
-            {"role": "system", "content": "You are a data analysis expert specializing in pandas code generation."},
-            {"role": "user", "content": prompt}
-        ],
+    response = chat_completion(
+        prompt,
+        system_message="You are a data analysis expert specializing in pandas code generation.",
         temperature=0.1  # Low temperature for more deterministic responses
-    )
+        )
     
     # Parse response
-    code = response.choices[0].message.content.strip()
+    code = response.strip()
     # only works on strings    
     if isinstance(code, str):
         # Remove markdown code block markers if present
@@ -487,7 +463,6 @@ def determine_extraction_strategy(
     column_info: List[Dict],
     dataset_stats: Dict,
     numerical_stats: Dict,
-    openai_api_key: str,
     column_values_analysis: Dict,
     extraction_code: str = None
 ) -> Dict[str, Any]:
@@ -576,19 +551,14 @@ PYTHON_CODE: [Your code]
 EXPLANATION: [Your explanation]
 """
 
-    # Call OpenAI API
-    client = openai.OpenAI(api_key=openai_api_key)
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[
-            {"role": "system", "content": "You are a data analysis expert specializing in pandas and data extraction."},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.1  # Low temperature for more deterministic responses
+    response = chat_completion(
+    prompt,
+    system_message="You are a data analysis expert specializing in pandas and data extraction.",
+    temperature=0.1  # Low temperature for more deterministic responses
     )
     
     # Parse response
-    content = response.choices[0].message.content
+    content = response
     
     # Extract sections
     analysis = extract_section(content, "ANALYSIS")
@@ -604,24 +574,20 @@ EXPLANATION: [Your explanation]
     }
 
 def execute_extraction_plan(
-    df: pd.DataFrame, 
-    extraction_plan: ExtractionPlan,
+    dataset_content: Union[pd.DataFrame, Dict[str, Any]],
+    extraction_plan: Dict[str, Any],
     query: str,
-    openai_api_key: str,
-    max_attempts: int = 3
-) -> ExtractedData:
+) -> Dict[str, Any]:
     """
-    Execute the extraction plan generated by the LLM with validation feedback loop.
+    Execute the extraction plan and return the extracted data.
     
     Args:
-        df: The DataFrame to extract data from
-        extraction_plan: The extraction plan containing code and strategy
+        dataset_content: The dataset content
+        extraction_plan: The extraction plan
         query: The original user query
-        openai_api_key: OpenAI API key
-        max_attempts: Maximum number of code generation attempts
         
     Returns:
-        ExtractedData object with extraction results and metadata
+        Dictionary containing extracted data
     """
     logger = logging.getLogger("data_extraction")
     
@@ -639,6 +605,7 @@ def execute_extraction_plan(
     }
     
     # Track attempts
+    max_attempts = 3
     attempts = 0
     success = False
     
@@ -654,16 +621,15 @@ def execute_extraction_plan(
         
         try:
             # Execute the code and capture results
-            execution_result, printed_output = execute_code(df, code)
+            execution_result, printed_output = execute_code(dataset_content, code)
             
             # Validate the results
             validation_result = validate_extraction_results(
                 execution_result, 
-                df, 
+                dataset_content, 
                 query, 
                 extraction_plan,
-                printed_output,
-                openai_api_key
+                printed_output
             )
             
             if validation_result["is_valid"]:
@@ -685,12 +651,11 @@ def execute_extraction_plan(
                 
                 # Generate improved code
                 improved_code = generate_improved_code(
-                    df, 
+                    dataset_content, 
                     query, 
                     extraction_plan,
                     validation_result["reason"],
-                    code,
-                    openai_api_key
+                    code
                 )
                 
                 # Update the extraction plan with the new code
@@ -704,12 +669,11 @@ def execute_extraction_plan(
             if attempts < max_attempts:
                 # Try to generate improved code that fixes the error
                 improved_code = generate_improved_code(
-                    df, 
+                    dataset_content, 
                     query, 
                     extraction_plan,
                     error_msg,
-                    code,
-                    openai_api_key
+                    code
                 )
                 
                 # Update the extraction plan with the new code
@@ -720,7 +684,7 @@ def execute_extraction_plan(
                 result["error"] = error_msg
                 
                 # Fallback to a simple extraction
-                result["results_dict"] = df.head(10).to_dict(orient="records")
+                result["results_dict"] = dataset_content.head(10).to_dict(orient="records")
                 result["printed_output"] = f"Error occurred: {str(e)}"
                 result["extraction_strategy"] = "Fallback strategy: showing first 10 rows due to error"
                 result["explanation"] = f"Original extraction failed with error: {str(e)}"
@@ -795,8 +759,7 @@ def validate_extraction_results(
     original_df: pd.DataFrame, 
     query: str, 
     extraction_plan: ExtractionPlan,
-    printed_output: str,
-    openai_api_key: str
+    printed_output: str
 ) -> Dict[str, Any]:
     """
     Validate the extraction results using an LLM.
@@ -807,7 +770,6 @@ def validate_extraction_results(
         query: The original user query
         extraction_plan: The extraction plan
         printed_output: Any printed output from the code execution
-        openai_api_key: OpenAI API key
         
     Returns:
         Dictionary with validation results
@@ -841,7 +803,7 @@ PRINTED OUTPUT:
 {printed_output if printed_output else "No output printed"}
 
 VALIDATION TASK:
-1. Determine if the extraction result is relevant to the user's query
+1. Determine if the extraction result has some relevance to the user's query (doesn't need to be exact)
 2. Check if the code executed correctly (no errors in the output)
 3. Verify that the result contains the information needed to answer the query
 4. Ensure the extraction follows the intended strategy
@@ -850,21 +812,15 @@ Respond with:
 1. VALID: Yes or No
 2. REASON: Brief explanation of your assessment
 3. SUGGESTIONS: If not valid, suggest specific improvements to the code
-"""
-
-    # Call OpenAI API
-    client = openai.OpenAI(api_key=openai_api_key)
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[
-            {"role": "system", "content": "You are a data analysis expert who validates extraction results."},
-            {"role": "user", "content": prompt}
-        ],
+"""    
+    response = chat_completion(
+        prompt,
+        system_message="You are a data analysis expert who validates extraction results.",
         temperature=0.2
-    )
+        )
     
     # Parse the response
-    response_text = response.choices[0].message.content
+    response_text = response
     
     # Extract validation result
     is_valid = "VALID: Yes" in response_text
@@ -890,8 +846,7 @@ def generate_improved_code(
     query: str,
     extraction_plan: ExtractionPlan,
     feedback: str,
-    previous_code: str,
-    openai_api_key: str
+    previous_code: str
 ) -> str:
     """
     Generate improved extraction code based on feedback.
@@ -902,7 +857,6 @@ def generate_improved_code(
         extraction_plan: The original extraction plan
         feedback: Feedback on why the previous code didn't work
         previous_code: The previous code that didn't work
-        openai_api_key: OpenAI API key
         
     Returns:
         Improved extraction code
@@ -944,19 +898,14 @@ The code should:
 Return ONLY the Python code, with no additional text or explanation. Use 'df' as the variable name for the input DataFrame.
 """
 
-    # Call OpenAI API
-    client = openai.OpenAI(api_key=openai_api_key)
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[
-            {"role": "system", "content": "You are a data analysis expert specializing in pandas code generation."},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.2
+    response = chat_completion(
+    prompt,
+    system_message="You are a data analysis expert specializing in pandas code generation.",
+    temperature=0.2
     )
     
     # Parse response
-    code = response.choices[0].message.content.strip()
+    code = response.strip()
     
     # Remove markdown code block markers if present
     if isinstance(code, str):
