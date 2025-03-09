@@ -225,20 +225,20 @@ KEY POINTS:
         logger.error(f"Error extracting PDF content: {str(e)}")
         raise ValueError(f"Error extracting PDF content: {e}")
 
-def assess_dataset_relevance(
+def assess_datafile_relevance(
     df_or_pdf: Union[pd.DataFrame, Dict[str, Any]], 
     query: str, 
     dataset_metadata: Dict[str, Any],
     relevance_threshold: float = 0.7
 ) -> Tuple[bool, float, str]:
     """
-    Assess if a dataset or PDF document is relevant to the user's query using OpenAI.
+    Assess if a datafile (CSV/Excel) or PDF document is relevant to the user's query using OpenAI.
     
     Args:
-        df_or_pdf: The dataset as a pandas DataFrame or PDF data as a dictionary
+        df_or_pdf: The datafile content as a pandas DataFrame or PDF data as a dictionary
         query: The original user query
-        dataset_metadata: Metadata about the dataset (title, description, etc.)
-        relevance_threshold: Threshold for considering a dataset relevant (0-1)
+        dataset_metadata: Metadata about the dataset and datafile
+        relevance_threshold: Threshold for considering a datafile relevant (0-1)
         use_azure: Whether to use Azure OpenAI
         azure_endpoint: The Azure OpenAI endpoint URL
         azure_deployment: The Azure OpenAI deployment name

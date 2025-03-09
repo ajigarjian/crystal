@@ -12,7 +12,7 @@ from factchecker.download import download_resource
 # For analyzing the datasets and extracting the relevant data, we use the following functions
 from factchecker.processing.analysis import (
     load_datafile,
-    assess_dataset_relevance,
+    assess_datafile_relevance,
     extract_relevant_data,
     analyze_dataset_overview
 )
@@ -262,16 +262,16 @@ class Command(BaseCommand):
                         self.stdout.write(f"\n{dataset_short_id} Using {os.path.basename(primary_file_path)} as primary file for detailed analysis")
                     
                     # Load the primary dataset file
-                    dataset_content = load_datafile(primary_file_path)
+                    datafile_content = load_datafile(primary_file_path)
                 else:
                     # Single file - load it directly
                     with self.stdout_lock:
-                        self.stdout.write(f"{dataset_short_id} Loading dataset for analysis...")
-                    dataset_content = load_datafile(output_paths[0])
+                        self.stdout.write(f"{dataset_short_id} Loading datafile for analysis...")
+                    datafile_content = load_datafile(output_paths[0])
                     file_analysis = None  # No multi-file analysis needed
                 
                 # Record basic dataset info
-                is_pdf = isinstance(dataset_content, dict) and dataset_content.get('type') == 'pdf'
+                is_pdf = isinstance(datafile_content, dict) and datafile_content.get('type') == 'pdf'
 
                 if is_pdf:
                     # Handle PDF document
@@ -284,8 +284,8 @@ class Command(BaseCommand):
                         "all_file_paths": output_paths,
                         "file_analysis": file_analysis,
                         "document_type": "pdf",
-                        "num_pages": dataset_content.get("num_pages", 0),
-                        "text_sample": dataset_content.get("text_sample", "")[:200] + "..."  # First 200 chars of text sample
+                        "num_pages": datafile_content.get("num_pages", 0),
+                        "text_sample": datafile_content.get("text_sample", "")[:200] + "..."  # First 200 chars of text sample
                     }
                 else:
                     # Handle DataFrame (tabular data)
@@ -297,9 +297,9 @@ class Command(BaseCommand):
                         "file_path": output_paths[0] if output_paths else None,
                         "all_file_paths": output_paths,
                         "file_analysis": file_analysis,
-                        "row_count": len(dataset_content),
-                        "column_count": len(dataset_content.columns),
-                        "columns": list(dataset_content.columns)
+                        "row_count": len(datafile_content),
+                        "column_count": len(datafile_content.columns),
+                        "columns": list(datafile_content.columns)
                     }
                 
                 # Print preview if requested
@@ -307,33 +307,33 @@ class Command(BaseCommand):
                     with self.stdout_lock:
                         self.stdout.write(f"\n{dataset_short_id} Data Preview:")
                         # Check if we're dealing with a PDF
-                        if isinstance(dataset_content, dict) and dataset_content.get('type') == 'pdf':
+                        if isinstance(datafile_content, dict) and datafile_content.get('type') == 'pdf':
                             # Display PDF preview with enhanced summary if available
-                            self.stdout.write(f"PDF Document: {dataset_content.get('file_name', '')}")
-                            self.stdout.write(f"Number of Pages: {dataset_content.get('num_pages', 0)}")
+                            self.stdout.write(f"PDF Document: {datafile_content.get('file_name', '')}")
+                            self.stdout.write(f"Number of Pages: {datafile_content.get('num_pages', 0)}")
                             
                             # Check if enhanced summary is available
-                            if "enhanced_summary" in dataset_content:
+                            if "enhanced_summary" in datafile_content:
                                 self.stdout.write("\nSummary:")
-                                self.stdout.write(dataset_content.get('enhanced_summary', ''))
+                                self.stdout.write(datafile_content.get('enhanced_summary', ''))
                                 
                                 # Display key points if available
-                                if dataset_content.get('key_points'):
+                                if datafile_content.get('key_points'):
                                     self.stdout.write("\nKey Points:")
-                                    for point in dataset_content.get('key_points', []):
+                                    for point in datafile_content.get('key_points', []):
                                         self.stdout.write(f"- {point}")
                             else:
                                 self.stdout.write("\nText Sample:")
-                                self.stdout.write(f"{dataset_content.get('text_sample', '')[:500]}...")
+                                self.stdout.write(f"{datafile_content.get('text_sample', '')[:500]}...")
                         else:
                             # Display DataFrame preview
-                            self.stdout.write(str(dataset_content.head()))
+                            self.stdout.write(str(datafile_content.head()))
                 
                 # Assess dataset relevance with Azure options
                 with self.stdout_lock:
-                    self.stdout.write(f"\n{dataset_short_id} Assessing dataset relevance...")
-                is_relevant, relevance_score, reasoning = assess_dataset_relevance(
-                    dataset_content, 
+                    self.stdout.write(f"\n{dataset_short_id} Assessing datafile relevance...")
+                is_relevant, relevance_score, reasoning = assess_datafile_relevance(
+                    datafile_content, 
                     query, 
                     dataset_info,
                     relevance_threshold
@@ -348,7 +348,7 @@ class Command(BaseCommand):
                 if is_relevant:
                     with self.stdout_lock:
                         self.stdout.write(self.style.SUCCESS(
-                            f"{dataset_short_id} Dataset is relevant (Score: {relevance_score:.2f})"
+                            f"{dataset_short_id} Datafile is relevant (Score: {relevance_score:.2f})"
                         ))
                     
                     # Extract relevant data with Azure options
@@ -362,7 +362,7 @@ class Command(BaseCommand):
                         else:
                             self.stdout.write(f"  file_path missing from dataset_info!")
                     extracted_data = extract_relevant_data(
-                        dataset_content, 
+                        datafile_content, 
                         query, 
                         dataset_info
                     )
@@ -381,7 +381,7 @@ class Command(BaseCommand):
                     with self.stdout_lock:
                         self.stdout.write(f"\n{dataset_short_id} Analyzing dataset overview...")
                     dataset_analysis = analyze_dataset_overview(
-                        dataset_content, 
+                        datafile_content, 
                         query, 
                         dataset_info, 
                         extracted_data=extracted_data
@@ -394,14 +394,14 @@ class Command(BaseCommand):
                 else:
                     with self.stdout_lock:
                         self.stdout.write(self.style.WARNING(
-                            f"{dataset_short_id} Dataset is not relevant enough (Score: {relevance_score:.2f})"
+                            f"{dataset_short_id} Datafile is not relevant enough (Score: {relevance_score:.2f})"
                         ))
                     
                     # Even for non-relevant datasets, get a basic analysis with Azure options
                     with self.stdout_lock:
                         self.stdout.write(f"\n{dataset_short_id} Analyzing dataset overview...")
                     dataset_analysis = analyze_dataset_overview(
-                        dataset_content, 
+                        datafile_content, 
                         query, 
                         dataset_info
                     )

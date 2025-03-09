@@ -5,7 +5,7 @@ from rest_framework.response import Response
 from factchecker.models import DatasetCatalog
 from factchecker.serializers import DatasetCatalogSerializer
 from factchecker.search import vector_search_datasets, preprocess_query, search_datasets, filter_relevant_datasets
-from factchecker.processing.analysis import load_datafile, assess_dataset_relevance, extract_relevant_data, analyze_dataset_overview
+from factchecker.processing.analysis import load_datafile, assess_datafile_relevance, extract_relevant_data, analyze_dataset_overview
 from factchecker.presentation.cli_tool_functions import summarize_findings, summarize_findings_alternate
 from django.conf import settings
 import os
@@ -181,7 +181,7 @@ def process_query(request):
                 # Assess dataset relevance
                 with stdout_lock:
                     logger.info(f"[API] {dataset_short_id} Assessing dataset relevance...")
-                is_relevant, relevance_score, reasoning = assess_dataset_relevance(
+                is_relevant, relevance_score, reasoning = assess_datafile_relevance(
                     dataset_content, 
                     query, 
                     dataset_info,

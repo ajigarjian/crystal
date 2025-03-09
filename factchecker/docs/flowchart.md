@@ -81,7 +81,7 @@ flowchart TD
         (load_datafile, load_pdf_document)
         AI: For PDFs, uses OpenAI/Azure to generate enhanced summaries"]
         ExtractData --> AssessRelevance["Assess relevance to query (second check)
-        (assess_dataset_relevance)
+        (assess_datafile_relevance)
         AI: Uses OpenAI/Azure to evaluate dataset relevance to query"]
         AssessRelevance --> RelevanceCheck{"Meets threshold?
         (relevance_score >= threshold)"}
