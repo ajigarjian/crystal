@@ -80,6 +80,7 @@ def chat_completion(
     system_message: str = "You are a helpful assistant.",
     temperature: float = 0.2,
     max_tokens: int = 800,
+    response_format: Optional[Dict[str, str]] = None
 ) -> str:
     """
     Get a chat completion from OpenAI or Azure OpenAI.
@@ -89,6 +90,7 @@ def chat_completion(
         system_message: The system message to use
         temperature: The temperature to use for generation
         max_tokens: Maximum tokens
+        response_format: Optional format specification for the response
         
     Returns:
         The generated text
@@ -96,15 +98,28 @@ def chat_completion(
     client, deployment = get_openai_client()
     
     try:
-        response = client.chat.completions.create(
-            model=deployment,  # For Azure, this is the deployment name
-            messages=[
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=temperature,
-            max_tokens=max_tokens
-        )
+        # Create API call with or without response_format based on whether it's provided
+        if response_format is not None:
+            response = client.chat.completions.create(
+                model=deployment,
+                messages=[
+                    {"role": "system", "content": system_message},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=temperature,
+                max_tokens=max_tokens,
+                response_format=response_format
+            )
+        else:
+            response = client.chat.completions.create(
+                model=deployment,
+                messages=[
+                    {"role": "system", "content": system_message},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=temperature,
+                max_tokens=max_tokens
+            )
 
         return response.choices[0].message.content
 

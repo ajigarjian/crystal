@@ -192,8 +192,8 @@ Format as JSON with fields: "summary" and "key_points" (array)
                     response = chat_completion(
                     prompt,
                     system_message="You are a document analysis expert.",
-                    temperature=0.3
-                    # TODO: Add response format here
+                    temperature=0.3,
+                    response_format={"type": "json_object"}
                     )
                     
                     summary_content = response
