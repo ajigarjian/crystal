@@ -9,6 +9,23 @@ A Django application that uses Data.gov datasets and OpenAI to fact-check querie
 - Data analysis and extraction from CSV files
 - Fact-checking based on government data
 
+## Documentation
+
+- **[Factchecker Command Flow](factchecker/docs/flowchart.md)**: Interactive flowchart visualizing the complete workflow of the factchecker command, including:
+  - Search and dataset discovery process
+  - Multi-file download and processing
+  - Data extraction with AI-assisted analysis
+  - Relevance assessment and filtering
+  - Output generation and formatting
+
+The flowchart can be viewed in several ways:
+
+- **GitHub**: The diagram renders automatically when viewing the markdown file on GitHub
+- **VS Code**: Install the "Markdown Preview Mermaid Support" extension and use the Preview feature
+- **Mermaid Live Editor**: Copy the diagram code and paste it into [Mermaid Live Editor](https://mermaid.live/)
+- **Export Options**: From the Mermaid Live Editor, you can export as SVG, PNG, or PDF for inclusion in presentations
+
+
 ## Setup
 
 ### Prerequisites

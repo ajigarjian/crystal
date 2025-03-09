@@ -163,3 +163,5 @@ CORS_ALLOWED_ORIGINS = [
 
 # For development only - remove in production
 CORS_ALLOW_ALL_ORIGINS = True
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
