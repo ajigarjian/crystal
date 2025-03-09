@@ -10,12 +10,13 @@ import re
 import json
 import datetime
 from factchecker.models import DatasetCatalog  # Import here to avoid circular imports
+import os
+from factchecker.utils.openai_client import chat_completion
 
 def analyze_dataset_overview(
     dataset_content: Union[pd.DataFrame, Dict[str, Any]],
     query: str,
     dataset_metadata: Dict[str, Any],
-    openai_api_key: str,
     extracted_data: Dict[str, Any] = None
 ) -> Dict[str, Any]:
     """
@@ -26,7 +27,6 @@ def analyze_dataset_overview(
         dataset_content: The dataset content (either a pandas DataFrame or a dictionary)
         query: The original user query
         dataset_metadata: Metadata about the dataset
-        openai_api_key: OpenAI API key
         extracted_data: The data extracted from the dataset
         
     Returns:
@@ -215,19 +215,15 @@ Be extremely concise but accurate. Do not make claims about missing data unless 
 
     logger.info("Sending analysis prompt to OpenAI")
     
-    # Call OpenAI API
-    client = openai.OpenAI(api_key=openai_api_key)
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[
-            {"role": "system", "content": "You are a data analyst who specializes in evaluating dataset quality and relevance. Be extremely concise and accurate. Before making claims about what data is or isn't in the dataset, carefully examine all columns, sample values, and especially the extraction information. Don't assume information is missing just because it's not in an expected column."},
-            {"role": "user", "content": prompt}
-        ],
+    # Use the chat_completion helper function
+    system_message = "You are a data analyst who specializes in evaluating dataset quality and relevance. Be extremely concise and accurate. Before making claims about what data is or isn't in the dataset, carefully examine all columns, sample values, and especially the extraction information. Don't assume information is missing just because it's not in an expected column."
+    
+    analysis = chat_completion(
+        prompt=prompt,
+        system_message=system_message,
         temperature=0.2
     )
     
-    # Parse the response
-    analysis = response.choices[0].message.content
     logger.info("Received analysis from OpenAI")
     
     # Return the analysis
@@ -243,6 +239,172 @@ Be extremely concise but accurate. Do not make claims about missing data unless 
         "extraction_info": extraction_info,
         "extracted_data": extracted_data,  # Include the full extracted data
         "analysis": analysis
+    }
+
+def analyze_dataset_files(
+    file_paths: List[str],
+    query: str,
+    dataset_metadata: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Analyze multiple files from a dataset to provide summaries for each file
+    and a combined overview.
+    
+    Args:
+        file_paths: List of paths to dataset files
+        query: The original user query
+        dataset_metadata: Metadata about the dataset
+        
+    Returns:
+        Dictionary containing file summaries and combined analysis
+    """
+    # Set up logging
+    logger = logging.getLogger("dataset_analysis")
+    logger.setLevel(logging.DEBUG)
+    
+    # Add a console handler if not already present
+    if not logger.handlers:
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.DEBUG)
+        formatter = logging.Formatter('[ANALYSIS] %(levelname)s: %(message)s')
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
+    
+    logger.info(f"Starting multi-file dataset analysis for query: {query}")
+    logger.info(f"Dataset: {dataset_metadata.get('title', 'Unknown')}")
+    logger.info(f"Analyzing {len(file_paths)} files")
+    
+    # List to store file summaries
+    file_summaries = []
+    combined_analysis = ""
+    
+    # Process each file
+    for i, file_path in enumerate(file_paths):
+        file_name = os.path.basename(file_path)
+        logger.info(f"Analyzing file {i+1}/{len(file_paths)}: {file_name}")
+        
+        try:
+            # Load the dataset file
+            from factchecker.processing.analysis.dataset_loader import load_dataset
+            file_content = load_dataset(file_path)
+            
+            # Create file metadata
+            file_metadata = {
+                "title": f"{dataset_metadata.get('title', 'Unknown')} - {file_name}",
+                "id": f"{dataset_metadata.get('id', 'unknown')}_{i}",
+                "file_path": file_path,
+            }
+            
+            # Generate summary for this file
+            if isinstance(file_content, pd.DataFrame):
+                # For DataFrame (tabular data)
+                file_summary = {
+                    "file_name": file_name,
+                    "file_path": file_path,
+                    "file_index": i,
+                    "row_count": len(file_content),
+                    "column_count": len(file_content.columns),
+                    "columns": list(file_content.columns)
+                }
+                
+                # Get a brief analysis of this file
+                file_analysis = analyze_dataset_overview(
+                    file_content, 
+                    query, 
+                    file_metadata
+                )
+                file_summary["analysis"] = file_analysis.get("analysis", "No analysis available")
+                
+            else:
+                # For PDF documents
+                file_summary = {
+                    "file_name": file_name,
+                    "file_path": file_path,
+                    "file_index": i,
+                    "document_type": "pdf",
+                    "num_pages": file_content.get("num_pages", 0)
+                }
+                
+                # Get a brief analysis of this PDF
+                file_analysis = analyze_dataset_overview(
+                    file_content, 
+                    query, 
+                    file_metadata
+                )
+                file_summary["analysis"] = file_analysis.get("analysis", "No analysis available")
+            
+            file_summaries.append(file_summary)
+            
+        except Exception as e:
+            logger.error(f"Error analyzing file {file_name}: {str(e)}")
+            file_summaries.append({
+                "file_name": file_name,
+                "file_path": file_path,
+                "file_index": i,
+                "error": str(e)
+            })
+    
+    # Generate a combined analysis if there are multiple files
+    if len(file_summaries) > 1:
+        # Create a prompt for OpenAI to summarize all files
+        file_descriptions = []
+        for summary in file_summaries:
+            if "row_count" in summary:
+                file_descriptions.append(
+                    f"File: {summary['file_name']}\n"
+                    f"Rows: {summary.get('row_count', 'N/A')}\n"
+                    f"Columns: {summary.get('column_count', 'N/A')}\n"
+                    f"Analysis: {summary.get('analysis', 'No analysis available')}"
+                )
+            else:
+                file_descriptions.append(
+                    f"File: {summary['file_name']}\n"
+                    f"Type: PDF\n"
+                    f"Pages: {summary.get('num_pages', 'N/A')}\n"
+                    f"Analysis: {summary.get('analysis', 'No analysis available')}"
+                )
+        
+        prompt = f"""
+You are analyzing multiple files from the same dataset to determine their relevance to a user's query.
+
+USER QUERY: "{query}"
+
+DATASET INFORMATION:
+Title: {dataset_metadata.get('title', 'Unknown')}
+Description: {dataset_metadata.get('description', '')}
+
+FILE SUMMARIES:
+{chr(10).join(file_descriptions)}
+
+Please provide a VERY CONCISE combined analysis of these files (maximum 3-4 sentences per section):
+
+1. DATASET STRUCTURE: How are the files related? Do they contain complementary information or different aspects of the same data?
+2. RELEVANCE: How relevant is this dataset (considering all files) to the user's query? Can it answer the query directly?
+3. RECOMMENDED APPROACH: Which file(s) would be most useful for answering the query and why?
+
+Be extremely concise but accurate.
+"""
+
+        logger.info("Sending combined analysis prompt to OpenAI")
+        
+        # Use the chat_completion helper function
+        system_message = "You are a data analyst who specializes in evaluating multi-file datasets. Be extremely concise and accurate."
+        
+        combined_analysis = chat_completion(
+            prompt=prompt,
+            system_message=system_message,
+            temperature=0.2
+        )
+        
+        logger.info("Received combined analysis from OpenAI")
+    
+    # Return the file summaries and combined analysis
+    return {
+        "dataset_id": dataset_metadata.get("id", ""),
+        "dataset_title": dataset_metadata.get("title", ""),
+        "file_count": len(file_paths),
+        "file_summaries": file_summaries,
+        "combined_analysis": combined_analysis if len(file_summaries) > 1 else ""
     }
 
 def get_data_dimensions(data: Any) -> Dict[str, Any]:
