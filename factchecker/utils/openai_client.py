@@ -10,7 +10,6 @@ try:
     provider = "azure"
 
 except KeyError:
-    print("Error loading Azure OpenAI provider. Falling back to native OpenAI.")
     OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
     provider = "openai"
 
