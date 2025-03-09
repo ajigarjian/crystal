@@ -10,14 +10,14 @@ from factchecker.search import preprocess_query, search_datasets, filter_relevan
 from factchecker.download import download_resource
 
 # For analyzing the datasets and extracting the relevant data, we use the following functions
-from factchecker.analysis import (
+from factchecker.processing.analysis import (
     load_dataset,
     assess_dataset_relevance,
     extract_relevant_data,
-    analyze_dataset_overview,
-    summarize_findings,
-    summarize_findings_alternate
+    analyze_dataset_overview
 )
+
+from factchecker.presentation.cli_tool_functions import summarize_findings, summarize_findings_alternate
 
 import pandas as pd
 from typing import Dict, Tuple, List, Any, Optional
