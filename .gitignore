@@ -46,3 +46,4 @@ db.sqlite3
 data_gov_catalog.json
 
 .DS_Store
+__pycache__
