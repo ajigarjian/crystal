@@ -5,7 +5,8 @@ from rest_framework.response import Response
 from factchecker.models import DatasetCatalog
 from factchecker.serializers import DatasetCatalogSerializer
 from factchecker.search import vector_search_datasets, preprocess_query, search_datasets, filter_relevant_datasets
-from factchecker.processing.analysis import load_dataset, assess_dataset_relevance, extract_relevant_data, analyze_dataset_overview, summarize_findings
+from factchecker.processing.analysis import load_dataset, assess_dataset_relevance, extract_relevant_data, analyze_dataset_overview
+from factchecker.presentation.cli_tool_functions import summarize_findings, summarize_findings_alternate
 from django.conf import settings
 import os
 from django.core.management import call_command
