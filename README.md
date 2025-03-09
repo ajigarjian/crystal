@@ -69,6 +69,11 @@ If you want to update the database with fresh data:
 2. Run `python manage.py import_catalog data_gov_catalog.json` to import the dataset metadata into the sqlite database (takes approximately 1 minute)
 3. Run `python manage.py generate_embeddings` to create new embeddings (takes several hours; note: this will use your OpenAI API credits and will cost around $1-$2)
 
+## Using Azure
+Azure OpenAI is optional but gives improved performance. Define the environment variables for Azure in `.env.example` in `.env` and the program will dynamically choose the Azure provider for all OpenAI calls, with the exception of:
+- views.py
+- Embeddings generation
+
 ## Large Files
 
 This project uses large data files that exceed GitHub's file size limits:
