@@ -291,8 +291,7 @@ def process_query(request):
             logger.info("[API] Generating summary of findings...")
             summary = summarize_findings(
                 query, 
-                extracted_data_list, 
-                settings.OPENAI_API_KEY, 
+                extracted_data_list,
                 dataset_analyses
             )
         
