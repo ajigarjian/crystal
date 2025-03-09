@@ -12,6 +12,7 @@ import datetime
 from factchecker.models import DatasetCatalog  # Import here to avoid circular imports
 import os
 from factchecker.utils.openai_client import chat_completion
+from factchecker.processing.analysis.pdf_analyzer import analyze_and_extract_pdf_data
 
 def analyze_dataset_overview(
     dataset_content: Union[pd.DataFrame, Dict[str, Any]],
@@ -285,8 +286,8 @@ def analyze_dataset_files(
         
         try:
             # Load the dataset file
-            from factchecker.processing.analysis.dataset_loader import load_dataset
-            file_content = load_dataset(file_path)
+            from factchecker.processing.analysis.dataset_loader import load_datafile
+            file_content = load_datafile(file_path)
             
             # Create file metadata
             file_metadata = {

@@ -11,7 +11,7 @@ from factchecker.download import download_resource
 
 # For analyzing the datasets and extracting the relevant data, we use the following functions
 from factchecker.processing.analysis import (
-    load_dataset,
+    load_datafile,
     assess_dataset_relevance,
     extract_relevant_data,
     analyze_dataset_overview
@@ -262,12 +262,12 @@ class Command(BaseCommand):
                         self.stdout.write(f"\n{dataset_short_id} Using {os.path.basename(primary_file_path)} as primary file for detailed analysis")
                     
                     # Load the primary dataset file
-                    dataset_content = load_dataset(primary_file_path)
+                    dataset_content = load_datafile(primary_file_path)
                 else:
                     # Single file - load it directly
                     with self.stdout_lock:
                         self.stdout.write(f"{dataset_short_id} Loading dataset for analysis...")
-                    dataset_content = load_dataset(output_paths[0])
+                    dataset_content = load_datafile(output_paths[0])
                     file_analysis = None  # No multi-file analysis needed
                 
                 # Record basic dataset info

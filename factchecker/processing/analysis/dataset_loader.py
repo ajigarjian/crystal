@@ -17,12 +17,12 @@ It provides utilities for loading datasets from various file formats, assessing 
 relevance to user queries, and preparing them for further analysis.
 """
 
-def load_dataset(file_path: str) -> Union[pd.DataFrame, Dict[str, Any]]:
+def load_datafile(file_path: str) -> Union[pd.DataFrame, Dict[str, Any]]:
     """
-    Load a dataset (CSV, Excel, or PDF) with appropriate error handling.
+    Load a data file (CSV, Excel, or PDF) with appropriate error handling.
     
     Args:
-        file_path: Path to the dataset file
+        file_path: Path to the data file
         
     Returns:
         For CSV/Excel: Pandas DataFrame containing the dataset

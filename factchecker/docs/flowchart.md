@@ -73,12 +73,12 @@ flowchart TD
         (analyze_dataset_files)
         AI: Analyzes all files and creates combined summary"]
         MultiFileCheck -->|No| ProcessFile["Process downloaded file
-        (load_dataset)"]
+        (load_datafile)"]
         AnalyzeMultipleFiles --> ProcessFile
         ProcessFile --> ParseFileType["Determine file type (CSV, JSON, etc)
-        (load_dataset)"]
+        (load_datafile)"]
         ParseFileType --> ExtractData["Extract data from file
-        (load_dataset, load_pdf_document)
+        (load_datafile, load_pdf_document)
         AI: For PDFs, uses OpenAI/Azure to generate enhanced summaries"]
         ExtractData --> AssessRelevance["Assess relevance to query (second check)
         (assess_dataset_relevance)
