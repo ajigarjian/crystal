@@ -382,13 +382,15 @@ Please provide a VERY CONCISE combined analysis of these files (maximum 3-4 sent
 1. DATASET STRUCTURE: How are the files related? Do they contain complementary information or different aspects of the same data?
 2. RELEVANCE: How relevant is this dataset (considering all files) to the user's query? Can it answer the query directly?
 3. RECOMMENDED APPROACH: Which file(s) would be most useful for answering the query and why?
+4. SUGGESTED DATAFILES: Provide a JSON array of filenames that should be analyzed in detail, ordered by relevance to the query. Include ONLY filenames without any additional text.
 
 Be extremely concise but accurate.
+
+For the SUGGESTED DATAFILES section, format your response exactly as follows:
+SUGGESTED DATAFILES: ["filename1.csv", "filename2.xlsx"]
 """
 
-        logger.info("Sending combined analysis prompt to OpenAI")
-        
-        # Use the chat_completion helper function
+        # Use the chat_completion helper function with JSON response format for the suggested files
         system_message = "You are a data analyst who specializes in evaluating multi-file datasets. Be extremely concise and accurate."
         
         combined_analysis = chat_completion(
@@ -397,7 +399,21 @@ Be extremely concise but accurate.
             temperature=0.2
         )
         
-        logger.info("Received combined analysis from OpenAI")
+        # Extract the suggested datafiles from the response
+        suggested_files = []
+        suggested_files_match = re.search(r'SUGGESTED DATAFILES:\s*(\[.*?\])', combined_analysis, re.DOTALL)
+        
+        if suggested_files_match:
+            try:
+                suggested_files_json = suggested_files_match.group(1)
+                suggested_files = json.loads(suggested_files_json)
+                logger.info(f"Extracted suggested datafiles: {suggested_files}")
+            except json.JSONDecodeError as e:
+                logger.error(f"Error parsing suggested datafiles JSON: {e}")
+                # Fallback to regex extraction if JSON parsing fails
+                suggested_files = re.findall(r'"([^"]+\.(csv|xlsx?|pdf))"', suggested_files_json)
+                suggested_files = [f[0] for f in suggested_files] if suggested_files else []
+                logger.info(f"Extracted suggested datafiles using regex: {suggested_files}")
     
     # Return the file summaries and combined analysis
     return {

@@ -216,6 +216,19 @@ def summarize_findings_alternate(
                 if debug_file_paths:
                     print(f"    Reconstructed file_path: {file_path}")
         
+        # Validate file paths
+        if "all_file_paths" in data:
+            valid_paths = []
+            for path in data["all_file_paths"]:
+                if os.path.exists(path):
+                    valid_paths.append(path)
+                else:
+                    if debug_file_paths:
+                        print(f"    Warning: File path does not exist: {path}")
+            
+            # Update all_file_paths with only valid paths
+            data["all_file_paths"] = valid_paths
+        
         # Determine filename and format
         filename = "unknown"
         file_format = "unknown"
@@ -233,13 +246,35 @@ def summarize_findings_alternate(
             "description": description or "No description available",
             "organization_name": organization_name or "Unknown",
             "score": data.get("relevance_score", data.get("similarity", 1.0)),
-            "files": [{
+            "files": []
+        }
+
+        # Add file information for each file path
+        if "all_file_paths" in data and data["all_file_paths"]:
+            for i, path in enumerate(data["all_file_paths"]):
+                filename = os.path.basename(path)
+                _, ext = os.path.splitext(path)
+                file_format = ext.lstrip(".").lower() if ext else "unknown"
+                
+                dataset_info["files"].append({
+                    "file_id": f"{dataset_id}-file-{i+1}",
+                    "filename": filename,
+                    "format": file_format,
+                    "description": "Extracted data file"
+                })
+        else:
+            # Fallback to single file if all_file_paths is not available
+            filename = os.path.basename(file_path) if file_path else "unknown"
+            _, ext = os.path.splitext(file_path) if file_path else ("", "")
+            file_format = ext.lstrip(".").lower() if ext else "unknown"
+            
+            dataset_info["files"].append({
                 "file_id": f"{dataset_id}-file-1",
                 "filename": filename,
                 "format": file_format,
-                "description": data.get("dataset_analysis", "Extracted data file")
-            }]
-        }
+                "description": "Extracted data file"
+            })
+
         result["relevant_datasets"].append(dataset_info)
         
         # Get the actual extracted data - try multiple possible keys
@@ -329,6 +364,15 @@ def summarize_findings_alternate(
             
         extraction_data["file_extractions"].append(file_extraction)
         result["extracted_data"].append(extraction_data)
+        
+        if debug_file_paths:
+            print(f"\n[DEBUG] Processing dataset: {dataset_id}")
+            print(f"    Title: {dataset_title}")
+            print(f"    file_path: {data.get('file_path', 'Not provided')}")
+            print(f"    all_file_paths: {data.get('all_file_paths', 'Not provided')}")
+            if "all_file_paths" in data and data["all_file_paths"]:
+                for i, path in enumerate(data["all_file_paths"]):
+                    print(f"      {i+1}: {path}")
     
     # Create a prompt for OpenAI to generate the text summary
     prompt = f"""

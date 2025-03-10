@@ -268,13 +268,21 @@ class Command(BaseCommand):
                         for i, path in enumerate(output_paths):
                             self.stdout.write(f"  File {i+1}: {path}")
                 
+                # Initialize primary_file_path here, before the conditional branches
+                primary_file_path = output_paths[0]
+                
+                # Initialize file_analysis to None for single-file datasets
+                file_analysis = None
+                
                 # If multiple files, analyze them together
                 if len(output_paths) > 1:
                     with self.stdout_lock:
                         self.stdout.write(f"{dataset_short_id} Analyzing multiple dataset files...")
+
                     
-                    # Use the new function to analyze all files with Azure options
                     from factchecker.processing.analysis.dataset_analyzer import analyze_dataset_files
+                    
+                    # Use the function to analyze all files
                     file_analysis = analyze_dataset_files(
                         output_paths, 
                         query, 
@@ -295,19 +303,45 @@ class Command(BaseCommand):
                             self.stdout.write(self.style.SUCCESS("\nCOMBINED FILE ANALYSIS:"))
                             self.stdout.write(file_analysis["combined_analysis"])
                     
-                    # Use the first file for further processing
-                    primary_file_path = output_paths[0]
-                    with self.stdout_lock:
-                        self.stdout.write(f"\n{dataset_short_id} Using {os.path.basename(primary_file_path)} as primary file for detailed analysis")
-                    
-                    # Load the primary dataset file
-                    datafile_content = load_datafile(primary_file_path)
+                    # Check if we have suggested files from the analysis
+                    if "suggested_files" in file_analysis and file_analysis["suggested_files"]:
+                        suggested_files = file_analysis["suggested_files"]
+                        
+                        # Find the paths for the suggested files
+                        suggested_file_paths = []
+                        for suggested_file in suggested_files:
+                            # Find the matching file path
+                            matching_paths = [path for path in output_paths if os.path.basename(path) == suggested_file]
+                            if matching_paths:
+                                suggested_file_paths.append(matching_paths[0])
+                        
+                        if suggested_file_paths:
+                            # Use the first suggested file as primary
+                            primary_file_path = suggested_file_paths[0]
+                            with self.stdout_lock:
+                                self.stdout.write(f"\n{dataset_short_id} Using suggested file {os.path.basename(primary_file_path)} as primary file for detailed analysis")
+                                
+                            # Store other suggested files for potential use
+                            secondary_file_paths = suggested_file_paths[1:] if len(suggested_file_paths) > 1 else []
+                            if secondary_file_paths:
+                                with self.stdout_lock:
+                                    self.stdout.write(f"{dataset_short_id} Additional suggested files for analysis: {', '.join([os.path.basename(p) for p in secondary_file_paths])}")
+                        else:
+                            # primary_file_path already initialized above, no need to set it again
+                            with self.stdout_lock:
+                                self.stdout.write(f"\n{dataset_short_id} No matching suggested files found. Using {os.path.basename(primary_file_path)} as primary file for detailed analysis")
+                    else:
+                        # primary_file_path already initialized above, no need to set it again
+                        with self.stdout_lock:
+                            self.stdout.write(f"\n{dataset_short_id} Using {os.path.basename(primary_file_path)} as primary file for detailed analysis")
                 else:
-                    # Single file - load it directly
+                    # For single file datasets, we already set primary_file_path above
+                    # Just add a log message for clarity
                     with self.stdout_lock:
-                        self.stdout.write(f"{dataset_short_id} Loading datafile for analysis...")
-                    datafile_content = load_datafile(output_paths[0])
-                    file_analysis = None  # No multi-file analysis needed
+                        self.stdout.write(f"\n{dataset_short_id} Single file dataset. Using {os.path.basename(primary_file_path)} for analysis")
+                
+                # Load the primary dataset file
+                datafile_content = load_datafile(primary_file_path)
                 
                 # Record basic dataset info
                 is_pdf = isinstance(datafile_content, dict) and datafile_content.get('type') == 'pdf'
@@ -319,7 +353,7 @@ class Command(BaseCommand):
                         "title": dataset["title"],
                         "description": dataset.get("description", ""),
                         "similarity": similarity_score,
-                        "file_path": output_paths[0] if output_paths else None,
+                        "file_path": primary_file_path if primary_file_path else None,
                         "all_file_paths": output_paths,
                         "file_analysis": file_analysis,
                         "document_type": "pdf",
@@ -333,7 +367,7 @@ class Command(BaseCommand):
                         "title": dataset["title"],
                         "description": dataset.get("description", ""),
                         "similarity": similarity_score,
-                        "file_path": output_paths[0] if output_paths else None,
+                        "file_path": primary_file_path if primary_file_path else None,
                         "all_file_paths": output_paths,
                         "file_analysis": file_analysis,
                         "row_count": len(datafile_content),
@@ -411,6 +445,8 @@ class Command(BaseCommand):
                         extracted_data["dataset_title"] = dataset_info["title"]
                         extracted_data["dataset_source"] = dataset_info.get("description", "Data.gov dataset")
                         extracted_data["dataset_id"] = dataset_info["id"]
+                        extracted_data["file_path"] = dataset_info["file_path"]
+                        extracted_data["all_file_paths"] = dataset_info["all_file_paths"]
                     
                     with self.stdout_lock:
                         self.stdout.write(f"{dataset_short_id} EXTRACTED DATA:")
@@ -458,7 +494,7 @@ class Command(BaseCommand):
                     "id": dataset["id"],
                     "title": dataset["title"],
                     "similarity": dataset.get("similarity", 0),
-                    "file_path": output_paths[0] if output_paths else None,
+                    "file_path": primary_file_path if primary_file_path else None,
                     "error": str(e)
                 }, None, None
         
