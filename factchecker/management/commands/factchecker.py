@@ -41,10 +41,11 @@ class Command(BaseCommand):
     
     def add_arguments(self, parser):
         parser.add_argument("query", help="Natural language query to search for datasets")
-        parser.add_argument("--top", type=int, default=5, help="Number of most relevant datasets to keep")
+        parser.add_argument("--similarity-threshold", type=float, default=0.5, 
+                           help="Minimum similarity score (0-1) for including datasets in vector search results")
         parser.add_argument("--output", default="downloads", help="Directory to save downloaded files")
         parser.add_argument("--preview", action="store_true", help="Show data preview")
-        parser.add_argument("--relevance-threshold", type=float, default=0.7, 
+        parser.add_argument("--relevance-threshold", type=float, default=0.4, 
                            help="Threshold for dataset relevance (0-1)")
         parser.add_argument("--force", help="Comma-separated list of local dataset paths to analyze directly, skipping search")
         parser.add_argument("--workers", type=int, default=3, 
@@ -75,7 +76,7 @@ class Command(BaseCommand):
         start_time = time.time()
         
         query = options['query']
-        top_n = options['top']
+        similarity_threshold = options.get('similarity_threshold', 0.5)
         output_dir = options['output']
         show_preview = options['preview']
         relevance_threshold = options['relevance_threshold']
@@ -96,6 +97,12 @@ class Command(BaseCommand):
             self.stderr.write(self.style.ERROR(f"Error initializing API keys: {e}"))
             return
         
+        # Base threshold for vector search
+        similarity_threshold = options.get('similarity_threshold', 0.5)  # Default to 0.5 if not specified
+        
+        # Higher threshold for keyword search
+        keyword_threshold = similarity_threshold + 0.2  # 0.2 higher than vector threshold (so default 0.7)
+        
         # Modified dataset search logic
         if force_datasets:
             self.stdout.write(f"Skipping search and using specified datasets: {force_datasets}")
@@ -115,32 +122,64 @@ class Command(BaseCommand):
                 })
         elif search_method:
             # User explicitly specified a single search method
-            self.stdout.write(f"Searching for datasets matching '{query}' using {search_method} search...")
-            
             if search_method == 'vector':
-                # Vector search (existing code)
-                relevant_datasets = vector_search_datasets(query, top_n=top_n)
+                # Vector search with specified threshold
+                self.stdout.write(f"Searching for datasets matching '{query}' using vector search with similarity threshold {similarity_threshold:.2f}...")
+                relevant_datasets = vector_search_datasets(query, similarity_threshold=similarity_threshold)
+                
+                # Display all results
+                if relevant_datasets:
+                    self.stdout.write(f"Found {len(relevant_datasets)} datasets with similarity >= {similarity_threshold:.2f}")
+                    for i, dataset in enumerate(relevant_datasets):
+                        self.stdout.write(f"  {i+1}. {dataset['title']} - Similarity: {dataset.get('similarity', 0):.4f}")
+                else:
+                    self.stdout.write("No datasets found.")
             else:
-                # Keyword search (existing code) 
-                relevant_datasets = search_datasets(query, gov_api_key, top_n=top_n)
+                # Keyword search with higher threshold
+                self.stdout.write(f"Searching for datasets matching '{query}' using keyword search with similarity threshold {keyword_threshold:.2f}...")
+                relevant_datasets = search_datasets(query, gov_api_key, similarity_threshold=keyword_threshold)
+                
+                # Display all results
+                if relevant_datasets:
+                    self.stdout.write(f"Found {len(relevant_datasets)} datasets with similarity >= {keyword_threshold:.2f}")
+                    for i, dataset in enumerate(relevant_datasets):
+                        self.stdout.write(f"  {i+1}. {dataset['title']} - Similarity: {dataset.get('similarity', 0):.4f}")
+                else:
+                    self.stdout.write("No datasets found.")
         else:
-            # DEFAULT: Use hybrid search approach
-            self.stdout.write(f"Searching for datasets matching '{query}' using hybrid search (vector + keyword)...")
-            
-            # Get top_n results from vector search
-            self.stdout.write(f"Performing vector search for top {top_n} datasets...")
-            vector_datasets = vector_search_datasets(query, top_n=top_n)
-            self.stdout.write(f"Found {len(vector_datasets)} datasets via vector search")
-            
-            # Get top_n results from keyword search
-            self.stdout.write(f"Performing keyword search for top {top_n} datasets...")
-            keyword_datasets = search_datasets(query, gov_api_key, top_n=top_n)
-            self.stdout.write(f"Found {len(keyword_datasets)} datasets via keyword search")
+            # DEFAULT: Use hybrid search approach with vector search as primary method
+            self.stdout.write(f"Searching for datasets matching '{query}' using hybrid search...")
+            self.stdout.write(f"Vector search threshold: {similarity_threshold:.2f}, Keyword search threshold: {keyword_threshold:.2f}")
+
+            # Get vector search results with threshold (primary method)
+            self.stdout.write(f"Performing vector search (primary method)...")
+            vector_datasets = vector_search_datasets(query, similarity_threshold=similarity_threshold)
+
+            if vector_datasets:
+                # Display similarity scores for ALL vector search results
+                self.stdout.write(f"Found {len(vector_datasets)} datasets via vector search with similarity >= {similarity_threshold:.2f}")
+                self.stdout.write("Vector search results with similarity scores:")
+                for i, dataset in enumerate(vector_datasets):  # Show all datasets
+                    self.stdout.write(f"  {i+1}. {dataset['title']} - Similarity: {dataset.get('similarity', 0):.4f}")
+            else:
+                self.stdout.write("No datasets found via vector search. Will rely on keyword search.")
+
+            # Get keyword search results with higher threshold (supplementary method)
+            self.stdout.write(f"Performing keyword search (supplementary method) with threshold {keyword_threshold:.2f}...")
+            keyword_datasets = search_datasets(query, gov_api_key, similarity_threshold=keyword_threshold)
+
+            if keyword_datasets:
+                self.stdout.write(f"Found {len(keyword_datasets)} datasets via keyword search with similarity >= {keyword_threshold:.2f}")
+                self.stdout.write("Keyword search results with similarity scores:")
+                for i, dataset in enumerate(keyword_datasets):  # Show all datasets
+                    self.stdout.write(f"  {i+1}. {dataset['title']} - Similarity: {dataset.get('similarity', 0):.4f}")
+            else:
+                self.stdout.write("No datasets found via keyword search.")
             
             # Get IDs from both search methods
             vector_ids = {dataset['id'] for dataset in vector_datasets}
             keyword_ids = {dataset['id'] for dataset in keyword_datasets}
-
+            
             # Find overlap (datasets found by both methods)
             overlap_ids = vector_ids.intersection(keyword_ids)
             self.stdout.write(f"Found {len(overlap_ids)} datasets in both search results")
