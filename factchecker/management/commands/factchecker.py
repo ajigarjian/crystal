@@ -3,6 +3,7 @@ import argparse
 from django.core.management.base import BaseCommand
 
 # For searching for the right datasets to download, we use vector search, and have support for keyword search using the gov api
+from factchecker.processing.analysis.extraction.execution import execute_relevant_data
 from factchecker.search import vector_search_datasets
 from factchecker.search import preprocess_query, search_datasets, filter_relevant_datasets
 
@@ -414,6 +415,8 @@ class Command(BaseCommand):
                 
                 dataset_info["relevance_score"] = relevance_score
                 dataset_info["relevance_reasoning"] = reasoning
+
+                dataset_info["is_relevant"] = is_relevant
                 
                 extracted_data = None
                 dataset_analysis = None
@@ -424,7 +427,7 @@ class Command(BaseCommand):
                             f"{dataset_short_id} Datafile is relevant (Score: {relevance_score:.2f})"
                         ))
                     
-                    # Extract relevant data with Azure options
+                    # Extract relevant data
                     with self.stdout_lock:
                         self.stdout.write(f"{dataset_short_id} Extracting relevant data...")
                     if debug_file_paths:
@@ -434,12 +437,17 @@ class Command(BaseCommand):
                             self.stdout.write(f"  file_path: {dataset_info['file_path']}")
                         else:
                             self.stdout.write(f"  file_path missing from dataset_info!")
-                    extracted_data = extract_relevant_data(
+
+                    # Extract the relevant data, including code
+                    relevant_data = extract_relevant_data(
                         datafile_content, 
                         query, 
                         dataset_info
                     )
-                    
+
+                    # Now extract data from the relevant data
+                    extracted_data = execute_relevant_data(relevant_data)
+
                     # Add dataset source information to the extracted data
                     if extracted_data:
                         extracted_data["dataset_title"] = dataset_info["title"]
@@ -448,9 +456,9 @@ class Command(BaseCommand):
                         extracted_data["file_path"] = dataset_info["file_path"]
                         extracted_data["all_file_paths"] = dataset_info["all_file_paths"]
                     
-                    with self.stdout_lock:
-                        self.stdout.write(f"{dataset_short_id} EXTRACTED DATA:")
-                        self.display_extracted_data(extracted_data)
+                    #with self.stdout_lock:
+                        #self.stdout.write(f"{dataset_short_id} EXTRACTED DATA:")
+                        #self.display_extracted_data(extracted_data)
                     
                     # Generate dataset overview analysis with Azure options
                     with self.stdout_lock:
@@ -472,17 +480,17 @@ class Command(BaseCommand):
                             f"{dataset_short_id} Datafile is not relevant enough (Score: {relevance_score:.2f})"
                         ))
                     
-                    # Even for non-relevant datasets, get a basic analysis with Azure options
-                    with self.stdout_lock:
-                        self.stdout.write(f"\n{dataset_short_id} Analyzing dataset overview...")
-                    dataset_analysis = analyze_dataset_overview(
-                        datafile_content, 
-                        query, 
-                        dataset_info
-                    )
-                    with self.stdout_lock:
-                        self.display_dataset_analysis(dataset_analysis)
-                    dataset_info["dataset_analysis"] = dataset_analysis["analysis"]
+                    # Even for non-relevant datasets, get a basic analysis
+                    # with self.stdout_lock:
+                    #     self.stdout.write(f"\n{dataset_short_id} Analyzing dataset overview...")
+                    # dataset_analysis = analyze_dataset_overview(
+                    #     datafile_content, 
+                    #     query, 
+                    #     dataset_info
+                    # )
+                    # with self.stdout_lock:
+                    #     self.display_dataset_analysis(dataset_analysis)
+                    dataset_info["dataset_analysis"] = "Not relevant enough."
                 
                 return dataset_info, dataset_analysis, extracted_data
                 
@@ -503,11 +511,17 @@ class Command(BaseCommand):
             results = []
             for i, dataset in enumerate(relevant_datasets):
                 dataset_info, dataset_analysis, extracted_data = process_dataset(i, dataset)
-                results.append(dataset_info)
-                if dataset_analysis:
-                    dataset_analyses.append(dataset_analysis)
-                if extracted_data:
-                    extracted_data_list.append(extracted_data)
+
+                # Don't process non-relevant datasets
+                if not dataset_info["is_relevant"]:
+                    print(f"Skipping {dataset_info["title"]} for being irrelevant.")
+
+                else:
+                    results.append(dataset_info)
+                    if dataset_analysis:
+                        dataset_analyses.append(dataset_analysis)
+                    if extracted_data:
+                        extracted_data_list.append(extracted_data)
         else:
             # Use ThreadPoolExecutor to process datasets in parallel
             with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
@@ -520,9 +534,13 @@ class Command(BaseCommand):
                 # Process results as they complete
                 for future in concurrent.futures.as_completed(future_to_index):
                     dataset_info, dataset_analysis, extracted_data = future.result()
-                    
-                    # Add results to our lists
-                    results.append(dataset_info)
+                                    # Don't process non-relevant datasets
+                    if not dataset_info["is_relevant"]:
+                        print(f"Skipping {dataset_info["title"]} for being irrelevant.")
+
+                    else:
+                        # Add results to our lists
+                        results.append(dataset_info)
                     
                     if dataset_analysis:
                         dataset_analyses.append(dataset_analysis)
@@ -554,7 +572,8 @@ class Command(BaseCommand):
         if extracted_data_list:
             self.stdout.write("\nGenerating summary of findings...")
             
-            # Use Azure options for summarizing findings
+
+            # Summarize findings
             if options.get('json_output'):
                 # Use alternate function for JSON output
                 self.stdout.write("Using comprehensive JSON output format...")
@@ -575,7 +594,8 @@ class Command(BaseCommand):
                         summary_text = output_dict["summary"]["text"]
                     else:
                         summary_text = str(output_dict["summary"])
-                    self.stdout.write(summary_text)
+                    #self.stdout.write(summary_text)
+                    print("Summary is disabled for now.")
                     
                     # Handle case where confidence score might be nested or directly present
                     if isinstance(output_dict["summary"], dict) and "confidence" in output_dict["summary"]:
@@ -635,13 +655,11 @@ class Command(BaseCommand):
         
         self.stdout.write("\nFrom dataset: " + extracted_data.get("dataset_title", "Unknown Dataset"))
         
-        # Display extraction strategy
-        self.stdout.write(f"Extraction Strategy:")
-        self.stdout.write(extracted_data.get("extraction_strategy", "No strategy provided"))
-
         # Display the data
         self.stdout.write("\nData:")
         data_dict = extracted_data.get("results_dict", {})
+
+        print(f"Debug print raw extracted_data response", extracted_data)
         
         # Check if data_dict is a list (records format) or a dictionary
         if isinstance(data_dict, list):
@@ -678,11 +696,11 @@ class Command(BaseCommand):
         self.stdout.write(extracted_data.get("explanation", "No explanation provided"))
         
         # Display code used
-        if "code" in extracted_data and extracted_data["code"]:
-            self.stdout.write("\nCode Used:")
-            self.stdout.write("```python")
-            self.stdout.write(extracted_data["code"])
-            self.stdout.write("```")
+        # if "code" in extracted_data and extracted_data["code"]:
+        #     self.stdout.write("\nCode Used:")
+        #     self.stdout.write("```python")
+        #     self.stdout.write(extracted_data["code"])
+        #     self.stdout.write("```")
         
         # Display any errors
         if "error" in extracted_data and extracted_data["error"]:
