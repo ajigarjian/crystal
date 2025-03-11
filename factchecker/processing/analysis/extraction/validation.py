@@ -61,13 +61,12 @@ def validate_extraction_results(
     
     # Create prompt for OpenAI
     prompt = f"""
-You are validating the results of a data extraction operation. Determine if the extraction can help successfullyaddress the user's query.
+You are validating the results of a data extraction operation.
 
 USER QUERY: "{query}"
 
 CODE EXECUTED:
 {extraction_plan.get("code", "")}
-
 
 EXECUTION RESULT:
 Type: {result_description}
@@ -77,10 +76,8 @@ PRINTED OUTPUT:
 {printed_output if printed_output else "No output printed"}
 
 VALIDATION TASK:
-1. Determine if the extraction result has some relevance to the user's query (doesn't need to be exact)
+1. Determine if the extraction result could have relevance to the user's query (doesn't need to be exact)
 2. Check if the code executed correctly (no errors in the output)
-3. Verify that the result contains the information needed to answer the query
-4. Ensure the extraction follows the intended strategy
 
 Respond with a JSON object containing these fields:
 - is_valid: boolean (true if valid, false if not)
