@@ -239,9 +239,6 @@ def assess_datafile_relevance(
         query: The original user query
         dataset_metadata: Metadata about the dataset and datafile
         relevance_threshold: Threshold for considering a datafile relevant (0-1)
-        use_azure: Whether to use Azure OpenAI
-        azure_endpoint: The Azure OpenAI endpoint URL
-        azure_deployment: The Azure OpenAI deployment name
         
     Returns:
         Tuple of (is_relevant, relevance_score, reasoning)
