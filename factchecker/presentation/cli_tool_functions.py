@@ -94,7 +94,7 @@ INSTRUCTIONS:
 
 Finally, provide a "SEARCH SUMMARY" section with 2 paragraphs that:
 1. Summarizes the overall context of the datasets analyzed (their scope, limitations, quality)
-2. Synthesizes the findings in relation to the query, including any external factors that might be relevant
+2. Synthesizes the findings in relation to the query in a highly factual way based on the given data.
 
 Your response should focus on answering the query using SPECIFIC VALUES and NUMBERS from the available data.
 """
@@ -102,7 +102,7 @@ Your response should focus on answering the query using SPECIFIC VALUES and NUMB
     response = chat_completion(
         prompt,
         system_message="You are a data analyst who provides thorough analysis of data, with special attention to recent data points.",
-        max_tokens=2048
+        max_tokens=1024
         )
     # Return the summary
     return response
