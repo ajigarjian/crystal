@@ -535,8 +535,16 @@ class Command(BaseCommand):
                 for future in concurrent.futures.as_completed(future_to_index):
                     dataset_info, dataset_analysis, extracted_data = future.result()
                                     # Don't process non-relevant datasets
-                    if not dataset_info["is_relevant"]:
-                        print(f"Skipping {dataset_info["title"]} for being irrelevant.")
+
+                    try:
+                        if not dataset_info["is_relevant"]:
+                            print(f"Skipping {dataset_info["title"]} for being irrelevant.")
+
+                    except KeyError as e:
+                        print(f"Ran into a KeyError processing this data sequentially.")
+                        print("dataset_info, dataset_analysis, extracted_data")
+                        raise(e)
+                    
 
                     else:
                         # Add results to our lists
