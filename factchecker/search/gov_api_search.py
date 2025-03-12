@@ -132,6 +132,8 @@ def calculate_similarity_scores(query: str, datasets: List[Dict]) -> None:
         temperature=0
     )
     
+    if not response:
+        return []
     # Parse the response to get similarity scores
     try:
         # Try to parse as JSON
