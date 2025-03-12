@@ -8,6 +8,8 @@ import re
 import PyPDF2
 from io import StringIO
 import json
+import xml.etree.ElementTree as ET
+from collections import defaultdict
 
 from factchecker.utils.openai_client import chat_completion
 
@@ -19,13 +21,13 @@ relevance to user queries, and preparing them for further analysis.
 
 def load_datafile(file_path: str) -> Union[pd.DataFrame, Dict[str, Any]]:
     """
-    Load a data file (CSV, Excel, or PDF) with appropriate error handling.
+    Load a data file (CSV, Excel, PDF, or XML) with appropriate error handling.
     
     Args:
         file_path: Path to the data file
         
     Returns:
-        For CSV/Excel: Pandas DataFrame containing the dataset
+        For CSV/Excel/XML: Pandas DataFrame containing the dataset
         For PDF: Dictionary with extracted text and metadata
     """
     logger = logging.getLogger("data_loading")
@@ -37,6 +39,11 @@ def load_datafile(file_path: str) -> Union[pd.DataFrame, Dict[str, Any]]:
     if file_extension == '.pdf':
         logger.info(f"Detected PDF file: {file_path}")
         return load_pdf_document(file_path)
+    
+    # Handle XML files
+    elif file_extension == '.xml':
+        logger.info(f"Detected XML file: {file_path}")
+        return load_xml_document(file_path)
     
     try:
         # Handle Excel files
@@ -224,6 +231,187 @@ KEY POINTS:
     except Exception as e:
         logger.error(f"Error extracting PDF content: {str(e)}")
         raise ValueError(f"Error extracting PDF content: {e}")
+
+def load_xml_document(file_path: str) -> Union[pd.DataFrame, Dict[str, Any]]:
+    """
+    Load an XML file and convert it to a pandas DataFrame using ElementTree.
+    Uses a multi-strategy approach to handle different XML structures.
+    
+    Args:
+        file_path: Path to the XML file
+        
+    Returns:
+        DataFrame containing the XML data or a dictionary with XML metadata
+    """
+    logger = logging.getLogger("data_loading")
+    logger.info(f"Loading XML file: {file_path}")
+    
+    try:
+        # First try pandas.read_xml with default settings as it's simplest
+        try:
+            logger.info("Attempting to parse XML with pandas.read_xml")
+            df = pd.read_xml(file_path)
+            
+            # If we got a DataFrame with data, return it
+            if not df.empty and len(df.columns) > 1:
+                logger.info(f"Successfully parsed XML with pandas.read_xml. Shape: {df.shape}")
+                return df
+            else:
+                logger.info("pandas.read_xml returned empty or single-column DataFrame. Will try ElementTree.")
+        except Exception as e:
+            logger.warning(f"pandas.read_xml parsing failed: {str(e)}")
+        
+        # Parse XML using ElementTree
+        logger.info("Parsing XML with ElementTree")
+        tree = ET.parse(file_path)
+        root = tree.getroot()
+        
+        # Strategy 1: Look for repeating elements that could form rows
+        logger.info("Strategy 1: Looking for repeating elements")
+        repeating_elements = find_repeating_elements(root)
+        
+        if repeating_elements:
+            # Get the most common repeating element (likely to be rows)
+            most_common_element = max(repeating_elements.items(), key=lambda x: x[1])[0]
+            logger.info(f"Found repeating element: {most_common_element}")
+            
+            # Extract data from repeating elements
+            rows = []
+            for elem in root.findall(f".//{most_common_element}"):
+                row_data = {}
+                
+                # Extract attributes
+                for key, value in elem.attrib.items():
+                    row_data[key] = value
+                
+                # Extract child elements
+                for child in elem:
+                    # Use tag as column name
+                    if child.text and child.text.strip():
+                        row_data[child.tag] = child.text.strip()
+                    # If child has children, concatenate their text
+                    elif len(list(child)) > 0:
+                        combined_text = " ".join([subchild.text for subchild in child if subchild.text and subchild.text.strip()])
+                        if combined_text:
+                            row_data[child.tag] = combined_text
+                    # Include attributes if no text
+                    elif child.attrib:
+                        for attr_key, attr_val in child.attrib.items():
+                            row_data[f"{child.tag}_{attr_key}"] = attr_val
+                
+                if row_data:  # Only add non-empty rows
+                    rows.append(row_data)
+            
+            if rows:
+                df = pd.DataFrame(rows)
+                logger.info(f"Successfully created DataFrame from repeating elements. Shape: {df.shape}")
+                return df
+        
+        # Strategy 2: Flatten the XML structure
+        logger.info("Strategy 2: Flattening XML structure")
+        flattened_data = []
+        
+        # For each direct child of root that might represent a record
+        for child in root:
+            record = flatten_element(child)
+            if record:
+                flattened_data.append(record)
+        
+        if flattened_data:
+            df = pd.DataFrame(flattened_data)
+            logger.info(f"Successfully created DataFrame from flattened structure. Shape: {df.shape}")
+            return df
+        
+        # Strategy 3: Create a single row with all data (for very flat XMLs)
+        logger.info("Strategy 3: Creating single row with all data")
+        all_data = flatten_element(root)
+        
+        if all_data:
+            df = pd.DataFrame([all_data])
+            logger.info(f"Created single-row DataFrame. Shape: {df.shape}")
+            return df
+        
+        # If all strategies fail, return XML metadata
+        logger.warning("All XML parsing strategies failed. Returning XML metadata.")
+        
+        # Get a sample of the XML content for reference
+        with open(file_path, 'r', encoding='utf-8') as f:
+            xml_sample = f.read(5000)  # First 5000 chars
+        
+        return {
+            "type": "xml",
+            "file_path": file_path,
+            "file_name": os.path.basename(file_path),
+            "root_tag": root.tag,
+            "xml_sample": xml_sample,
+            "parsing_error": "Could not convert XML to DataFrame"
+        }
+    
+    except Exception as e:
+        logger.error(f"Error loading XML file: {str(e)}")
+        # Return a minimal DataFrame with error information
+        return pd.DataFrame({
+            "error": [f"Failed to parse XML: {str(e)}"],
+            "file_path": [file_path]
+        })
+
+def find_repeating_elements(root):
+    """
+    Find elements that repeat in the XML, which likely represent rows in a table.
+    
+    Args:
+        root: Root element of the XML tree
+        
+    Returns:
+        Dictionary mapping element tags to their frequency
+    """
+    element_counts = defaultdict(int)
+    
+    # Count occurrences of each element tag
+    for elem in root.iter():
+        element_counts[elem.tag] += 1
+    
+    # Filter to elements that appear multiple times (potential rows)
+    repeating_elements = {tag: count for tag, count in element_counts.items() 
+                         if count > 1 and tag != root.tag}
+    
+    return repeating_elements
+
+def flatten_element(element, prefix=''):
+    """
+    Recursively flatten an XML element and its children into a dictionary.
+    
+    Args:
+        element: XML element to flatten
+        prefix: Prefix for nested element names
+        
+    Returns:
+        Dictionary with flattened element data
+    """
+    result = {}
+    
+    # Add element attributes
+    for key, value in element.attrib.items():
+        column_name = f"{prefix}{element.tag}_{key}" if prefix else f"{element.tag}_{key}"
+        result[column_name] = value
+    
+    # Add element text if not empty
+    if element.text and element.text.strip():
+        column_name = f"{prefix}{element.tag}" if prefix else element.tag
+        result[column_name] = element.text.strip()
+    
+    # Process child elements
+    for child in element:
+        # Create new prefix for nested elements
+        new_prefix = f"{prefix}{element.tag}_" if prefix else f"{element.tag}_"
+        
+        # Recursively process child element
+        child_data = flatten_element(child, new_prefix)
+        
+        # Add child data to result
+        result.update(child_data)
+    
+    return result
 
 def assess_datafile_relevance(
     df_or_pdf: Union[pd.DataFrame, Dict[str, Any]], 
