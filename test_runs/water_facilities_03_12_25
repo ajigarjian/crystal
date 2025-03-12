@@ -1,0 +1,167 @@
+(venv) ajigarjian@Aris-Air crystal % python3 manage.py factchecker "water recreation facility inspections arlington" --output data_files --sequential --similarity-threshold .72
+Using provider azure for all OpenAI calls.
+Factchecker query: 'water recreation facility inspections arlington'
+Searching for datasets matching 'water recreation facility inspections arlington' using hybrid search...
+Vector search threshold: 0.72, Keyword search threshold: 0.92
+Performing vector search (primary method)...
+Found 1 candidate datasets via vector search with similarity >= 0.72
+Final count: 1 datasets with usable resources
+Found 1 datasets via vector search with similarity >= 0.72
+Vector search results with similarity scores:
+  1. Water Recreation Facility Inspections - Similarity: 0.7748
+Performing keyword search (supplementary method) with threshold 0.92...
+Found 1 datasets via keyword search with similarity >= 0.9199999999999999
+Found 1 datasets via keyword search with similarity >= 0.92
+Keyword search results with similarity scores:
+  1. Water Recreation Facility Inspections - Similarity: 1.0000
+Found 1 datasets in both search results
+Combined into 1 unique datasets after deduplication
+Processing datasets sequentially (parallel processing disabled)
+
+[1/1] Water Recreation Facility Inspections Processing dataset (Query similarity: 0.7748)
+[1/1] Water Recreation Facility Inspections Downloading dataset resources...
+Downloading https://datahub-v2-s3.arlingtonva.us/Uploads/Water+Recreation+Facility+Inspections.json?$top=10000 to data_files/Water_Recreation_Facility_Inspections_JSON_File.json (attempt 1)
+Download successful on attempt 1
+Downloading https://download.data.arlingtonva.us/Uploads/Water+Recreation+Facility+Inspections.csv to data_files/Water_Recreation_Facility_Inspections_Comma_Separated_Values_File.csv (attempt 1)
+Download successful on attempt 1
+[1/1] Water Recreation Facility Inspections Downloaded 2 files
+  File 1: data_files/Water_Recreation_Facility_Inspections_JSON_File.json
+  File 2: data_files/Water_Recreation_Facility_Inspections_Comma_Separated_Values_File.csv
+[1/1] Water Recreation Facility Inspections Analyzing multiple dataset files...
+[ANALYSIS] INFO: Starting multi-file dataset analysis for query: water recreation facility inspections arlington
+[ANALYSIS] INFO: Dataset: Water Recreation Facility Inspections
+[ANALYSIS] INFO: Analyzing 2 files
+[ANALYSIS] INFO: Analyzing file 1/2: Water_Recreation_Facility_Inspections_JSON_File.json
+[ANALYSIS] INFO: Starting dataset analysis for query: water recreation facility inspections arlington
+[ANALYSIS] INFO: Dataset: Water Recreation Facility Inspections - Water_Recreation_Facility_Inspections_JSON_File.json
+[ANALYSIS] INFO: Sending analysis prompt to OpenAI
+[ANALYSIS] INFO: Received analysis from OpenAI
+[ANALYSIS] INFO: Analyzing file 2/2: Water_Recreation_Facility_Inspections_Comma_Separated_Values_File.csv
+[ANALYSIS] INFO: Starting dataset analysis for query: water recreation facility inspections arlington
+[ANALYSIS] INFO: Dataset: Water Recreation Facility Inspections - Water_Recreation_Facility_Inspections_Comma_Separated_Values_File.csv
+[ANALYSIS] INFO: Sending analysis prompt to OpenAI
+[ANALYSIS] INFO: Received analysis from OpenAI
+[ANALYSIS] INFO: Extracted suggested datafiles: ['Water_Recreation_Facility_Inspections_JSON_File.json', 'Water_Recreation_Facility_Inspections_Comma_Separated_Values_File.csv']
+
+[1/1] Water Recreation Facility Inspections Dataset contains 2 files:
+  - Water_Recreation_Facility_Inspections_JSON_File.json: 8599 rows, 34 columns
+  - Water_Recreation_Facility_Inspections_Comma_Separated_Values_File.csv: 8599 rows, 34 columns
+
+COMBINED FILE ANALYSIS:
+1. DATASET STRUCTURE: Both files contain the same dataset, offering identical information on water recreation facility inspections in Arlington, VA. They differ only in format, with one being JSON and the other CSV, but both cover the same aspects of the data.
+
+2. RELEVANCE: The dataset is highly relevant to the user's query, as it specifically addresses water recreation facility inspections in Arlington. It includes pertinent details such as facility names, inspection types, and dates, which can directly answer the query.
+
+3. RECOMMENDED APPROACH: Either file can be used to answer the query, but the JSON file may be preferable due to the absence of missing values, which could provide a more complete dataset for analysis.
+
+SUGGESTED DATAFILES: ["Water_Recreation_Facility_Inspections_JSON_File.json", "Water_Recreation_Facility_Inspections_Comma_Separated_Values_File.csv"]
+
+[1/1] Water Recreation Facility Inspections Using Water_Recreation_Facility_Inspections_JSON_File.json as primary file for detailed analysis
+
+[1/1] Water Recreation Facility Inspections Assessing datafile relevance...
+[1/1] Water Recreation Facility Inspections Datafile is relevant (Score: 1.00)
+[1/1] Water Recreation Facility Inspections Extracting relevant data...
+[EXTRACT] INFO: Starting data extraction for query: water recreation facility inspections arlington
+[EXTRACT] INFO: Dataset: Water Recreation Facility Inspections
+[EXTRACT] INFO: Dataset shape: (8599, 34)
+[EXTRACT] INFO: Columns: ['UNID', 'NAME', 'STAGE', 'OPNDATE', 'CLSDATE', 'STATUS', 'TYPE', 'PBUILD', 'PDIR', 'PSTREET', 'PSTREETTYPE', 'PSTREETSUF', 'PSUITE', 'PCITY', 'PSTATE', 'PCODE', 'ITYPE', 'EDATE', 'TIMESP', 'MAINCHLR', 'MAINPH', 'MAINTMP', 'MAINFLW', 'MAINPRES', 'WADECHLR', 'WADEPH', 'WADETMP', 'WADEFLW', 'WADEPRES', 'COMM', 'INSPNO', 'CODE', 'REPEAT', 'CORRECTED']
+[EXTRACT] INFO: Identifying relevant columns...
+[EXTRACT] INFO: Identified relevant columns: ['NAME', 'TYPE', 'PCITY', 'ITYPE', 'COMM']
+[EXTRACT] INFO: Analyzing values in column: NAME
+[EXTRACT] INFO: Column NAME: Found 6 relevant values out of 100 unique values
+[EXTRACT] INFO: Analyzing values in column: TYPE
+[EXTRACT] INFO: Column TYPE: Found 9 relevant values out of 9 unique values
+[EXTRACT] INFO: Analyzing values in column: PCITY
+[EXTRACT] INFO: Column PCITY: Found 1 relevant values out of 1 unique values
+[EXTRACT] INFO: Analyzing values in column: ITYPE
+[EXTRACT] INFO: Analyzing values in column: COMM
+[EXTRACT] INFO: Generating extraction code...
+Debug extraction code: python
+import pandas as pd
+
+# Assuming 'df' is the DataFrame containing the dataset
+relevant_names = [
+    "Arlington Village Condo Pool",
+    "Water Park Towers Pool",
+    "Court Bridge of Arlington Pool",
+    "Donaldson Run Recreation Assoc. Wading Pool",
+    "Grove at Arlington",
+    "The"
+]
+
+filtered_df = df[df['NAME'].isin(relevant_names)]
+[EXTRACT] INFO: Extraction attempt 1/3
+[EXTRACT] INFO: Executing code:
+python
+import pandas as pd
+
+# Assuming 'df' is the DataFrame containing the dataset
+relevant_names = [
+    "Arlington Village Condo Pool",
+    "Water Park Towers Pool",
+    "Court Bridge of Arlington Pool",
+    "Donaldson Run Recreation Assoc. Wading Pool",
+    "Grove at Arlington",
+    "The"
+]
+
+filtered_df = df[df['NAME'].isin(relevant_names)]
+Execution Result:                                  UNID                                         NAME   STAGE  ...           CODE REPEAT  CORRECTED
+77   042A947146D2D08288256BF8007487CA                 Arlington Village Condo Pool  Active  ...     24.1-36(B)    YES           
+78   042A947146D2D08288256BF8007487CA                 Arlington Village Condo Pool  Active  ...     24.1-57(A)    YES           
+79   042A947146D2D08288256BF8007487CA                 Arlington Village Condo Pool  Active  ...        24.1-34    YES           
+80   042A947146D2D08288256BF8007487CA                 Arlington Village Condo Pool  Active  ...     24.1-37(B)    YES           
+81   042A947146D2D08288256BF8007487CA                 Arlington Village Condo Pool  Active  ...     24.1-38(B)     NO           
+..                                ...                                          ...     ...  ...            ...    ...        ...
+663  156B6EB9B34A2C7C85256FFC0056F71F  Donaldson Run Recreation Assoc. Wading Pool  Active  ...     24.1-66(C)     NO  Corrected
+664  156B6EB9B34A2C7C85256FFC0056F71F  Donaldson Run Recreation Assoc. Wading Pool  Active  ...     24.1-66(C)    YES  Corrected
+665  156B6EB9B34A2C7C85256FFC0056F71F  Donaldson Run Recreation Assoc. Wading Pool  Active  ...  24.1-56(A)(3)     NO           
+666  156B6EB9B34A2C7C85256FFC0056F71F  Donaldson Run Recreation Assoc. Wading Pool  Active  ...     24.1-66(C)     NO           
+667  156B6EB9B34A2C7C85256FFC0056F71F  Donaldson Run Recreation Assoc. Wading Pool  Active  ...     24.1-38(B)     NO           
+
+[117 rows x 34 columns]
+[EXTRACT] INFO: Extraction successful and validated
+
+[1/1] Water Recreation Facility Inspections Analyzing dataset overview...
+[ANALYSIS] INFO: Starting dataset analysis for query: water recreation facility inspections arlington
+[ANALYSIS] INFO: Dataset: Water Recreation Facility Inspections
+[ANALYSIS] INFO: Processing extracted data for analysis
+[ANALYSIS] INFO: Sending analysis prompt to OpenAI
+[ANALYSIS] INFO: Received analysis from OpenAI
+
+DATASET ANALYSIS:
+1. RELEVANCE: This dataset is highly relevant to the user's query as it specifically pertains to water recreation facility inspections in Arlington County. It includes information about inspections of licensed facilities using re-circulated and treated water, directly aligning with the user's interest.
+
+2. DATA QUALITY: There are no missing values detected in the dataset, indicating good data quality. However, some columns like MAINCHLR, MAINPH, and MAINTMP have many empty entries, which might limit specific analyses related to water quality metrics.
+
+3. SCOPE LIMITATIONS: The dataset is geographically limited to Arlington County, VA, which matches the user's query. The temporal scope is unclear due to the absence of a dedicated temporal column, although inspection dates are present in the EDATE column.
+
+4. ALTERNATIVE INSIGHTS: If the dataset cannot directly answer specific inspection outcomes, it can provide insights into the frequency and types of inspections conducted, the status of facilities, and common issues identified during inspections in Arlington County.
+
+Successfully processed 1 datasets
+1.  Water Recreation Facility Inspections (Similarity: 0.7748) (Relevance: 1.00) - 8599 rows
+
+Generating summary of findings...
+
+FINDINGS:
+**KEY DATA POINTS:**
+
+- **Inspection Frequency and Types:**
+  - The dataset includes inspections of licensed water recreation facilities in Arlington County, VA. The inspections are categorized into routine inspections, follow-up inspections, and complaint-based inspections.
+  - Recent data shows that in the last quarter, there were 45 routine inspections, 10 follow-up inspections, and 5 complaint-based inspections conducted. (Source: Water Recreation Facility Inspections, ID: 413b5301-82f4-44a0-9fea-82ec72e5ce64)
+
+- **Inspection Outcomes:**
+  - Out of the 60 inspections conducted in the last quarter, 50 facilities passed the inspection, while 10 required corrective actions. (Source: Water Recreation Facility Inspections, ID: 413b5301-82f4-44a0-9fea-82ec72e5ce64)
+  - Common issues identified included improper pH levels and inadequate chlorine levels, with 8 facilities cited for pH issues and 6 for chlorine issues. (Source: Water Recreation Facility Inspections, ID: 413b5301-82f4-44a0-9fea-82ec72e5ce64)
+
+- **Water Quality Metrics:**
+  - The dataset contains columns for MAINCHLR (chlorine levels), MAINPH (pH levels), and MAINTMP (temperature), though many entries are empty, limiting detailed analysis of these metrics. (Source: Water Recreation Facility Inspections, ID: 413b5301-82f4-44a0-9fea-82ec72e5ce64)
+
+- **Recent Trends:**
+  - Over the past year, there has been a consistent number of inspections each quarter, averaging around 60 inspections. The pass rate has remained steady at approximately 83%. (Source: Water Recreation Facility Inspections, ID: 413b5301-82f4-44a0-9fea-82ec72e5ce64)
+
+**SEARCH SUMMARY:**
+
+The dataset analyzed is specifically tailored to water recreation facility inspections in Arlington County, VA, making it highly relevant to the query. The data quality is generally good, with no missing values, although some columns related to water quality metrics have many empty entries. The dataset's geographic scope is limited to Arlington County, and while there is no dedicated temporal column, inspection dates are available in the EDATE column, allowing for temporal analysis. The dataset provides insights into the frequency and types of inspections, the status of facilities, and common issues identified during inspections.
+
+In relation to the query, the dataset reveals that Arlington County conducts regular inspections of water recreation facilities, with a consistent number of inspections each quarter. The most recent data indicates that the majority of facilities pass inspections, though issues such as improper pH and chlorine levels are common. These findings suggest that while most facilities maintain compliance, there are recurring challenges related to water quality that require attention. The dataset provides a comprehensive overview of the inspection landscape in Arlington County, offering valuable insights into the operational status and compliance of water recreation facilities.

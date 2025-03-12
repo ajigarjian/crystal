@@ -9,7 +9,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 def download_resource(api_key: str, dataset_id: str, output_dir: str = "downloads") -> Optional[str]:
     """
-    Download one of a dataset's resource by its ID and save to CSV, XLSX, XML, or PDF if possible.
+    Download one of a dataset's resource by its ID and save to CSV, XLSX, XML, JSON, or PDF if possible.
     
     Args:
         api_key: Data.gov API key
@@ -40,10 +40,10 @@ def download_resource(api_key: str, dataset_id: str, output_dir: str = "download
         # Remove multiple consecutive underscores and limit length
         clean_title = "_".join(filter(None, clean_title.split("_")))[:100]
         
-        # First try to find CSV, Excel, or XML resources
+        # First try to find CSV, Excel, XML, or JSON resources
         for resource in dataset.get("resources", []):
             resource_format = resource.get("format", "").lower()
-            if resource_format in ["csv", "xlsx", "xls", "excel", "xml"]:  # Added XML here
+            if resource_format in ["csv", "xlsx", "xls", "excel", "xml", "json"]:  # Added JSON here
                 url = resource["url"]
                 # Determine file extension based on format or mimetype
                 if resource_format == "excel":
@@ -69,7 +69,7 @@ def download_resource(api_key: str, dataset_id: str, output_dir: str = "download
                 
                 return output_path
         
-        # If no CSV, Excel, or XML found, try to find PDF
+        # If no CSV, Excel, XML, or JSON found, try to find PDF
         for resource in dataset.get("resources", []):
             resource_format = resource.get("format", "").lower()
             if resource_format == "pdf":
@@ -85,10 +85,10 @@ def download_resource(api_key: str, dataset_id: str, output_dir: str = "download
                     for chunk in response.iter_content(chunk_size=8192):
                         f.write(chunk)
                 
-                print(f"Downloaded PDF file: {filename} (CSV/Excel/XML not available)")
+                print(f"Downloaded PDF file: {filename} (CSV/Excel/XML/JSON not available)")
                 return output_path
         
-        print(f"No CSV, Excel, XML, or PDF resource found for dataset {dataset_id}")
+        print(f"No CSV, Excel, XML, JSON, or PDF resource found for dataset {dataset_id}")
         return None
         
     except requests.exceptions.RequestException as e:
@@ -97,7 +97,7 @@ def download_resource(api_key: str, dataset_id: str, output_dir: str = "download
 
 def download_all_resources(api_key: str, dataset_id: str, output_dir: str = "downloads") -> list:
     """
-    Download all CSV, XLSX, XLS, and XML resources from a dataset.
+    Download all CSV, XLSX, XLS, XML, and JSON resources from a dataset.
     Handles insecure connections, HTTP/HTTPS issues, and 403 Forbidden errors.
     
     Args:
@@ -132,10 +132,10 @@ def download_all_resources(api_key: str, dataset_id: str, output_dir: str = "dow
         # List to store paths of downloaded files
         downloaded_files = []
         
-        # First try to find CSV, Excel, or XML resources
+        # First try to find CSV, Excel, XML, or JSON resources
         for i, resource in enumerate(dataset.get("resources", [])):
             resource_format = resource.get("format", "").lower()
-            if resource_format in ["csv", "xlsx", "xls", "excel", "xml"]:
+            if resource_format in ["csv", "xlsx", "xls", "excel", "xml", "json"]:  # Added JSON here
                 resource_url = resource.get("url")
                 if not resource_url:
                     continue
@@ -152,6 +152,8 @@ def download_all_resources(api_key: str, dataset_id: str, output_dir: str = "dow
                     output_filename = f"{clean_title}_{clean_resource_name}.xlsx"
                 elif resource_format == "xml":
                     output_filename = f"{clean_title}_{clean_resource_name}.xml"
+                elif resource_format == "json":  # Added JSON handling
+                    output_filename = f"{clean_title}_{clean_resource_name}.json"
                 else:
                     output_filename = f"{clean_title}_{clean_resource_name}"
                 
@@ -262,7 +264,7 @@ def download_all_resources(api_key: str, dataset_id: str, output_dir: str = "dow
                 if not download_successful:
                     print(f"All download attempts failed for {resource_url}")
         
-        # If no CSV, Excel, or XML found, try to find PDF with the same approach
+        # If no CSV, Excel, XML, or JSON found, try to find PDF with the same approach
         if not downloaded_files:
             for i, resource in enumerate(dataset.get("resources", [])):
                 resource_format = resource.get("format", "").lower()

@@ -10,6 +10,7 @@ from io import StringIO
 import json
 import xml.etree.ElementTree as ET
 from collections import defaultdict
+from pandas import json_normalize
 
 from factchecker.utils.openai_client import chat_completion
 
@@ -21,13 +22,13 @@ relevance to user queries, and preparing them for further analysis.
 
 def load_datafile(file_path: str) -> Union[pd.DataFrame, Dict[str, Any]]:
     """
-    Load a data file (CSV, Excel, PDF, or XML) with appropriate error handling.
+    Load a data file (CSV, Excel, PDF, XML, or JSON) with appropriate error handling.
     
     Args:
         file_path: Path to the data file
         
     Returns:
-        For CSV/Excel/XML: Pandas DataFrame containing the dataset
+        For CSV/Excel/XML/JSON: Pandas DataFrame containing the dataset
         For PDF: Dictionary with extracted text and metadata
     """
     logger = logging.getLogger("data_loading")
@@ -44,6 +45,11 @@ def load_datafile(file_path: str) -> Union[pd.DataFrame, Dict[str, Any]]:
     elif file_extension == '.xml':
         logger.info(f"Detected XML file: {file_path}")
         return load_xml_document(file_path)
+    
+    # Handle JSON files
+    elif file_extension == '.json':
+        logger.info(f"Detected JSON file: {file_path}")
+        return load_json_document(file_path)
     
     try:
         # Handle Excel files
@@ -712,3 +718,96 @@ NOTABLE ELEMENTS:
         pdf_data["enhanced_summary"] = f"Summary generation failed: {str(e)}"
         pdf_data["enhanced_text_sample"] = pdf_data.get("text_sample", "")
         return pdf_data
+
+def load_json_document(file_path: str) -> pd.DataFrame:
+    """
+    Load a JSON file and convert it to a pandas DataFrame.
+    Uses multiple strategies to handle different JSON structures.
+    
+    Args:
+        file_path: Path to the JSON file
+        
+    Returns:
+        DataFrame containing the JSON data
+    """
+    logger = logging.getLogger("data_loading")
+    logger.info(f"Loading JSON file: {file_path}")
+    
+    try:
+        # Read the JSON file
+        with open(file_path, 'r', encoding='utf-8') as f:
+            json_data = json.load(f)
+        
+        # Strategy 1: If JSON is already a list of records (most common case)
+        if isinstance(json_data, list) and len(json_data) > 0 and isinstance(json_data[0], dict):
+            logger.info("JSON is a list of records, converting directly to DataFrame")
+            return pd.DataFrame(json_data)
+        
+        # Strategy 2: If JSON is a dict with a key containing a list of records
+        elif isinstance(json_data, dict):
+            # Look for array fields that might contain the data
+            potential_data_keys = []
+            
+            for key, value in json_data.items():
+                if isinstance(value, list) and len(value) > 0 and isinstance(value[0], dict):
+                    potential_data_keys.append((key, len(value)))
+            
+            # If we found potential data arrays, use the largest one
+            if potential_data_keys:
+                # Sort by array size (descending)
+                potential_data_keys.sort(key=lambda x: x[1], reverse=True)
+                best_key = potential_data_keys[0][0]
+                
+                logger.info(f"Using '{best_key}' field which contains a list of {potential_data_keys[0][1]} records")
+                return pd.DataFrame(json_data[best_key])
+            
+            # Strategy 3: If JSON is a nested structure, try to flatten it
+            logger.info("Attempting to flatten nested JSON structure")
+            try:
+                # Use json_normalize to flatten nested structures
+                df = json_normalize(json_data)
+                
+                # If we got a single row with nested data, try to expand it
+                if len(df.columns) > 0 and len(df) == 1:
+                    for col in df.columns:
+                        # If column contains lists of dicts, expand it
+                        if isinstance(df[col].iloc[0], list) and len(df[col].iloc[0]) > 0 and isinstance(df[col].iloc[0][0], dict):
+                            logger.info(f"Expanding nested array in column '{col}'")
+                            nested_df = pd.DataFrame(df[col].iloc[0])
+                            # Add any other top-level columns
+                            for other_col in df.columns:
+                                if other_col != col:
+                                    nested_df[other_col] = df[other_col].iloc[0]
+                            return nested_df
+                
+                return df
+            except Exception as e:
+                logger.warning(f"Error flattening JSON: {e}")
+            
+            # Strategy 4: If all else fails, convert the dict to a single-row DataFrame
+            logger.info("Converting JSON dict to single-row DataFrame")
+            # Filter out nested structures that can't be directly converted
+            flat_dict = {}
+            for key, value in json_data.items():
+                if isinstance(value, (str, int, float, bool)) or value is None:
+                    flat_dict[key] = value
+                elif isinstance(value, list) and all(isinstance(x, (str, int, float, bool)) for x in value):
+                    flat_dict[key] = str(value)  # Convert simple lists to strings
+            
+            return pd.DataFrame([flat_dict])
+        
+        # Strategy 5: If JSON is a scalar or empty, create a minimal DataFrame
+        else:
+            logger.warning("JSON has unexpected structure, creating minimal DataFrame")
+            return pd.DataFrame({
+                "value": [json_data] if not isinstance(json_data, list) else json_data,
+                "file_path": [file_path]
+            })
+    
+    except Exception as e:
+        logger.error(f"Error loading JSON file: {str(e)}")
+        # Return a minimal DataFrame with error information
+        return pd.DataFrame({
+            "error": [f"Failed to parse JSON: {str(e)}"],
+            "file_path": [file_path]
+        })
