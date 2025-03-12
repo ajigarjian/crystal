@@ -8,4 +8,5 @@ router.register(r'datasets', views.DatasetCatalogViewSet)
 urlpatterns = [
     path('', include(router.urls)),
     path('query/', views.process_query, name='process-query'),
+    path('waitlist/register/', views.register_waitlist, name='register_waitlist'),
 ]

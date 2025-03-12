@@ -6,6 +6,8 @@ import { ArrowRight, Send } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
 import { processQuery } from '@/lib/api';
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 // Pre-generate the data text outside the component
 const DATA_TEXTS = generateDataTexts(150);
@@ -45,6 +47,15 @@ export default function Home() {
   const [startY, setStartY] = useState(0);
   const [startScrollTop, setStartScrollTop] = useState(0);
   
+  // Add this state for the waitlist form
+  const [waitlistForm, setWaitlistForm] = useState({
+    firstName: "",
+    email: ""
+  });
+  
+  // Add this state for submission feedback
+  const [submitted, setSubmitted] = useState(false);
+  
   // Initialize trail positions
   useEffect(() => {
     // Initialize with 5 points at the center
@@ -70,43 +81,52 @@ export default function Home() {
       const left = (gridCol * (100 / gridCols)) + randomOffsetX;
       const top = (gridRow * (100 / gridRows)) + randomOffsetY;
       
-      // Define the "safe zones"
-      const isInAPIButtonZone = gridCol >= 8 && gridRow <= 1;
+      // Define the "safe zones" - areas where we don't want text to appear
       
-      // Center zone for Crystal logo and subheader (middle columns, middle rows)
-      const isInCenterLogoZone = 
+      // Title zone (top-center)
+      const isInTitleZone = 
         (gridCol >= 3 && gridCol <= 6) && // Middle columns
+        (gridRow >= 3 && gridRow <= 4);   // Upper-middle rows
+      
+      // Tagline zone (below title)
+      const isInTaglineZone = 
+        (gridCol >= 2 && gridCol <= 7) && // Middle-wide columns
         (gridRow >= 4 && gridRow <= 5);   // Middle rows
       
-      // Chat interface zone (bottom-center area)
-      const isInChatInterfaceZone = 
-        (gridCol >= 2 && gridCol <= 7) && // Middle-wide columns
-        (gridRow >= 6 && gridRow <= 9);   // Bottom rows
+      // Form zone (center of page)
+      const isInFormZone = 
+        (gridCol >= 3 && gridCol <= 6) && // Middle columns
+        (gridRow >= 5 && gridRow <= 8);   // Middle-lower rows
+      
+      // API button zone (top-right)
+      const isInAPIButtonZone = gridCol >= 8 && gridRow <= 1;
       
       // If in any safe zone, move the text elsewhere
       let safeLeft = left;
       let safeTop = top;
       
-      if (isInAPIButtonZone) {
-        // Move to a different area (middle-left in this case)
-        safeLeft = 20 + (Math.random() * 20);
-        safeTop = 40 + (Math.random() * 20);
-      } else if (isInCenterLogoZone) {
-        // Move to bottom area
-        safeLeft = 30 + (Math.random() * 40);
-        safeTop = 70 + (Math.random() * 20);
-      } else if (isInChatInterfaceZone) {
-        // Move to top or sides
-        if (Math.random() > 0.5) {
-          // Move to top
-          safeLeft = 10 + (Math.random() * 80);
-          safeTop = 10 + (Math.random() * 30);
-        } else {
-          // Move to sides
-          safeLeft = Math.random() > 0.5 ? 
-            5 + (Math.random() * 15) : // Left side
-            80 + (Math.random() * 15); // Right side
-          safeTop = 30 + (Math.random() * 40);
+      if (isInTitleZone || isInTaglineZone || isInFormZone || isInAPIButtonZone) {
+        // Create larger margins around important elements
+        // Move to one of the corners or edges
+        const position = Math.floor(Math.random() * 4); // 0-3 for different positions
+        
+        switch(position) {
+          case 0: // Top-left
+            safeLeft = 5 + (Math.random() * 15);
+            safeTop = 5 + (Math.random() * 15);
+            break;
+          case 1: // Top-right (avoid API button)
+            safeLeft = 70 + (Math.random() * 20);
+            safeTop = 15 + (Math.random() * 15);
+            break;
+          case 2: // Bottom-left
+            safeLeft = 5 + (Math.random() * 15);
+            safeTop = 70 + (Math.random() * 20);
+            break;
+          case 3: // Bottom-right
+            safeLeft = 70 + (Math.random() * 20);
+            safeTop = 70 + (Math.random() * 20);
+            break;
         }
       } else {
         // Otherwise just ensure positions stay within visible bounds (5% to 95%)
@@ -347,6 +367,55 @@ export default function Home() {
     };
   }, [isDragging, startY, startScrollTop]);
 
+  // Add this function to handle form input changes
+  const handleWaitlistInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setWaitlistForm(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+  
+  // Add this function to handle waitlist submission
+  const handleWaitlistSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    try {
+      const response = await fetch('http://localhost:8000/api/waitlist/register/', {  // Direct call to Django
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify({
+          first_name: waitlistForm.firstName,
+          email: waitlistForm.email
+        }),
+      });
+
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to register');
+      }
+      
+      // Show success message
+      setSubmitted(true);
+      
+      // Reset form after 3 seconds
+      setTimeout(() => {
+        setSubmitted(false);
+        setWaitlistForm({
+          firstName: "",
+          email: ""
+        });
+      }, 3000);
+    } catch (error) {
+      console.error('Error submitting form:', error);
+      alert(error.message || "Failed to register. Please try again later.");
+    }
+  };
+
   return (
     <div className="flex items-center justify-center min-h-screen bg-neutral-50 dark:bg-neutral-50 p-4">
       <div
@@ -377,7 +446,7 @@ export default function Home() {
             className="text-white flex items-center gap-1 hover:text-white/80 transition-colors"
             style={{ fontFamily: 'var(--font-geist-sans)' }}
           >
-            API <ArrowRight className="h-4 w-4" />
+            API (coming soon) <ArrowRight className="h-4 w-4" />
           </Button>
         </div>
 
@@ -430,7 +499,7 @@ export default function Home() {
             </div>
             <div className="relative mt-2 z-20 text-center w-full">
               <h2 className="relative text-xl sm:text-2xl text-white" style={{ fontFamily: 'var(--font-geist-sans)' }}>
-                Connect your queries to government data.
+                Querying for Deep<span className="text-green-500 animate-pulse drop-shadow-[0_0_8px_rgba(34,197,94,0.8)]" style={{ textShadow: '0 0 10px rgba(34, 197, 94, 0.8)' }}>er</span> Research into Public Records
               </h2>
             </div>
           </>
@@ -449,83 +518,63 @@ export default function Home() {
           </div>
         )}
         
-        {/* Chat Interface - Position differently based on mode */}
-        <div className={`${chatMode ? 'mt-4' : 'mt-8'} z-20 relative w-full max-w-3xl mx-auto px-4 ${chatMode ? 'flex flex-col' : ''}`}>
-          {/* Chat Messages - Only show in chat mode */}
-          {chatMode && messages.length > 0 && (
-            <div className="flex-grow overflow-y-auto mb-4 pb-4" style={{ height: 'calc(100vh - 180px)' }}>
-              {messages.map((message, index) => (
-                <div 
-                  key={index} 
-                  className={`mb-4 ${message.role === 'user' ? 'text-right' : 'text-left'}`}
+        {/* Waitlist Form - Replace the chat interface */}
+        <div className="z-20 relative w-full max-w-md mx-auto px-4 mt-8">
+          <form 
+            onSubmit={handleWaitlistSubmit}
+            className="bg-white/10 backdrop-blur-sm rounded-lg p-6 border border-white/20"
+          >
+            <h3 className="text-white text-xl font-medium mb-4 text-center">
+              Join our waitlist
+            </h3>
+            
+            {submitted ? (
+              <div className="bg-white/20 text-white p-4 rounded-md text-center">
+                <p className="font-medium">Thanks {waitlistForm.firstName}!</p>
+                <p>We'll notify you when we launch.</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="firstName" className="text-white">
+                    First Name
+                  </Label>
+                  <Input
+                    id="firstName"
+                    name="firstName"
+                    placeholder="Your first name"
+                    value={waitlistForm.firstName}
+                    onChange={handleWaitlistInputChange}
+                    required
+                    className="bg-white/10 border-white/20 text-white placeholder:text-white/70"
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="email" className="text-white">
+                    Email
+                  </Label>
+                  <Input
+                    id="email"
+                    name="email"
+                    type="email"
+                    placeholder="your.email@example.com"
+                    value={waitlistForm.email}
+                    onChange={handleWaitlistInputChange}
+                    required
+                    className="bg-white/10 border-white/20 text-white placeholder:text-white/70"
+                  />
+                </div>
+                
+                <Button 
+                  type="submit" 
+                  className="w-full bg-white/20 hover:bg-white/30 text-white mt-2"
                 >
-                  <div 
-                    className={`inline-block max-w-[80%] rounded-lg p-3 ${
-                      message.role === 'user' 
-                        ? 'bg-white/30 text-white'
-                        : 'bg-white/20 backdrop-blur-xl text-white'
-                    }`}
-                  >
-                    {message.loading ? (
-                      <div className="flex items-center space-x-2">
-                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                        <span>Analyzing data...</span>
-                      </div>
-                    ) : (
-                      <div className="whitespace-pre-wrap">{message.content}</div>
-                    )}
-                    
-                    {/* If there's dataset info, show it */}
-                    {message.role === 'assistant' && message.response?.datasets && (
-                      <div className="mt-2 pt-2 border-t border-white/20">
-                        <p className="text-sm text-white/80">Based on {message.response.datasets.length} datasets</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-          
-          {/* Input area - simplified without Card wrapper */}
-          <div className={`${chatMode ? 'fixed bottom-6 left-0 right-0 px-4 z-50 max-w-3xl mx-auto w-full' : ''}`}>
-            {!chatMode && (
-              <div className="mb-4">
-                <div className="flex flex-wrap gap-2">
-                  {["Air quality in Greenwich Village", "Seattle Section 8 vacancy rates", "Orange grove emissions factors"].map((sampleQuery, i) => (
-                    <button
-                      key={i}
-                      onClick={() => setInputValue(sampleQuery)}
-                      className="text-sm bg-white/10 hover:bg-white/20 text-white px-3 py-1 rounded-full transition-colors"
-                    >
-                      {sampleQuery}
-                    </button>
-                  ))}
-                </div>
+                  Join Waitlist
+                </Button>
               </div>
             )}
-            <div className="flex w-full items-end gap-2">
-              <Textarea
-                placeholder="Ask a question about government data..."
-                className="min-h-[60px] bg-white/10 border-white/20 text-white placeholder:text-white/90 resize-none text-base rounded-lg"
-                value={inputValue}
-                onChange={handleInputChange}
-                onKeyDown={handleKeyDown}
-              />
-              <Button 
-                size="icon" 
-                className="shrink-0 bg-white/20 hover:bg-white/30 text-white h-[60px] w-[60px]"
-                onClick={handleSubmit}
-                disabled={isLoading || !inputValue.trim()}
-              >
-                {isLoading ? (
-                  <div className="h-6 w-6 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                ) : (
-                  <Send className="h-6 w-6" />
-                )}
-              </Button>
-            </div>
-          </div>
+          </form>
         </div>
       </div>
     </div>
