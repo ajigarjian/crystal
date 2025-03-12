@@ -261,7 +261,9 @@ class Command(BaseCommand):
                             "id": dataset["id"],
                             "title": dataset["title"],
                             "similarity": dataset.get("similarity", 0),
-                            "error": "Download failed"
+                            "error": "Download failed",
+                            "is_relevant": False,
+                            "relevance_score": 0.0
                         }, None, None
                         
                     with self.stdout_lock:
@@ -502,8 +504,10 @@ class Command(BaseCommand):
                     "id": dataset["id"],
                     "title": dataset["title"],
                     "similarity": dataset.get("similarity", 0),
-                    "file_path": primary_file_path if primary_file_path else None,
-                    "error": str(e)
+                    "file_path": primary_file_path if 'primary_file_path' in locals() else None,
+                    "error": str(e),
+                    "is_relevant": False,
+                    "relevance_score": 0.0
                 }, None, None
         
         if sequential:
@@ -512,10 +516,9 @@ class Command(BaseCommand):
             for i, dataset in enumerate(relevant_datasets):
                 dataset_info, dataset_analysis, extracted_data = process_dataset(i, dataset)
 
-                # Don't process non-relevant datasets
-                if not dataset_info["is_relevant"]:
-                    print(f"Skipping {dataset_info["title"]} for being irrelevant.")
-
+                # Check if is_relevant key exists before using it
+                if "is_relevant" in dataset_info and not dataset_info["is_relevant"]:
+                    print(f"Skipping {dataset_info['title']} for being irrelevant.")
                 else:
                     results.append(dataset_info)
                     if dataset_analysis:
@@ -534,18 +537,10 @@ class Command(BaseCommand):
                 # Process results as they complete
                 for future in concurrent.futures.as_completed(future_to_index):
                     dataset_info, dataset_analysis, extracted_data = future.result()
-                                    # Don't process non-relevant datasets
-
-                    try:
-                        if not dataset_info["is_relevant"]:
-                            print(f"Skipping {dataset_info["title"]} for being irrelevant.")
-
-                    except KeyError as e:
-                        print(f"Ran into a KeyError processing this data sequentially.")
-                        print("dataset_info, dataset_analysis, extracted_data")
-                        raise(e)
                     
-
+                    # Check if is_relevant key exists before using it
+                    if "is_relevant" in dataset_info and not dataset_info["is_relevant"]:
+                        print(f"Skipping {dataset_info['title']} for being irrelevant.")
                     else:
                         # Add results to our lists
                         results.append(dataset_info)

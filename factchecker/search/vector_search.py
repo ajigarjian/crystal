@@ -149,7 +149,7 @@ def get_usable_resources(dataset_id: str) -> List[Dict]:
             effective_format = format_field if format_field else url_format
             
             # Check if it's a format we can use
-            if effective_format in ["csv", "json", "xlsx", "xls", "pdf"]:
+            if effective_format in ["csv", "json", "xlsx", "xls", "pdf", "xml"]:
                 filtered_resources.append({
                     "url": url,
                     "format": effective_format,

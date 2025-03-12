@@ -8,6 +8,9 @@ import re
 import PyPDF2
 from io import StringIO
 import json
+import xml.etree.ElementTree as ET
+from collections import defaultdict
+from pandas import json_normalize
 
 from factchecker.utils.openai_client import chat_completion
 
@@ -19,13 +22,13 @@ relevance to user queries, and preparing them for further analysis.
 
 def load_datafile(file_path: str) -> Union[pd.DataFrame, Dict[str, Any]]:
     """
-    Load a data file (CSV, Excel, or PDF) with appropriate error handling.
+    Load a data file (CSV, Excel, PDF, XML, or JSON) with appropriate error handling.
     
     Args:
         file_path: Path to the data file
         
     Returns:
-        For CSV/Excel: Pandas DataFrame containing the dataset
+        For CSV/Excel/XML/JSON: Pandas DataFrame containing the dataset
         For PDF: Dictionary with extracted text and metadata
     """
     logger = logging.getLogger("data_loading")
@@ -37,6 +40,16 @@ def load_datafile(file_path: str) -> Union[pd.DataFrame, Dict[str, Any]]:
     if file_extension == '.pdf':
         logger.info(f"Detected PDF file: {file_path}")
         return load_pdf_document(file_path)
+    
+    # Handle XML files
+    elif file_extension == '.xml':
+        logger.info(f"Detected XML file: {file_path}")
+        return load_xml_document(file_path)
+    
+    # Handle JSON files
+    elif file_extension == '.json':
+        logger.info(f"Detected JSON file: {file_path}")
+        return load_json_document(file_path)
     
     try:
         # Handle Excel files
@@ -224,6 +237,187 @@ KEY POINTS:
     except Exception as e:
         logger.error(f"Error extracting PDF content: {str(e)}")
         raise ValueError(f"Error extracting PDF content: {e}")
+
+def load_xml_document(file_path: str) -> Union[pd.DataFrame, Dict[str, Any]]:
+    """
+    Load an XML file and convert it to a pandas DataFrame using ElementTree.
+    Uses a multi-strategy approach to handle different XML structures.
+    
+    Args:
+        file_path: Path to the XML file
+        
+    Returns:
+        DataFrame containing the XML data or a dictionary with XML metadata
+    """
+    logger = logging.getLogger("data_loading")
+    logger.info(f"Loading XML file: {file_path}")
+    
+    try:
+        # First try pandas.read_xml with default settings as it's simplest
+        try:
+            logger.info("Attempting to parse XML with pandas.read_xml")
+            df = pd.read_xml(file_path)
+            
+            # If we got a DataFrame with data, return it
+            if not df.empty and len(df.columns) > 1:
+                logger.info(f"Successfully parsed XML with pandas.read_xml. Shape: {df.shape}")
+                return df
+            else:
+                logger.info("pandas.read_xml returned empty or single-column DataFrame. Will try ElementTree.")
+        except Exception as e:
+            logger.warning(f"pandas.read_xml parsing failed: {str(e)}")
+        
+        # Parse XML using ElementTree
+        logger.info("Parsing XML with ElementTree")
+        tree = ET.parse(file_path)
+        root = tree.getroot()
+        
+        # Strategy 1: Look for repeating elements that could form rows
+        logger.info("Strategy 1: Looking for repeating elements")
+        repeating_elements = find_repeating_elements(root)
+        
+        if repeating_elements:
+            # Get the most common repeating element (likely to be rows)
+            most_common_element = max(repeating_elements.items(), key=lambda x: x[1])[0]
+            logger.info(f"Found repeating element: {most_common_element}")
+            
+            # Extract data from repeating elements
+            rows = []
+            for elem in root.findall(f".//{most_common_element}"):
+                row_data = {}
+                
+                # Extract attributes
+                for key, value in elem.attrib.items():
+                    row_data[key] = value
+                
+                # Extract child elements
+                for child in elem:
+                    # Use tag as column name
+                    if child.text and child.text.strip():
+                        row_data[child.tag] = child.text.strip()
+                    # If child has children, concatenate their text
+                    elif len(list(child)) > 0:
+                        combined_text = " ".join([subchild.text for subchild in child if subchild.text and subchild.text.strip()])
+                        if combined_text:
+                            row_data[child.tag] = combined_text
+                    # Include attributes if no text
+                    elif child.attrib:
+                        for attr_key, attr_val in child.attrib.items():
+                            row_data[f"{child.tag}_{attr_key}"] = attr_val
+                
+                if row_data:  # Only add non-empty rows
+                    rows.append(row_data)
+            
+            if rows:
+                df = pd.DataFrame(rows)
+                logger.info(f"Successfully created DataFrame from repeating elements. Shape: {df.shape}")
+                return df
+        
+        # Strategy 2: Flatten the XML structure
+        logger.info("Strategy 2: Flattening XML structure")
+        flattened_data = []
+        
+        # For each direct child of root that might represent a record
+        for child in root:
+            record = flatten_element(child)
+            if record:
+                flattened_data.append(record)
+        
+        if flattened_data:
+            df = pd.DataFrame(flattened_data)
+            logger.info(f"Successfully created DataFrame from flattened structure. Shape: {df.shape}")
+            return df
+        
+        # Strategy 3: Create a single row with all data (for very flat XMLs)
+        logger.info("Strategy 3: Creating single row with all data")
+        all_data = flatten_element(root)
+        
+        if all_data:
+            df = pd.DataFrame([all_data])
+            logger.info(f"Created single-row DataFrame. Shape: {df.shape}")
+            return df
+        
+        # If all strategies fail, return XML metadata
+        logger.warning("All XML parsing strategies failed. Returning XML metadata.")
+        
+        # Get a sample of the XML content for reference
+        with open(file_path, 'r', encoding='utf-8') as f:
+            xml_sample = f.read(5000)  # First 5000 chars
+        
+        return {
+            "type": "xml",
+            "file_path": file_path,
+            "file_name": os.path.basename(file_path),
+            "root_tag": root.tag,
+            "xml_sample": xml_sample,
+            "parsing_error": "Could not convert XML to DataFrame"
+        }
+    
+    except Exception as e:
+        logger.error(f"Error loading XML file: {str(e)}")
+        # Return a minimal DataFrame with error information
+        return pd.DataFrame({
+            "error": [f"Failed to parse XML: {str(e)}"],
+            "file_path": [file_path]
+        })
+
+def find_repeating_elements(root):
+    """
+    Find elements that repeat in the XML, which likely represent rows in a table.
+    
+    Args:
+        root: Root element of the XML tree
+        
+    Returns:
+        Dictionary mapping element tags to their frequency
+    """
+    element_counts = defaultdict(int)
+    
+    # Count occurrences of each element tag
+    for elem in root.iter():
+        element_counts[elem.tag] += 1
+    
+    # Filter to elements that appear multiple times (potential rows)
+    repeating_elements = {tag: count for tag, count in element_counts.items() 
+                         if count > 1 and tag != root.tag}
+    
+    return repeating_elements
+
+def flatten_element(element, prefix=''):
+    """
+    Recursively flatten an XML element and its children into a dictionary.
+    
+    Args:
+        element: XML element to flatten
+        prefix: Prefix for nested element names
+        
+    Returns:
+        Dictionary with flattened element data
+    """
+    result = {}
+    
+    # Add element attributes
+    for key, value in element.attrib.items():
+        column_name = f"{prefix}{element.tag}_{key}" if prefix else f"{element.tag}_{key}"
+        result[column_name] = value
+    
+    # Add element text if not empty
+    if element.text and element.text.strip():
+        column_name = f"{prefix}{element.tag}" if prefix else element.tag
+        result[column_name] = element.text.strip()
+    
+    # Process child elements
+    for child in element:
+        # Create new prefix for nested elements
+        new_prefix = f"{prefix}{element.tag}_" if prefix else f"{element.tag}_"
+        
+        # Recursively process child element
+        child_data = flatten_element(child, new_prefix)
+        
+        # Add child data to result
+        result.update(child_data)
+    
+    return result
 
 def assess_datafile_relevance(
     df_or_pdf: Union[pd.DataFrame, Dict[str, Any]], 
@@ -524,3 +718,96 @@ NOTABLE ELEMENTS:
         pdf_data["enhanced_summary"] = f"Summary generation failed: {str(e)}"
         pdf_data["enhanced_text_sample"] = pdf_data.get("text_sample", "")
         return pdf_data
+
+def load_json_document(file_path: str) -> pd.DataFrame:
+    """
+    Load a JSON file and convert it to a pandas DataFrame.
+    Uses multiple strategies to handle different JSON structures.
+    
+    Args:
+        file_path: Path to the JSON file
+        
+    Returns:
+        DataFrame containing the JSON data
+    """
+    logger = logging.getLogger("data_loading")
+    logger.info(f"Loading JSON file: {file_path}")
+    
+    try:
+        # Read the JSON file
+        with open(file_path, 'r', encoding='utf-8') as f:
+            json_data = json.load(f)
+        
+        # Strategy 1: If JSON is already a list of records (most common case)
+        if isinstance(json_data, list) and len(json_data) > 0 and isinstance(json_data[0], dict):
+            logger.info("JSON is a list of records, converting directly to DataFrame")
+            return pd.DataFrame(json_data)
+        
+        # Strategy 2: If JSON is a dict with a key containing a list of records
+        elif isinstance(json_data, dict):
+            # Look for array fields that might contain the data
+            potential_data_keys = []
+            
+            for key, value in json_data.items():
+                if isinstance(value, list) and len(value) > 0 and isinstance(value[0], dict):
+                    potential_data_keys.append((key, len(value)))
+            
+            # If we found potential data arrays, use the largest one
+            if potential_data_keys:
+                # Sort by array size (descending)
+                potential_data_keys.sort(key=lambda x: x[1], reverse=True)
+                best_key = potential_data_keys[0][0]
+                
+                logger.info(f"Using '{best_key}' field which contains a list of {potential_data_keys[0][1]} records")
+                return pd.DataFrame(json_data[best_key])
+            
+            # Strategy 3: If JSON is a nested structure, try to flatten it
+            logger.info("Attempting to flatten nested JSON structure")
+            try:
+                # Use json_normalize to flatten nested structures
+                df = json_normalize(json_data)
+                
+                # If we got a single row with nested data, try to expand it
+                if len(df.columns) > 0 and len(df) == 1:
+                    for col in df.columns:
+                        # If column contains lists of dicts, expand it
+                        if isinstance(df[col].iloc[0], list) and len(df[col].iloc[0]) > 0 and isinstance(df[col].iloc[0][0], dict):
+                            logger.info(f"Expanding nested array in column '{col}'")
+                            nested_df = pd.DataFrame(df[col].iloc[0])
+                            # Add any other top-level columns
+                            for other_col in df.columns:
+                                if other_col != col:
+                                    nested_df[other_col] = df[other_col].iloc[0]
+                            return nested_df
+                
+                return df
+            except Exception as e:
+                logger.warning(f"Error flattening JSON: {e}")
+            
+            # Strategy 4: If all else fails, convert the dict to a single-row DataFrame
+            logger.info("Converting JSON dict to single-row DataFrame")
+            # Filter out nested structures that can't be directly converted
+            flat_dict = {}
+            for key, value in json_data.items():
+                if isinstance(value, (str, int, float, bool)) or value is None:
+                    flat_dict[key] = value
+                elif isinstance(value, list) and all(isinstance(x, (str, int, float, bool)) for x in value):
+                    flat_dict[key] = str(value)  # Convert simple lists to strings
+            
+            return pd.DataFrame([flat_dict])
+        
+        # Strategy 5: If JSON is a scalar or empty, create a minimal DataFrame
+        else:
+            logger.warning("JSON has unexpected structure, creating minimal DataFrame")
+            return pd.DataFrame({
+                "value": [json_data] if not isinstance(json_data, list) else json_data,
+                "file_path": [file_path]
+            })
+    
+    except Exception as e:
+        logger.error(f"Error loading JSON file: {str(e)}")
+        # Return a minimal DataFrame with error information
+        return pd.DataFrame({
+            "error": [f"Failed to parse JSON: {str(e)}"],
+            "file_path": [file_path]
+        })

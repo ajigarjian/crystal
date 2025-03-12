@@ -190,7 +190,7 @@ def search_datasets(query: str, api_key: str, similarity_threshold: float = 0.7)
             if "tags" in dataset and isinstance(dataset["tags"], list):
                 tags = [tag.get("name", "") for tag in dataset["tags"] if isinstance(tag, dict)]
             
-            # Filter resources to include CSV, XLSX, XLS, JSON, or PDF formats
+            # Filter resources to include CSV, XLSX, XLS, JSON, XML or PDF formats
             # Check both format field and URL ending
             filtered_resources = []
             for r in dataset.get("resources", []):
@@ -212,7 +212,7 @@ def search_datasets(query: str, api_key: str, similarity_threshold: float = 0.7)
                 effective_format = format_field if format_field else url_format
                 
                 # Check if the effective format is one we can use
-                if effective_format in ["csv", "json", "xlsx", "xls", "pdf"]:
+                if effective_format in ["csv", "json", "xlsx", "xls", "pdf", "xml"]:
                     # Store the effective format in the resource
                     resource = {
                         "url": url,
