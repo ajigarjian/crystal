@@ -522,14 +522,14 @@ export default function Home() {
         <div className="z-20 relative w-full max-w-md mx-auto px-4 mt-8">
           <form 
             onSubmit={handleWaitlistSubmit}
-            className="bg-white/10 backdrop-blur-sm rounded-lg p-6 border border-white/20"
+            className="bg-black/40 backdrop-blur-md rounded-lg p-6 border border-white/30 shadow-xl"
           >
             <h3 className="text-white text-xl font-medium mb-4 text-center">
               Join our waitlist
             </h3>
             
             {submitted ? (
-              <div className="bg-white/20 text-white p-4 rounded-md text-center">
+              <div className="bg-green-500/30 text-white p-4 rounded-md text-center border border-green-400/50">
                 <p className="font-medium">Thanks {waitlistForm.firstName}!</p>
                 <p>We'll notify you when we launch.</p>
               </div>
@@ -546,7 +546,7 @@ export default function Home() {
                     value={waitlistForm.firstName}
                     onChange={handleWaitlistInputChange}
                     required
-                    className="bg-white/10 border-white/20 text-white placeholder:text-white/70"
+                    className="bg-white/20 border-white/30 text-white placeholder:text-white/80 focus:border-green-400/70 focus:ring-1 focus:ring-green-400/70"
                   />
                 </div>
                 
@@ -562,13 +562,13 @@ export default function Home() {
                     value={waitlistForm.email}
                     onChange={handleWaitlistInputChange}
                     required
-                    className="bg-white/10 border-white/20 text-white placeholder:text-white/70"
+                    className="bg-white/20 border-white/30 text-white placeholder:text-white/80 focus:border-green-400/70 focus:ring-1 focus:ring-green-400/70"
                   />
                 </div>
                 
                 <Button 
                   type="submit" 
-                  className="w-full bg-white/20 hover:bg-white/30 text-white mt-2"
+                  className="w-full bg-green-500/80 hover:bg-green-500/90 text-white mt-2 font-medium transition-all"
                 >
                   Join Waitlist
                 </Button>
