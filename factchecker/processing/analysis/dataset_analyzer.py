@@ -143,29 +143,14 @@ def analyze_dataset_overview(
         if "code" in extracted_data and extracted_data["code"]:
             extraction_info.append(f"EXTRACTION CODE: \n{extracted_data['code']}")
         
-        if "printed_output" in extracted_data and extracted_data["printed_output"]:
-            extraction_info.append(f"EXTRACTION OUTPUT: \n{extracted_data['printed_output']}")
-        
         # Include information about the extracted data
         if "results_dict" in extracted_data:
             results = extracted_data["results_dict"]
             if isinstance(results, list) and results:
                 # Include all extracted records (up to a reasonable limit)
                 max_records = min(len(results), 10)
-                extraction_info.append(f"EXTRACTED DATA RECORDS ({len(results)} total):")
+                extraction_info.append(f"EXTRACTED DATA: {results[:10]}")
                 
-                for i, record in enumerate(results[:max_records]):
-                    if isinstance(record, dict):
-                        # For dictionaries, include key-value pairs
-                        record_info = []
-                        for key, value in record.items():
-                            if key in ['Name', 'Geo Place Name', 'Time Period', 'Data Value']:
-                                record_info.append(f"{key}: {value}")
-                        
-                        extraction_info.append(f"Record {i+1}: {', '.join(record_info)}")
-                    else:
-                        # For other types, just include the record
-                        extraction_info.append(f"Record {i+1}: {record}")
             elif isinstance(results, dict) and results:
                 extraction_info.append(f"EXTRACTED DATA: {results}")
     
