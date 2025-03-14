@@ -497,7 +497,7 @@ export default function Home() {
                 Crystal
               </h1>
             </div>
-            <div className="relative mt-2 z-20 text-center w-full">
+            <div className="relative p-2 mt-2 z-20 text-center w-full">
               <h2 className="relative text-xl sm:text-2xl text-white" style={{ fontFamily: 'var(--font-geist-sans)' }}>
                 Querying for Deep<span className="text-green-500 animate-pulse drop-shadow-[0_0_8px_rgba(34,197,94,0.8)]" style={{ textShadow: '0 0 10px rgba(34, 197, 94, 0.8)' }}>er</span> Research into Public Records
               </h2>
