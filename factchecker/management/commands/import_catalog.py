@@ -89,7 +89,8 @@ class Command(BaseCommand):
                         tags_json=json.dumps(dataset.get('tags', [])),
                         extras_json=json.dumps(dataset.get('extras', [])),
                         groups_json=json.dumps(dataset.get('groups', [])),
-                        indexed=False
+                        indexed=False,
+                        image_url=dataset.get('image_url'),
                     )
                     
                     batch_data.append(dataset_obj)
@@ -128,7 +129,7 @@ class Command(BaseCommand):
                                         'license_title', 'license_url', 'maintainer',
                                         'maintainer_email', 'metadata_created',
                                         'metadata_modified', 'tags_json', 'extras_json',
-                                        'groups_json']
+                                        'groups_json', 'image_url']
                         )
                         
                         # Create resources
@@ -163,7 +164,7 @@ class Command(BaseCommand):
                                 'license_title', 'license_url', 'maintainer',
                                 'maintainer_email', 'metadata_created',
                                 'metadata_modified', 'tags_json', 'extras_json',
-                                'groups_json']
+                                'groups_json', 'image_url']
                 )
                 
             if resource_batch:
