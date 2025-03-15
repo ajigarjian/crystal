@@ -41,7 +41,7 @@ def generate_extraction_code(
     
     Args:
         dataset_content: The dataset content (either a pandas DataFrame or a dictionary)
-        column_values_analysis: Analysis of relevant columns and values
+        column_values_analysis: Analysis of potentially relevant columns and values
         query: The original user query
         
     Returns:
@@ -52,41 +52,42 @@ def generate_extraction_code(
     for col_name, analysis in column_values_analysis.items():
         relevant_values = analysis["relevant_values"]
         if not relevant_values:
-            column_analysis_summary.append(f"- Column '{col_name}': No relevant values identified")
+            column_analysis_summary.append(f"- Column '{col_name}': No potentially relevant values identified")
         elif len(relevant_values) == len(analysis["unique_values"]):
-            column_analysis_summary.append(f"- Column '{col_name}': All values are relevant")
+            column_analysis_summary.append(f"- Column '{col_name}': All values are potentially relevant")
         else:
             # Limit the number of values to display
             display_values = relevant_values
             if len(relevant_values) > 10:
                 display_values = relevant_values[:10]
                 column_analysis_summary.append(
-                    f"- Column '{col_name}': {len(relevant_values)} relevant values, including: {display_values}"
+                    f"- Column '{col_name}': {len(relevant_values)} potentially relevant values, including: {display_values}"
                 )
             else:
                 column_analysis_summary.append(
-                    f"- Column '{col_name}': Relevant values: {relevant_values}"
+                    f"- Column '{col_name}': Potentially relevant values: {relevant_values}"
                 )
     
     # Create prompt for OpenAI
     prompt = f"""
-You are a data analysis expert. Given a dataset and analysis of relevant columns and values, generate pandas code to extract the relevant data.
+You are a data analysis expert. Given a dataset and analysis of potentially relevant columns and values, generate pandas code to extract the relevant data.
 
 USER QUERY: "{query}"
 
 DATASET SHAPE: {dataset_content.shape[0]} rows × {dataset_content.shape[1]} columns
 
-COLUMN ANALYSIS:
+POTENTIAL COLUMN ANALYSIS:
 {chr(10).join(column_analysis_summary) if column_analysis_summary else "No relevant columns identified."}
 
 SAMPLE DATA (first 5 rows):
 {dataset_content.head(5).to_string()}
 
 Based on the user query and column analysis, generate pandas code to extract the relevant data. The code should:
-1. Filter the dataframe to include only rows with relevant values in the identified columns
+1. Consider how specific a user query is. If they dont mention any geographical or spatial “filters” etc, dont filter by identified columns.
+1. If applicable, filter the dataframe to include only rows with relevant values in the identified columns
 2. If multiple columns have relevant values, combine the filters appropriately
 3. If no relevant columns or values were identified, return a suitable subset of the data that might be relevant
-4. Include any necessary data transformations or aggregations to answer the query
+4. Include aggregate and comparison values to improve the response.
 
 Return ONLY the Python code, with no additional text or explanation. Use 'df' as the variable name for the input DataFrame.
 """
