@@ -176,30 +176,30 @@ def download_all_resources(api_key: str, dataset_id: str, output_dir: str = "dow
                 # Try different download approaches
                 download_attempts = [
                     # 1. Standard secure download
-                    lambda url: requests.get(url, stream=True, timeout=30),
+                    lambda url: requests.get(url, stream=True, timeout=10),
                     
                     # 2. With browser headers
-                    lambda url: requests.get(url, stream=True, timeout=30, headers=browser_headers),
+                    lambda url: requests.get(url, stream=True, timeout=10, headers=browser_headers),
                     
                     # 3. Insecure download (verify=False)
-                    lambda url: requests.get(url, stream=True, timeout=30, verify=False),
+                    lambda url: requests.get(url, stream=True, timeout=10, verify=False),
                     
                     # 4. Insecure with browser headers
-                    lambda url: requests.get(url, stream=True, timeout=30, verify=False, headers=browser_headers),
+                    lambda url: requests.get(url, stream=True, timeout=10, verify=False, headers=browser_headers),
                     
                     # 5. Try with http:// if https:// fails
-                    lambda url: requests.get(url.replace('https://', 'http://'), stream=True, timeout=30, headers=browser_headers) 
+                    lambda url: requests.get(url.replace('https://', 'http://'), stream=True, timeout=10, headers=browser_headers) 
                     if url.startswith('https://') else None,
                     
                     # 6. Try with https:// if http:// fails
-                    lambda url: requests.get(url.replace('http://', 'https://'), stream=True, timeout=30, headers=browser_headers) 
+                    lambda url: requests.get(url.replace('http://', 'https://'), stream=True, timeout=10, headers=browser_headers) 
                     if url.startswith('http://') else None,
                     
                     # 7. Special case for nycgovparks.org
                     lambda url: requests.get(
                         url, 
                         stream=True, 
-                        timeout=30, 
+                        timeout=10, 
                         headers={
                             **browser_headers,
                             "Referer": "https://www.nycgovparks.org/",
@@ -219,13 +219,26 @@ def download_all_resources(api_key: str, dataset_id: str, output_dir: str = "dow
                         response.raise_for_status()
                         
                         with open(output_path, 'wb') as f:
+                            # Add timeout check for download
+                            start_time = time.time()
                             for chunk in response.iter_content(chunk_size=8192):
+                                # Check if download is taking too long (10 seconds)
+                                if time.time() - start_time > 10:
+                                    print(f"Download taking too long, terminating after 10 seconds")
+                                    raise TimeoutError("Download timeout exceeded")
                                 f.write(chunk)
                         
                         downloaded_files.append(output_path)
                         download_successful = True
                         print(f"Download successful on attempt {attempt_num}")
                         break
+                        
+                    except TimeoutError as te:
+                        print(f"Download attempt {attempt_num} timed out: {te}")
+                        # Remove partially downloaded file
+                        if os.path.exists(output_path):
+                            os.remove(output_path)
+                        break  # Don't try other methods if timeout occurred
                         
                     except Exception as e:
                         print(f"Download attempt {attempt_num} failed: {e}")
@@ -247,6 +260,7 @@ def download_all_resources(api_key: str, dataset_id: str, output_dir: str = "dow
                             "-A", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",  # User agent
                             "-e", "https://catalog.data.gov/",  # Referer
                             "--retry", "3",  # Retry 3 times
+                            "--max-time", "10",  # Set 10 second timeout
                             resource_url
                         ]
                         
@@ -287,21 +301,21 @@ def download_all_resources(api_key: str, dataset_id: str, output_dir: str = "dow
                     # Try different download approaches
                     download_attempts = [
                         # 1. Standard secure download
-                        lambda url: requests.get(url, stream=True, timeout=30),
+                        lambda url: requests.get(url, stream=True, timeout=10),
                         
                         # 2. Insecure download (verify=False)
-                        lambda url: requests.get(url, stream=True, timeout=30, verify=False),
+                        lambda url: requests.get(url, stream=True, timeout=10, verify=False),
                         
                         # 3. Try with http:// if https:// fails
-                        lambda url: requests.get(url.replace('https://', 'http://'), stream=True, timeout=30) 
+                        lambda url: requests.get(url.replace('https://', 'http://'), stream=True, timeout=10) 
                         if url.startswith('https://') else None,
                         
                         # 4. Try with https:// if http:// fails
-                        lambda url: requests.get(url.replace('http://', 'https://'), stream=True, timeout=30) 
+                        lambda url: requests.get(url.replace('http://', 'https://'), stream=True, timeout=10) 
                         if url.startswith('http://') else None,
                         
                         # 5. Insecure http://
-                        lambda url: requests.get(url.replace('https://', 'http://'), stream=True, timeout=30, verify=False) 
+                        lambda url: requests.get(url.replace('https://', 'http://'), stream=True, timeout=10, verify=False) 
                         if url.startswith('https://') else None,
                     ]
                     
@@ -316,13 +330,26 @@ def download_all_resources(api_key: str, dataset_id: str, output_dir: str = "dow
                             response.raise_for_status()
                             
                             with open(output_path, 'wb') as f:
+                                # Add timeout check for download
+                                start_time = time.time()
                                 for chunk in response.iter_content(chunk_size=8192):
+                                    # Check if download is taking too long (10 seconds)
+                                    if time.time() - start_time > 10:
+                                        print(f"Download taking too long, terminating after 10 seconds")
+                                        raise TimeoutError("Download timeout exceeded")
                                     f.write(chunk)
                             
                             downloaded_files.append(output_path)
                             download_successful = True
                             print(f"Download successful on attempt {attempt_num}")
                             break
+                            
+                        except TimeoutError as te:
+                            print(f"Download attempt {attempt_num} timed out: {te}")
+                            # Remove partially downloaded file
+                            if os.path.exists(output_path):
+                                os.remove(output_path)
+                            break  # Don't try other methods if timeout occurred
                             
                         except Exception as e:
                             print(f"Download attempt {attempt_num} failed: {e}")
