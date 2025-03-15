@@ -40,6 +40,9 @@ class DatasetCatalog(models.Model):
     # Add this new field
     notes = models.TextField(blank=True, null=True)
     
+    # New field for image URL
+    image_url = models.URLField(max_length=1000, blank=True, null=True)
+    
     class Meta:
         indexes = [
             models.Index(fields=['title']),
