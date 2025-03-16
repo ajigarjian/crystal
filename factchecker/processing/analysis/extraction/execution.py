@@ -521,8 +521,8 @@ def execute_relevant_data(relevant_data) -> Dict[str, Any]:
                     execution_result, 
                     dataset_content, 
                     query, 
-                    {"code": code},
-                    printed_output
+                    printed_output,
+                    code
                 )
                 
                 print(f"Validation result: is_valid={validation_result.is_valid}, reason={validation_result.reason}")
