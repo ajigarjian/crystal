@@ -386,120 +386,120 @@ If ALL values seem relevant or if filtering by specific values doesn't make sens
     
     return relevant_values
 
-def determine_extraction_strategy(
-    dataset_content: Union[pd.DataFrame, Dict[str, Any]],
-    query: str,
-    dataset_metadata: Dict[str, Any],
-    column_info: List[Dict],
-    dataset_stats: Dict,
-    numerical_stats: Dict,
-    column_values_analysis: Dict,
-    extraction_code: str = None
-) -> Dict[str, Any]:
-    """
-    Use LLM to determine the best strategy for extracting relevant data.
-    """
-    # Create a sample of the dataset
-    sample_rows = dataset_content.head(5).to_string(index=False)
+# def determine_extraction_strategy(
+#     dataset_content: Union[pd.DataFrame, Dict[str, Any]],
+#     query: str,
+#     dataset_metadata: Dict[str, Any],
+#     column_info: List[Dict],
+#     dataset_stats: Dict,
+#     numerical_stats: Dict,
+#     column_values_analysis: Dict,
+#     extraction_code: str = None
+# ) -> Dict[str, Any]:
+#     """
+#     Use LLM to determine the best strategy for extracting relevant data.
+#     """
+#     # Create a sample of the dataset
+#     sample_rows = dataset_content.head(5).to_string(index=False)
     
-    # Format column information for the prompt
-    column_details = []
-    for col in column_info:
-        column_details.append(
-            f"- {col['name']} ({col['dtype']}): {col['unique_values']} unique values, "
-            f"{'has' if col['has_nulls'] else 'no'} nulls, samples: {col['sample_values']}"
-        )
+#     # Format column information for the prompt
+#     column_details = []
+#     for col in column_info:
+#         column_details.append(
+#             f"- {col['name']} ({col['dtype']}): {col['unique_values']} unique values, "
+#             f"{'has' if col['has_nulls'] else 'no'} nulls, samples: {col['sample_values']}"
+#         )
     
-    # Format numerical statistics for the prompt
-    numerical_details = []
-    for col, stats in numerical_stats.items():
-        numerical_details.append(
-            f"- {col}: min={stats['min']}, max={stats['max']}, mean={stats['mean']:.2f}, "
-            f"median={stats['median']}, std={stats['std']:.2f}"
-        )
+#     # Format numerical statistics for the prompt
+#     numerical_details = []
+#     for col, stats in numerical_stats.items():
+#         numerical_details.append(
+#             f"- {col}: min={stats['min']}, max={stats['max']}, mean={stats['mean']:.2f}, "
+#             f"median={stats['median']}, std={stats['std']:.2f}"
+#         )
     
-    # Format column values analysis if available
-    column_analysis_summary = []
-    if column_values_analysis:
-        for col_name, analysis in column_values_analysis.items():
-            relevant_values = analysis["relevant_values"]
-            if not relevant_values:
-                column_analysis_summary.append(f"- Column '{col_name}': No relevant values identified")
-            elif len(relevant_values) == len(analysis["unique_values"]):
-                column_analysis_summary.append(f"- Column '{col_name}': All values are relevant")
-            else:
-                # Limit the number of values to display
-                display_values = relevant_values
-                if len(relevant_values) > 10:
-                    display_values = relevant_values[:10]
-                    column_analysis_summary.append(
-                        f"- Column '{col_name}': {len(relevant_values)} relevant values, including: {display_values}"
-                    )
-                else:
-                    column_analysis_summary.append(
-                        f"- Column '{col_name}': Relevant values: {relevant_values}"
-                    )
+#     # Format column values analysis if available
+#     column_analysis_summary = []
+#     if column_values_analysis:
+#         for col_name, analysis in column_values_analysis.items():
+#             relevant_values = analysis["relevant_values"]
+#             if not relevant_values:
+#                 column_analysis_summary.append(f"- Column '{col_name}': No relevant values identified")
+#             elif len(relevant_values) == len(analysis["unique_values"]):
+#                 column_analysis_summary.append(f"- Column '{col_name}': All values are relevant")
+#             else:
+#                 # Limit the number of values to display
+#                 display_values = relevant_values
+#                 if len(relevant_values) > 10:
+#                     display_values = relevant_values[:10]
+#                     column_analysis_summary.append(
+#                         f"- Column '{col_name}': {len(relevant_values)} relevant values, including: {display_values}"
+#                     )
+#                 else:
+#                     column_analysis_summary.append(
+#                         f"- Column '{col_name}': Relevant values: {relevant_values}"
+#                     )
     
-    # Create prompt for OpenAI
-    prompt = f"""
-You are a data analysis expert. Given a dataset and a user query, your task is to determine the best strategy to extract the relevant data that answers the query.
+#     # Create prompt for OpenAI
+#     prompt = f"""
+# You are a data analysis expert. Given a dataset and a user query, your task is to determine the best strategy to extract the relevant data that answers the query.
 
-USER QUERY: "{query}"
+# USER QUERY: "{query}"
 
-DATASET INFORMATION:
-Title: {dataset_metadata.get('title', 'Unknown')}
-Description: {dataset_metadata.get('description', '')}
+# DATASET INFORMATION:
+# Title: {dataset_metadata.get('title', 'Unknown')}
+# Description: {dataset_metadata.get('description', '')}
 
-DATASET STATISTICS:
-- Rows: {dataset_stats['row_count']}
-- Columns: {dataset_stats['column_count']}
+# DATASET STATISTICS:
+# - Rows: {dataset_stats['row_count']}
+# - Columns: {dataset_stats['column_count']}
 
-COLUMN INFORMATION:
-{chr(10).join(column_details)}
+# COLUMN INFORMATION:
+# {chr(10).join(column_details)}
 
-NUMERICAL COLUMN STATISTICS:
-{chr(10).join(numerical_details) if numerical_details else "No numerical columns found."}
+# NUMERICAL COLUMN STATISTICS:
+# {chr(10).join(numerical_details) if numerical_details else "No numerical columns found."}
 
-{"COLUMN VALUES ANALYSIS:\n" + chr(10).join(column_analysis_summary) if column_analysis_summary else ""}
+# {"COLUMN VALUES ANALYSIS:\n" + chr(10).join(column_analysis_summary) if column_analysis_summary else ""}
 
-{"SUGGESTED EXTRACTION CODE:\n" + extraction_code if extraction_code else ""}
+# {"SUGGESTED EXTRACTION CODE:\n" + extraction_code if extraction_code else ""}
 
-SAMPLE DATA (first 5 rows):
-{sample_rows}
+# SAMPLE DATA (first 5 rows):
+# {sample_rows}
 
-Based on the user query and dataset information, please provide:
+# Based on the user query and dataset information, please provide:
 
-1. ANALYSIS: Analyze how this dataset can answer the user's query
-2. EXTRACTION_STRATEGY: Detailed strategy for extracting the relevant data
-3. PYTHON_CODE: Write pandas code to extract the data (use 'df' as the DataFrame variable)
-4. EXPLANATION: Explain why this extraction method is appropriate
+# 1. ANALYSIS: Analyze how this dataset can answer the user's query
+# 2. EXTRACTION_STRATEGY: Detailed strategy for extracting the relevant data
+# 3. PYTHON_CODE: Write pandas code to extract the data (use 'df' as the DataFrame variable)
+# 4. EXPLANATION: Explain why this extraction method is appropriate
 
-Your response should be in the following format:
-ANALYSIS: [Your analysis]
-EXTRACTION_STRATEGY: [Your strategy]
-PYTHON_CODE: [Your code]
-EXPLANATION: [Your explanation]
-"""
+# Your response should be in the following format:
+# ANALYSIS: [Your analysis]
+# EXTRACTION_STRATEGY: [Your strategy]
+# PYTHON_CODE: [Your code]
+# EXPLANATION: [Your explanation]
+# """
 
-    response = chat_completion(
-    prompt,
-    system_message="You are a data analysis expert specializing in pandas and data extraction.",
-    temperature=0.1  # Low temperature for more deterministic responses
-    )
+#     response = chat_completion(
+#     prompt,
+#     system_message="You are a data analysis expert specializing in pandas and data extraction.",
+#     temperature=0.1  # Low temperature for more deterministic responses
+#     )
     
-    # Parse response
-    content = response
+#     # Parse response
+#     content = response
     
-    # Extract sections
-    analysis = extract_section(content, "ANALYSIS")
-    strategy = extract_section(content, "EXTRACTION_STRATEGY")
-    code = extract_section(content, "PYTHON_CODE")
-    explanation = extract_section(content, "EXPLANATION")
+#     # Extract sections
+#     analysis = extract_section(content, "ANALYSIS")
+#     strategy = extract_section(content, "EXTRACTION_STRATEGY")
+#     code = extract_section(content, "PYTHON_CODE")
+#     explanation = extract_section(content, "EXPLANATION")
     
-    return {
-        "analysis": analysis,
-        "strategy": strategy,
-        "code": code,
-        "explanation": explanation
-    }
+#     return {
+#         "analysis": analysis,
+#         "strategy": strategy,
+#         "code": code,
+#         "explanation": explanation
+#     }
 
