@@ -34,7 +34,8 @@ class ExtractedData(TypedDict):
 def generate_extraction_code(
     dataset_content: Union[pd.DataFrame, Dict[str, Any]],
     column_values_analysis: Dict[str, Dict[str, List[Any]]],
-    query: str
+    query: str,
+    reason=None
 ) -> str:
     """
     Generate pandas code to extract relevant data based on column analysis.
@@ -81,6 +82,9 @@ POTENTIAL COLUMN ANALYSIS:
 
 SAMPLE DATA (first 5 rows):
 {dataset_content.head(5).to_string()}
+
+A PREVIOUS VALIDATION FAILURE REASON:
+{reason if reason else "N/A"}
 
 Based on the user query and column analysis, generate pandas code to extract the relevant data. The code should:
 1. Consider how specific a user query is. If they dont mention any geographical or spatial “filters” etc, dont filter by identified columns.
