@@ -8,6 +8,7 @@ import io
 import traceback
 from contextlib import redirect_stdout
 
+from factchecker.processing.analysis.extraction.generation import generate_extraction_code
 from factchecker.processing.analysis.extraction.shared import ExtractionPlan, ExtractedData
 from factchecker.processing.analysis.extraction.validation import validate_extraction_results
 from factchecker.processing.analysis.extraction.helpers import check_execute_code_response
@@ -180,12 +181,14 @@ def execute_relevant_data(relevant_data) -> Dict[str, Any]:
                     logger.info(f"Validation failed: {validation_result.reason}")
                     
                     # Generate improved code
-                    improved_code = generate_improved_code(
-                        dataset_content, 
-                        query,
-                        validation_result.reason,
-                        code
-                    )
+                    # improved_code = generate_improved_code(
+                    #     dataset_content, 
+                    #     query,
+                    #     validation_result.reason,
+                    #     code
+                    # )
+
+                    improved_code = generate_extraction_code(dataset_content, column_values_analysis, query, validation_result.reason)
                     
                     result["code"] = improved_code
 
