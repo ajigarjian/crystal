@@ -34,7 +34,8 @@ class ExtractedData(TypedDict):
 def generate_extraction_code(
     dataset_content: Union[pd.DataFrame, Dict[str, Any]],
     column_values_analysis: Dict[str, Dict[str, List[Any]]],
-    query: str
+    query: str,
+    reason=None
 ) -> str:
     """
     Generate pandas code to extract relevant data based on column analysis.
@@ -82,6 +83,9 @@ POTENTIAL COLUMN ANALYSIS:
 SAMPLE DATA (first 5 rows):
 {dataset_content.head(5).to_string()}
 
+A PREVIOUS VALIDATION FAILURE REASON:
+{reason if reason else "N/A"}
+
 Based on the user query and column analysis, generate pandas code to extract the relevant data. The code should:
 1. Consider how specific a user query is. If they dont mention any geographical or spatial “filters” etc, dont filter by identified columns.
 1. If applicable, filter the dataframe to include only rows with relevant values in the identified columns
@@ -90,6 +94,14 @@ Based on the user query and column analysis, generate pandas code to extract the
 4. Include aggregate and comparison values to improve the response.
 
 Return ONLY the Python code, with no additional text or explanation. Use 'df' as the variable name for the input DataFrame.
+
+Object to return at end of the Python code:
+
+{{
+    "subset_df": "A subset DataFrame generated in the program that contains helpful information.,
+    "aggregations": {{"key": "value"}} # A dict of key-value pairs for any aggregate and comparison values.
+}}
+
 """
 
     response = chat_completion(
@@ -141,7 +153,11 @@ You are improving data extraction code based on feedback. Generate a better vers
 USER QUERY: "{query}"
 
 EXTRACTION STRATEGY:
-{extraction_plan.get("strategy", "No strategy provided")}
+1. Consider how specific a user query is. If they dont mention any geographical or spatial “filters” etc, dont filter by identified columns.
+1. If applicable, filter the dataframe to include only rows with relevant values in the identified columns
+2. If multiple columns have relevant values, combine the filters appropriately
+3. If no relevant columns or values were identified, return a suitable subset of the data that might be relevant
+4. Include aggregate and comparison values to improve the response.
 
 DATAFRAME INFO:
 {df_info}
@@ -165,6 +181,14 @@ The code should:
 4. Be robust against potential errors
 
 Return ONLY the Python code, with no additional text or explanation. Use 'df' as the variable name for the input DataFrame.
+
+Object to return at end of the Python code:
+
+{{
+    "subset_df": "A subset DataFrame generated in the program that contains helpful information.,
+    "aggregations": {{"key": "value"}} # A dict of key-value pairs for any aggregate and comparison values.
+}}
+
 """
 
     response = chat_completion(

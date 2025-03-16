@@ -8,6 +8,7 @@ import io
 import traceback
 from contextlib import redirect_stdout
 
+from factchecker.processing.analysis.extraction.generation import generate_extraction_code
 from factchecker.processing.analysis.extraction.shared import ExtractionPlan, ExtractedData
 from factchecker.processing.analysis.extraction.validation import validate_extraction_results, evaluate_query_answer_quality
 from factchecker.processing.analysis.extraction.helpers import check_execute_code_response
@@ -81,6 +82,154 @@ Return ONLY the Python code, with no additional text or explanation. Use 'df' as
             code = code[9:-3].strip()
     
     return code
+
+def execute_relevant_data(relevant_data) -> Dict[str, Any]:
+    """
+    Execute the relevant data and return the extracted data
+    
+    Args:
+        relevant_data:
+
+        {
+            "dataset_stats": dataset_stats,
+            "column_info": column_info,
+            "numerical_stats": numerical_stats,
+            "column_values_analysis": column_values_analysis,
+            "extraction_code": extraction_code,
+            "dataset_content": dataset_content
+        }
+        
+    Returns:
+        extracted_data: Dictionary containing extracted data
+    """
+    logger = logging.getLogger("data_extraction")
+    
+    # Result 
+    result = {}
+
+    # Get variables
+    dataset_stats = relevant_data["dataset_stats"]
+    column_info = relevant_data["column_info"]
+    numerical_stats = relevant_data["numerical_stats"]
+    column_values_analysis = relevant_data["column_values_analysis"]
+    extraction_code = relevant_data["extraction_code"]
+    dataset_content = relevant_data["dataset_content"]
+    query = relevant_data["user_query"]
+
+    # Initialize result with default values
+    # Track attempts
+    max_attempts = 3
+    attempts = 0
+    success = False
+    
+    while attempts < max_attempts and not success:
+        attempts += 1
+        logger.info(f"Extraction attempt {attempts}/{max_attempts}")
+        
+        # Get the current code to execute
+        code = relevant_data.get("extraction_code", "").strip()
+        
+        logger.info(f"Executing code:\n{extraction_code}")
+        
+        try:
+            # Execute the code and capture results
+            execution_result, printed_output = execute_code(dataset_content, code)
+
+            # Check for an empty response before calling the validation LLM.
+            response_check = check_execute_code_response(execution_result, printed_output)
+
+            # If the response is None, there were no initial validation errors. Continue.
+            if not response_check:
+
+                # Debug print the extracted data
+                print("Execution Result:", execution_result)
+
+                # Validate the results
+                validation_result = validate_extraction_results(
+                    execution_result, 
+                    dataset_content, 
+                    query, 
+                    printed_output,
+                    code
+                )
+                
+                if validation_result.is_valid:
+                    # If valid, update the result and break the loop
+                    success = True
+                    
+                    # Package the results
+                    if isinstance(execution_result, pd.DataFrame):
+                        result["results_dict"] = execution_result.to_dict(orient="records")
+                    elif isinstance(execution_result, dict):
+                        # Check that it conforms to the expected response
+                        if "subset_df" in execution_result and "aggregations" in execution_result:
+                            result["results_dict"] = execution_result["subset_df"]
+                            result["aggregations"] = execution_result["aggregations"]
+                        else:
+                            # If it doesn't match the expected format, just use the dict as is
+                            result["results_dict"] = execution_result
+                    else:
+                        result["results_dict"] = {"data": execution_result}
+                    
+                    result["printed_output"] = printed_output
+                    logger.info("Extraction successful and validated")
+                
+                else:
+                    # If not valid, update the extraction plan with new code
+                    logger.info(f"Validation failed: {validation_result.reason}")
+                    
+                    # Generate improved code
+                    # improved_code = generate_improved_code(
+                    #     dataset_content, 
+                    #     query,
+                    #     validation_result.reason,
+                    #     code
+                    # )
+
+                    improved_code = generate_extraction_code(dataset_content, column_values_analysis, query, validation_result.reason)
+                    
+                    result["code"] = improved_code
+
+            # If the initial check_execute_code_response check fails
+            else:
+                    # debug log
+                    print(f"Debug: Initial check failed for", execution_result, printed_output, code)
+                    # Generate improved code
+                    improved_code = generate_improved_code(
+                        dataset_content, 
+                        query, 
+                        response_check,
+                        code
+                    )
+                    
+                    result["code"] = improved_code
+                    
+        except Exception as e:
+            error_msg = f"Execution error: {str(e)}"
+            logger.error(f"{error_msg}\n{traceback.format_exc()}")
+            
+            if attempts < max_attempts:
+                # Try to generate improved code that fixes the error
+                improved_code = generate_improved_code(
+                    dataset_content, 
+                    query,
+                    error_msg,
+                    code
+                )
+                
+                # Update the extraction plan with the new code
+                result["code"] = improved_code
+            else:
+                # If this was the last attempt, record the error
+                result["error"] = error_msg
+                
+                # Fallback to a simple extraction
+                result["results_dict"] = dataset_content.head(10).to_dict(orient="records")
+                result["printed_output"] = f"Error occurred: {str(e)}"
+                result["extraction_strategy"] = "Fallback strategy: showing first 10 rows due to error"
+                result["explanation"] = f"Original extraction failed with error: {str(e)}"
+    
+    return result
 
 def execute_code(df: pd.DataFrame, code: str) -> Tuple[Any, str]:
     """

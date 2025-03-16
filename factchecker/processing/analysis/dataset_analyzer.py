@@ -142,6 +142,11 @@ def analyze_dataset_overview(
         
         if "code" in extracted_data and extracted_data["code"]:
             extraction_info.append(f"EXTRACTION CODE: \n{extracted_data['code']}")
+
+        # Include information about the extracted data aggregations
+        if "aggregations" in extracted_data and extracted_data["aggregations"]:
+            extraction_info.append(f"EXTRACTION DATA AGGREGATIONS: \n{extracted_data['aggregations']}")
+        
         
         # Include information about the extracted data
         if "results_dict" in extracted_data:

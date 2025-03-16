@@ -36,8 +36,8 @@ def validate_extraction_results(
     result: Any, 
     original_df: pd.DataFrame, 
     query: str, 
-    extraction_plan: ExtractionPlan,
-    printed_output: str
+    printed_output: str,
+    code: str
 ) -> ValidationResult:
     """
     Validate the extraction results using an LLM.
@@ -67,7 +67,7 @@ You are validating the results of a data extraction operation.
 USER QUERY: "{query}"
 
 CODE EXECUTED:
-{extraction_plan.get("code", "")}
+{code}
 
 EXECUTION RESULT:
 Type: {result_description}
