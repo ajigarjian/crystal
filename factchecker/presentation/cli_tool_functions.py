@@ -14,6 +14,25 @@ from factchecker.processing.analysis.dataset_analyzer import ExtendedJSONEncoder
 from factchecker.utils.openai_client import chat_completion
 
 
+def ensure_serializable(obj):
+    """Convert any non-serializable objects to serializable formats."""
+    if isinstance(obj, pd.DataFrame):
+        return obj.to_dict(orient="records")
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif hasattr(obj, 'to_dict'):
+        return obj.to_dict()
+    return obj
+
+def process_result_for_serialization(result_dict):
+    """Process the result dictionary to ensure all values are JSON serializable."""
+    if isinstance(result_dict, dict):
+        return {k: process_result_for_serialization(v) for k, v in result_dict.items()}
+    elif isinstance(result_dict, list):
+        return [process_result_for_serialization(item) for item in result_dict]
+    else:
+        return ensure_serializable(result_dict)
+
 def summarize_findings(
     query: str,
     extracted_data_list: List[Dict[str, Any]],
@@ -279,21 +298,47 @@ def summarize_findings_alternate(
         
         # Get the actual extracted data - try multiple possible keys
         extracted = None
-        for extracted_key in ["extracted_data", "results_dict", "data", "result"]:
+        aggregations = None
+
+        # First try to get results_dict
+        for extracted_key in ["results_dict", "extracted_data", "data", "result"]:
             if extracted_key in data and data[extracted_key]:
                 extracted = data[extracted_key]
                 break
-                
+
+        # Then try to get aggregations separately - check multiple possible locations
+        if "aggregations" in data and data["aggregations"]:
+            aggregations = data["aggregations"]
+        elif extracted and isinstance(extracted, dict):
+            # Check if aggregations is inside the extracted data
+            if "aggregations" in extracted:
+                aggregations = extracted["aggregations"]
+            # Check if data.aggregations exists (nested structure)
+            elif "data" in extracted and isinstance(extracted["data"], dict) and "aggregations" in extracted["data"]:
+                aggregations = extracted["data"]["aggregations"]
+
         # Get printed output if available
         printed_output = data.get("printed_output", "")
                 
+        # Add this before creating extraction_data
+        if debug_file_paths:
+            print(f"\n[DEBUG] Data keys for dataset {dataset_id}: {list(data.keys())}")
+        
         # Add to extracted_data section
         extraction_data = {
             "dataset_id": dataset_id,
             "dataset_title": dataset_title,
             "file_extractions": []
         }
-        
+
+        # Only add these keys if they exist in the data
+        if "results_dict" in data:
+            extraction_data["results_df"] = data["results_dict"]
+        if "aggregations" in data:
+            extraction_data["aggregations"] = data["aggregations"]
+        if "result" in data:
+            extraction_data["result"] = data["result"]
+
         file_extraction = {
             "file_id": f"{dataset_id}-file-1",
             "filename": filename,
@@ -344,6 +389,10 @@ def summarize_findings_alternate(
                 file_extraction["data_preview"] = printed_output[:500]
             else:
                 file_extraction["data_preview"] = "No data extracted"
+        
+        # Add aggregations if available
+        if aggregations:
+            file_extraction["aggregations"] = aggregations
         
         # Add code used for extraction if available
         if "code" in data:
@@ -428,5 +477,8 @@ def summarize_findings_alternate(
     dataset_ids = [data.get("dataset_id", "unknown") for data in extracted_data_list]
     result["analysis_steps"]["processing_notes"] = f"Analysis based on {len(dataset_ids)} datasets: {', '.join(dataset_ids)}"
     
+    # Process the result to ensure all values are serializable
+    result = process_result_for_serialization(result)
+
     # Return formatted JSON string
     return json.dumps(result, indent=2, cls=ExtendedJSONEncoder)
