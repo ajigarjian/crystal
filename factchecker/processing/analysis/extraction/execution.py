@@ -161,6 +161,14 @@ def execute_relevant_data(relevant_data) -> Dict[str, Any]:
                     # Package the results
                     if isinstance(execution_result, pd.DataFrame):
                         result["results_dict"] = execution_result.to_dict(orient="records")
+                    elif isinstance(execution_result, dict):
+                        # Check that it conforms to the expected response
+                        if "subset_df" in execution_result and "aggregations" in execution_result:
+                            result["results_dict"] = execution_result["subset_df"]
+                            result["aggregations"] = execution_result["aggregations"]
+                        else:
+                            # If it doesn't match the expected format, just use the dict as is
+                            result["results_dict"] = execution_result
                     else:
                         result["results_dict"] = {"data": execution_result}
                     
