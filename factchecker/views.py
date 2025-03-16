@@ -2,7 +2,7 @@ from django.shortcuts import render
 from rest_framework import viewsets, status
 from rest_framework.decorators import api_view, action
 from rest_framework.response import Response
-from factchecker.models import DatasetCatalog
+from factchecker.models import DatasetCatalog, WaitlistEntry
 from factchecker.serializers import DatasetCatalogSerializer
 from factchecker.search import vector_search_datasets, preprocess_query, search_datasets, filter_relevant_datasets
 from factchecker.processing.analysis import load_datafile, assess_datafile_relevance, extract_relevant_data, analyze_dataset_overview
@@ -20,6 +20,9 @@ from threading import Lock
 import traceback
 import numpy as np
 import json
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from corsheaders.defaults import default_headers
 
 # Create a logger for the API
 logger = logging.getLogger("factchecker_api")
@@ -337,3 +340,34 @@ def process_query(request):
             'error': str(e),
             'traceback': traceback.format_exc()
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@csrf_exempt
+@api_view(['POST'])
+def register_waitlist(request):
+    first_name = request.data.get('first_name', '')
+    email = request.data.get('email', '')
+    
+    # Basic validation
+    if not email:
+        return Response(
+            {"error": "Email is required"}, 
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    # Check for duplicates
+    if WaitlistEntry.objects.filter(email=email).exists():
+        return Response(
+            {"error": "This email is already registered"}, 
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    # Create entry
+    WaitlistEntry.objects.create(
+        first_name=first_name,
+        email=email
+    )
+    
+    return Response(
+        {"message": "Successfully added to waitlist"},
+        status=status.HTTP_201_CREATED
+    )
