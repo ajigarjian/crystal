@@ -150,8 +150,8 @@ def execute_relevant_data(relevant_data) -> Dict[str, Any]:
                     execution_result, 
                     dataset_content, 
                     query, 
-                    execution_result,
-                    printed_output
+                    printed_output,
+                    code
                 )
                 
                 if validation_result.is_valid:
