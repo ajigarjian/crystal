@@ -88,7 +88,7 @@ INSTRUCTIONS:
 1. Present the KEY DATA POINTS that directly answer the query - include SPECIFIC NUMBERS and VALUES
 2. Be concise but thorough - include all relevant data in your analysis
 3. Format as bullet points where appropriate
-4. Always cite the source dataset for each data point
+4. Always cite the source dataset and calculation strategy in brackets [] for each data point
 5. If analyzing trends over time, be sure to include the full time range and specific values in your analysis
 6. Pay special attention to the most recent data points when analyzing trends
 
