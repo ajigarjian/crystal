@@ -155,6 +155,7 @@ def summarize_findings_alternate(
         "timestamp": datetime.datetime.now().isoformat(),
         "relevant_datasets": [],
         "extracted_data": [],
+        "dataset_context": [],  # New field for dataset context
         "summary": {
             "text": summary_text,
             "confidence": 0.85
@@ -196,12 +197,44 @@ def summarize_findings_alternate(
         processed_data = process_result_for_serialization(data)
         result["extracted_data"].append(processed_data)
     
+    # Add dataset context from analyses
+    if dataset_analyses:
+        for analysis in dataset_analyses:
+            dataset_context = {
+                "dataset_id": analysis.get("dataset_id", "Unknown ID"),
+                "title": analysis.get("dataset_title", "Unnamed Dataset"),
+                "overview": analysis.get("analysis", "No analysis available"),
+                "column_info": analysis.get("column_info", {}),
+                "numerical_stats": analysis.get("numerical_stats", {}),
+                "temporal_coverage": analysis.get("temporal_coverage", {}),
+                "missing_values": analysis.get("missing_values", {}),
+                "data_quality": analysis.get("data_quality", {})
+            }
+            
+            # Add any additional metadata that might be useful
+            if "dataset_metadata" in analysis:
+                dataset_context["metadata"] = analysis["dataset_metadata"]
+                
+            # Add any dataset statistics
+            if "dataset_stats" in analysis:
+                dataset_context["statistics"] = analysis["dataset_stats"]
+                
+            result["dataset_context"].append(dataset_context)
+    
     # Add analysis steps info
     result["analysis_steps"]["extraction_time_sec"] = round(time.time() - start_time, 1)
     
     # Include dataset IDs in processing notes
     dataset_ids = [data.get("dataset_id", "unknown") for data in extracted_data_list]
     result["analysis_steps"]["processing_notes"] = f"Analysis based on {len(dataset_ids)} datasets: {', '.join(dataset_ids)}"
+    
+    # Add query processing details
+    result["analysis_steps"]["query_processing"] = {
+        "original_query": query,
+        "datasets_analyzed": len(dataset_ids),
+        "extraction_methods_used": [data.get("extraction_strategy", "Unknown strategy") 
+                                   for data in extracted_data_list if "extraction_strategy" in data]
+    }
     
     # Return formatted JSON string
     return json.dumps(result, indent=2, cls=ExtendedJSONEncoder)
