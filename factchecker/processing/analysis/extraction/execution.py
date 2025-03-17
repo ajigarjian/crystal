@@ -242,38 +242,43 @@ def execute_code(df: pd.DataFrame, code: str) -> Tuple[Any, str]:
     captured_output = io.StringIO()
     
     try:
-        # First try to evaluate as an expression
-        with redirect_stdout(captured_output):
-            result = eval(code, {"__builtins__": {}}, local_env)
-        
-        printed_output = captured_output.getvalue().strip()
-        return result, printed_output
-        
-    except SyntaxError:
-        # If not an expression, execute as a statement block
-        captured_output = io.StringIO()  # Reset the captured output
-        
+        # Instead of trying to evaluate as an expression first, always execute as a statement block
+        # and look for the dictionary at the end
         with redirect_stdout(captured_output):
             exec(code, {"__builtins__": __builtins__}, local_env)
         
         printed_output = captured_output.getvalue().strip()
         
-        # Try to find the result in the local environment
-        new_vars = [var for var in local_env if var not in ["df", "pd", "np"]]
+        # Look for a dictionary in the local environment that matches the expected format
+        result = None
+        for var_name, var_value in local_env.items():
+            if var_name not in ["df", "pd", "np"] and isinstance(var_value, dict):
+                if "subset_df" in var_value and "aggregations" in var_value:
+                    result = var_value
+                    break
         
-        if new_vars:
-            # Use the last variable created as the result
-            result_var = new_vars[-1]
-            result = local_env[result_var]
-        else:
-            # If no new variables were created, check if df was modified
-            if not df.equals(local_env["df"]):
-                result = local_env["df"]
+        # If we didn't find a matching dictionary, check if any new variables were created
+        if result is None:
+            new_vars = [var for var in local_env if var not in ["df", "pd", "np"]]
+            
+            if new_vars:
+                # Use the last variable created as the result
+                result_var = new_vars[-1]
+                result = local_env[result_var]
             else:
-                # If nothing changed, use the original DataFrame
-                result = df
+                # If no new variables were created, check if df was modified
+                if not df.equals(local_env["df"]):
+                    result = local_env["df"]
+                else:
+                    # If nothing changed, use the original DataFrame
+                    result = df
         
         return result, printed_output
+        
+    except Exception as e:
+        # If execution fails, log the error and return None
+        printed_output = captured_output.getvalue().strip()
+        return None, f"{printed_output}\nError: {str(e)}"
 
 def validate_query_answer_quality(
     result: Any,
@@ -304,6 +309,14 @@ def validate_query_answer_quality(
         "printed_output": printed_output,
         "validation_history": []
     }
+    
+    # Save subset_df from any attempt that has it
+    original_subset_df = None
+    
+    # Preserve subset_df if it exists in the initial result
+    if isinstance(result, dict) and "subset_df" in result:
+        original_subset_df = result["subset_df"]
+        final_result["subset_df"] = original_subset_df
     
     # Track attempts
     max_attempts = 3
@@ -339,6 +352,8 @@ def validate_query_answer_quality(
             # Package the results
             if isinstance(result, pd.DataFrame):
                 final_result["results_dict"] = result.to_dict(orient="records")
+            elif isinstance(result, dict) and "aggregations" in result:
+                final_result["results_dict"] = {"data": result["aggregations"]}
             else:
                 final_result["results_dict"] = {"data": result}
             
@@ -360,11 +375,14 @@ def validate_query_answer_quality(
                 improved_code = improved_code.replace("```python", "", 1)
             if improved_code.endswith("```"):
                 improved_code = improved_code[:-3]
-            improved_code = improved_code.strip()
-            
             # Execute the improved code
             try:
                 new_result, new_printed_output = execute_code(original_df, improved_code)
+                
+                # Preserve subset_df if it exists in the new result
+                if isinstance(new_result, dict) and "subset_df" in new_result:
+                    original_subset_df = new_result["subset_df"]
+                    final_result["subset_df"] = original_subset_df
                 
                 # Update for next iteration
                 result = new_result
@@ -379,6 +397,11 @@ def validate_query_answer_quality(
                 # Try executing the new improved code
                 try:
                     new_result, new_printed_output = execute_code(original_df, improved_code)
+                    
+                    # Preserve subset_df if it exists in the new result
+                    if isinstance(new_result, dict) and "subset_df" in new_result:
+                        original_subset_df = new_result["subset_df"]
+                        final_result["subset_df"] = original_subset_df
                     
                     # Update for next iteration
                     result = new_result
@@ -402,6 +425,11 @@ def validate_query_answer_quality(
             try:
                 new_result, new_printed_output = execute_code(original_df, improved_code)
                 
+                # Preserve subset_df if it exists in the new result
+                if isinstance(new_result, dict) and "subset_df" in new_result:
+                    original_subset_df = new_result["subset_df"]
+                    final_result["subset_df"] = original_subset_df
+                
                 # Update for next iteration
                 result = new_result
                 printed_output = new_printed_output
@@ -418,6 +446,8 @@ def validate_query_answer_quality(
         # Package the results
         if isinstance(result, pd.DataFrame):
             final_result["results_dict"] = result.to_dict(orient="records")
+        elif isinstance(result, dict) and "aggregations" in result:
+            final_result["results_dict"] = {"data": result["aggregations"]}
         else:
             final_result["results_dict"] = {"data": result}
         
@@ -429,6 +459,18 @@ def validate_query_answer_quality(
             best_attempt = max(final_result["validation_history"], key=lambda x: x["answer_quality"])
             final_result["answer_quality"] = best_attempt["answer_quality"]
             final_result["answer_quality_reasoning"] = best_attempt["reasoning"]
+    
+    # Always include the original subset_df in the final result if we found one
+    if original_subset_df is not None and "subset_df" not in final_result:
+        final_result["subset_df"] = original_subset_df
+    
+    # Ensure subset_df is properly formatted for serialization if it exists
+    if "subset_df" in final_result:
+        # If subset_df is a DataFrame, convert to dict for serialization
+        if isinstance(final_result["subset_df"], pd.DataFrame):
+            # Limit to a reasonable number of rows to avoid huge outputs
+            subset_df = final_result["subset_df"].head(100)
+            final_result["subset_df"] = subset_df.to_dict(orient="records")
     
     return final_result
 
