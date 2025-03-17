@@ -598,7 +598,7 @@ class Command(BaseCommand):
                     else:
                         summary_text = str(output_dict["summary"])
                     #self.stdout.write(summary_text)
-                    print("Summary is disabled for now.")
+                    print("Skipping printed summary because --json-output flag was passed.")
                     
                     # Handle case where confidence score might be nested or directly present
                     if isinstance(output_dict["summary"], dict) and "confidence" in output_dict["summary"]:
