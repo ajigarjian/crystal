@@ -2,12 +2,8 @@
 
 import { Button } from "@/components/ui/button";
 import { useEffect, useRef, useState } from "react";
-import { ArrowRight, Send } from "lucide-react";
-import { Textarea } from "@/components/ui/textarea";
-import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
-import { processQuery } from '@/lib/api';
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { ArrowRight } from "lucide-react";
+import Link from "next/link";
 
 // Pre-generate the data text outside the component
 const DATA_TEXTS = generateDataTexts(150);
@@ -18,8 +14,6 @@ export default function Home() {
   const trailPositions = useRef<Array<{x: number, y: number}>>([]);
   const requestRef = useRef<number>();
   const previousTimeRef = useRef<number>();
-  const [inputValue, setInputValue] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
   
   // State to hold the randomized positions and styles
   const [textStyles, setTextStyles] = useState<Array<{
@@ -30,31 +24,6 @@ export default function Home() {
     opacity: number;
     transform: string;
   }>>([]);
-  
-  // Add these state variables to your Home component
-  const [chatMode, setChatMode] = useState(false);
-  const [messages, setMessages] = useState<Array<{
-    role: 'user' | 'assistant';
-    content: string;
-    loading?: boolean;
-    response?: any; // To store the full API response
-  }>>([]);
-  
-  const contentRef = useRef(null);
-  const [thumbHeight, setThumbHeight] = useState(0);
-  const [thumbTop, setThumbTop] = useState(0);
-  const [isDragging, setIsDragging] = useState(false);
-  const [startY, setStartY] = useState(0);
-  const [startScrollTop, setStartScrollTop] = useState(0);
-  
-  // Add this state for the waitlist form
-  const [waitlistForm, setWaitlistForm] = useState({
-    firstName: "",
-    email: ""
-  });
-  
-  // Add this state for submission feedback
-  const [submitted, setSubmitted] = useState(false);
   
   // Initialize trail positions
   useEffect(() => {
@@ -93,19 +62,21 @@ export default function Home() {
         (gridCol >= 2 && gridCol <= 7) && // Middle-wide columns
         (gridRow >= 4 && gridRow <= 5);   // Middle rows
       
-      // Form zone (center of page)
-      const isInFormZone = 
+      // Buttons zone (center of page) - SMALLER THAN BEFORE
+      const isInButtonsZone = 
         (gridCol >= 3 && gridCol <= 6) && // Middle columns
-        (gridRow >= 5 && gridRow <= 8);   // Middle-lower rows
+        (gridRow >= 6 && gridRow <= 7);   // Just 2 rows instead of 3-4 rows previously
       
-      // API button zone (top-right)
-      const isInAPIButtonZone = gridCol >= 8 && gridRow <= 1;
+      // Navigation links zone (top-right) - EXPANDED
+      const isInNavLinksZone = 
+        (gridCol >= 6 && gridCol <= 9) && // Right side columns
+        (gridRow <= 1);                   // Top row
       
       // If in any safe zone, move the text elsewhere
       let safeLeft = left;
       let safeTop = top;
       
-      if (isInTitleZone || isInTaglineZone || isInFormZone || isInAPIButtonZone) {
+      if (isInTitleZone || isInTaglineZone || isInButtonsZone || isInNavLinksZone) {
         // Create larger margins around important elements
         // Move to one of the corners or edges
         const position = Math.floor(Math.random() * 4); // 0-3 for different positions
@@ -115,9 +86,9 @@ export default function Home() {
             safeLeft = 5 + (Math.random() * 15);
             safeTop = 5 + (Math.random() * 15);
             break;
-          case 1: // Top-right (avoid API button)
+          case 1: // Middle-right
             safeLeft = 70 + (Math.random() * 20);
-            safeTop = 15 + (Math.random() * 15);
+            safeTop = 40 + (Math.random() * 20);
             break;
           case 2: // Bottom-left
             safeLeft = 5 + (Math.random() * 15);
@@ -202,27 +173,18 @@ export default function Home() {
   };
   
   useEffect(() => {
-    if (chatMode) {
-      // If in chat mode, cancel any existing animation frame
-      if (requestRef.current) {
-        cancelAnimationFrame(requestRef.current);
-        requestRef.current = undefined;
-      }
-      return;
-    }
-    
-    // Only run animation when not in chat mode
+    // Run animation
     requestRef.current = requestAnimationFrame(animate);
     return () => {
       if (requestRef.current) {
         cancelAnimationFrame(requestRef.current as number);
       }
     };
-  }, [mousePosition, chatMode]);
+  }, [mousePosition]);
   
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
-      if (!containerRef.current || chatMode) return; // Skip if in chat mode
+      if (!containerRef.current) return;
       
       const rect = containerRef.current.getBoundingClientRect();
       const x = e.clientX - rect.left;
@@ -241,188 +203,13 @@ export default function Home() {
         container.removeEventListener('mousemove', handleMouseMove);
       }
     };
-  }, [chatMode]);
-
-  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setInputValue(e.target.value);
-  };
-
-  const handleSubmit = async () => {
-    if (!inputValue.trim()) return;
-    
-    // Add user message to the chat
-    const userMessage = inputValue;
-    setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
-    
-    // Add a loading message from the assistant
-    setMessages(prev => [...prev, { role: 'assistant', content: '', loading: true }]);
-    
-    // Switch to chat mode if not already
-    if (!chatMode) {
-      setChatMode(true);
-    }
-    
-    setIsLoading(true);
-    setInputValue("");
-    
-    try {
-      const response = await processQuery(userMessage);
-      
-      // Update the loading message with the actual response
-      setMessages(prev => {
-        const newMessages = [...prev];
-        const loadingIndex = newMessages.findIndex(m => m.loading);
-        if (loadingIndex !== -1) {
-          newMessages[loadingIndex] = {
-            role: 'assistant',
-            content: response.summary || "No summary available",
-            response: response
-          };
-        }
-        return newMessages;
-      });
-      
-    } catch (error) {
-      console.error("Error processing query:", error);
-      
-      // Update the loading message with an error
-      setMessages(prev => {
-        const newMessages = [...prev];
-        const loadingIndex = newMessages.findIndex(m => m.loading);
-        if (loadingIndex !== -1) {
-          newMessages[loadingIndex] = {
-            role: 'assistant',
-            content: "Sorry, I encountered an error processing your query. Please try again."
-          };
-        }
-        return newMessages;
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSubmit();
-    }
-  };
-
-  useEffect(() => {
-    const content = contentRef.current;
-    if (!content) return;
-    
-    const updateThumb = () => {
-      const { scrollHeight, clientHeight, scrollTop } = content;
-      const scrollRatio = clientHeight / scrollHeight;
-      const newThumbHeight = Math.max(scrollRatio * clientHeight, 30); // Minimum thumb height
-      const newThumbTop = (scrollTop / scrollHeight) * clientHeight;
-      
-      setThumbHeight(newThumbHeight);
-      setThumbTop(newThumbTop);
-    };
-    
-    content.addEventListener('scroll', updateThumb);
-    window.addEventListener('resize', updateThumb);
-    updateThumb();
-    
-    return () => {
-      content.removeEventListener('scroll', updateThumb);
-      window.addEventListener('resize', updateThumb);
-    };
   }, []);
-
-  const handleThumbMouseDown = (e) => {
-    setIsDragging(true);
-    setStartY(e.clientY);
-    setStartScrollTop(contentRef.current.scrollTop);
-  };
-
-  useEffect(() => {
-    const handleMouseMove = (e) => {
-      if (!isDragging) return;
-      
-      const content = contentRef.current;
-      const { scrollHeight, clientHeight } = content;
-      const deltaY = e.clientY - startY;
-      const deltaRatio = deltaY / clientHeight;
-      const newScrollTop = startScrollTop + deltaRatio * scrollHeight;
-      
-      content.scrollTop = newScrollTop;
-    };
-    
-    const handleMouseUp = () => {
-      setIsDragging(false);
-    };
-    
-    if (isDragging) {
-      window.addEventListener('mousemove', handleMouseMove);
-      window.addEventListener('mouseup', handleMouseUp);
-    }
-    
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [isDragging, startY, startScrollTop]);
-
-  // Add this function to handle form input changes
-  const handleWaitlistInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    setWaitlistForm(prev => ({
-      ...prev,
-      [name]: value
-    }));
-  };
-  
-  // Add this function to handle waitlist submission
-  const handleWaitlistSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    try {
-      const response = await fetch('http://localhost:8000/api/waitlist/register/', {  // Direct call to Django
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
-        body: JSON.stringify({
-          first_name: waitlistForm.firstName,
-          email: waitlistForm.email
-        }),
-      });
-
-      const data = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to register');
-      }
-      
-      // Show success message
-      setSubmitted(true);
-      
-      // Reset form after 3 seconds
-      setTimeout(() => {
-        setSubmitted(false);
-        setWaitlistForm({
-          firstName: "",
-          email: ""
-        });
-      }, 3000);
-    } catch (error) {
-      console.error('Error submitting form:', error);
-      alert(error.message || "Failed to register. Please try again later.");
-    }
-  };
 
   return (
     <div className="flex items-center justify-center min-h-screen bg-neutral-50 dark:bg-neutral-50 p-4">
       <div
         ref={containerRef}
-        className={`w-full h-[calc(100vh-2rem)] rounded-lg bg-cover bg-center flex flex-col ${
-          chatMode ? 'justify-start' : 'justify-center'
-        } relative overflow-hidden`}
+        className="w-full h-[calc(100vh-2rem)] rounded-lg bg-cover bg-center flex flex-col justify-center relative overflow-hidden"
         style={{
           backgroundImage: "url('/images/crystal-bg0.png')",
           '--mouse-x': '50%',
@@ -439,8 +226,26 @@ export default function Home() {
           '--trail-y-4': '50%',
         } as React.CSSProperties}
       >
-        {/* API Link in upper right corner */}
-        <div className="absolute top-6 right-6 z-30">
+        {/* Navigation links */}
+        <div className="absolute top-6 right-6 z-30 flex gap-4">
+          <Link href="/datasets">
+            <Button 
+              variant="link" 
+              className="text-white flex items-center gap-1 hover:text-white/80 transition-colors"
+              style={{ fontFamily: 'var(--font-geist-sans)' }}
+            >
+              Datasets
+            </Button>
+          </Link>
+          <Link href="/waitlist">
+            <Button 
+              variant="link" 
+              className="text-white flex items-center gap-1 hover:text-white/80 transition-colors"
+              style={{ fontFamily: 'var(--font-geist-sans)' }}
+            >
+              Join Waitlist
+            </Button>
+          </Link>
           <Button 
             variant="link" 
             className="text-white flex items-center gap-1 hover:text-white/80 transition-colors"
@@ -449,9 +254,9 @@ export default function Home() {
             API (coming soon) <ArrowRight className="h-4 w-4" />
           </Button>
         </div>
-
+        
         {/* Data Text Background Layer */}
-        <div className={`absolute inset-0 z-0 data-text-background ${chatMode ? 'opacity-0' : ''} transition-opacity duration-300`}>
+        <div className="absolute inset-0 z-0 data-text-background">
           {DATA_TEXTS.map((text, i) => (
             <div 
               key={i} 
@@ -474,107 +279,48 @@ export default function Home() {
           ))}
         </div>
         
-        {/* Background Image Layer with trail effect */}
+        {/* Background Image Layer with trail effect and darker overlay */}
         <div 
-          className={`absolute inset-0 z-10 bg-cover bg-center ${
-            chatMode ? 'after:absolute after:inset-0 after:bg-black/70 after:backdrop-blur-sm' : 'trail-mask'
-          }`} 
+          className="absolute inset-0 z-10 bg-cover bg-center trail-mask after:absolute after:inset-0 after:bg-black/40 after:z-10" 
           style={{ backgroundImage: "url('/images/crystal-bg0.png')" }}
         ></div>
         
-        {/* Content - Show differently based on chat mode */}
-        {!chatMode ? (
-          // Landing page content
-          <>
-            <div className="flex items-center justify-center z-20 relative w-full">
-              <img 
-                src="/images/gem.svg" 
-                alt="Crystal Gem Logo" 
-                className="h-12 w-12 mr-3" 
-                style={{ filter: "brightness(0) invert(1)" }}
-              />
-              <h1 className="text-6xl font-bold text-white" style={{ fontFamily: 'var(--font-geist-sans)' }}>
-                Crystal
-              </h1>
-            </div>
-            <div className="relative p-2 mt-2 z-20 text-center w-full">
-              <h2 className="relative text-xl sm:text-2xl text-white" style={{ fontFamily: 'var(--font-geist-sans)' }}>
-                Querying for Deep<span className="text-green-500 animate-pulse drop-shadow-[0_0_8px_rgba(34,197,94,0.8)]" style={{ textShadow: '0 0 10px rgba(34, 197, 94, 0.8)' }}>er</span> Research into Public Records
-              </h2>
-            </div>
-          </>
-        ) : (
-          // Chat mode header - smaller version of the logo
-          <div className="flex items-center z-20 relative pt-6 px-6">
-            <img 
-              src="/images/gem.svg" 
-              alt="Crystal Gem Logo" 
-              className="h-8 w-8 mr-2" 
-              style={{ filter: "brightness(0) invert(1)" }}
-            />
-            <h1 className="text-2xl font-bold text-white" style={{ fontFamily: 'var(--font-geist-sans)' }}>
-              Crystal
-            </h1>
-          </div>
-        )}
+        {/* Content */}
+        <div className="flex items-center justify-center z-20 relative w-full">
+          <img 
+            src="/images/gem.svg" 
+            alt="Crystal Gem Logo" 
+            className="h-12 w-12 mr-3" 
+            style={{ filter: "brightness(0) invert(1)" }}
+          />
+          <h1 className="text-6xl font-bold text-white" style={{ fontFamily: 'var(--font-geist-sans)' }}>
+            Crystal
+          </h1>
+        </div>
+        <div className="relative p-2 mt-2 z-20 text-center w-full">
+          <h2 className="relative text-xl sm:text-2xl text-white" style={{ fontFamily: 'var(--font-geist-sans)' }}>
+            Querying for Deep<span className="text-green-500 animate-pulse drop-shadow-[0_0_8px_rgba(34,197,94,0.8)]" style={{ textShadow: '0 0 10px rgba(34, 197, 94, 0.8)' }}>er</span> Research into Public Records
+          </h2>
+        </div>
         
-        {/* Waitlist Form - Replace the chat interface */}
-        <div className="z-20 relative w-full max-w-md mx-auto px-4 mt-8">
-          <form 
-            onSubmit={handleWaitlistSubmit}
-            className="bg-black/40 backdrop-blur-md rounded-lg p-6 border border-white/30 shadow-xl"
-          >
-            <h3 className="text-white text-xl font-medium mb-4 text-center">
-              Join our waitlist
-            </h3>
-            
-            {submitted ? (
-              <div className="bg-green-500/30 text-white p-4 rounded-md text-center border border-green-400/50">
-                <p className="font-medium">Thanks {waitlistForm.firstName}!</p>
-                <p>We'll notify you when we launch.</p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="firstName" className="text-white">
-                    First Name
-                  </Label>
-                  <Input
-                    id="firstName"
-                    name="firstName"
-                    placeholder="Your first name"
-                    value={waitlistForm.firstName}
-                    onChange={handleWaitlistInputChange}
-                    required
-                    className="bg-white/20 border-white/30 text-white placeholder:text-white/80 focus:border-green-400/70 focus:ring-1 focus:ring-green-400/70"
-                  />
-                </div>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="email" className="text-white">
-                    Email
-                  </Label>
-                  <Input
-                    id="email"
-                    name="email"
-                    type="email"
-                    placeholder="your.email@example.com"
-                    value={waitlistForm.email}
-                    onChange={handleWaitlistInputChange}
-                    required
-                    className="bg-white/20 border-white/30 text-white placeholder:text-white/80 focus:border-green-400/70 focus:ring-1 focus:ring-green-400/70"
-                  />
-                </div>
-                
-                <Button 
-                  type="submit" 
-                  className="w-full bg-green-500/80 hover:bg-green-500/90 text-white mt-2 font-medium transition-all"
-                >
-                  Join Waitlist
-                </Button>
-              </div>
-            )}
-          </form>
+        {/* Call to action buttons */}
+        <div className="z-20 relative w-full max-w-md mx-auto px-4 mt-8 flex flex-col gap-4">
+          <Link href="/beta" className="w-full">
+            <Button 
+              className="w-full bg-green-500/80 hover:bg-green-500/90 text-white font-medium transition-all"
+            >
+              Try the Beta
+            </Button>
+          </Link>
+          
+          <Link href="/waitlist" className="w-full">
+            <Button 
+              variant="outline"
+              className="w-full bg-white/10 hover:bg-white/20 text-white border-white/30 font-medium transition-all"
+            >
+              Join Waitlist
+            </Button>
+          </Link>
         </div>
       </div>
     </div>

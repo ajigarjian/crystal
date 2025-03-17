@@ -1,0 +1,522 @@
+FAISS Search Results (Optimized - Single Load)
+Generated on: 2025-03-17 00:23:21
+FAISS index loaded in 1.1190 seconds
+================================================================================
+
+Query 1: "air quality in greenwich village"
+--------------------------------------------------------------------------------
+
+FAISS search: 2 results in 7.7588 seconds
+
+  1. Air Quality
+     Similarity: 0.4718
+     ID: 29aa21ae-b135-4227-9db6-6dd283715900
+
+  2. NYC Greenhouse Gas Emissions Municipal Inventory
+     Similarity: 0.4097
+     ID: a262a6c1-d370-40ac-9477-e220598a878d
+
+
+================================================================================
+
+Query 2: "electric vehicle adoption rates by state"
+--------------------------------------------------------------------------------
+
+FAISS search: 9 results in 5.2893 seconds
+
+  1. Electric Vehicle Population Size History
+     Similarity: 0.5828
+     ID: 95a4aa73-6a97-41f8-a949-970dee5dd706
+
+  2. Electric Vehicle Population Size History By County
+     Similarity: 0.5744
+     ID: 49227ac1-3484-4dff-91f9-cee23909ce98
+
+  3. Electric Vehicle Population Data
+     Similarity: 0.5596
+     ID: 844dbad1-ee1e-44b8-9799-34cb7ed24640
+
+  4. MDOT/MVA Electric and Plug-in Hybrid Vehicle Registrations by County as of each month end from July 2020 to January 2025
+     Similarity: 0.5477
+     ID: eb7193c2-53c3-47f9-a683-0a9eacdf0040
+
+  5. MDOT/MVA Electric Vehicle Registrations by Classification as of Each Month End
+     Similarity: 0.5334
+     ID: 4ff1f296-3d9c-4cd8-84b9-0a383667908d
+
+
+================================================================================
+
+Query 3: "gun murder rates in the southwest since 2015"
+--------------------------------------------------------------------------------
+
+FAISS search: 3 results in 5.4012 seconds
+
+  1. Violent Crimes
+     Similarity: 0.4210
+     ID: a8f1fb9b-a001-4daa-98e3-8be5361a914b
+
+  2. 1.12 Clearance Rates (summary)
+     Similarity: 0.4200
+     ID: 9f99759f-9577-4214-a962-a5f98c454466
+
+  3. Non-Fatal Shootings - 2013
+     Similarity: 0.4174
+     ID: 44de9ba5-2910-493c-b548-ece353d6df49
+
+
+================================================================================
+
+Query 4: "climate change impact on coastal communities"
+--------------------------------------------------------------------------------
+
+FAISS search: 9 results in 4.7372 seconds
+
+  1. Winter climate change and coastal wetland foundation species in the southeastern United States
+     Similarity: 0.5168
+     ID: 357cc3c1-6b06-488f-9f4c-047295a56072
+
+  2. Winter climate change and coastal wetland foundation species in the southeastern United States
+     Similarity: 0.5132
+     ID: 0d0ca5c6-7b41-4a98-bd7d-ed4a95864790
+
+  3. Projected mangrove distribution and ecosystem properties in the southeastern United States under climate change
+     Similarity: 0.4998
+     ID: 83799563-1e58-4cc7-b94b-9a5eb1ab84df
+
+  4. Projections of coastal flood hazards and flood potential for the U.S. Atlantic coast
+     Similarity: 0.4987
+     ID: fec34ca8-37ac-4185-a7ac-6dbdff09d773
+
+  5. Projections of coastal flood hazards and flood potential for North Carolina and South Carolina
+     Similarity: 0.4982
+     ID: 87d5c395-4bf0-49b8-a0aa-3757167ed09f
+
+
+================================================================================
+
+Query 5: "public school funding disparities"
+--------------------------------------------------------------------------------
+
+FAISS search: 6 results in 4.1974 seconds
+
+  1. Fair Student Funding Budget Detail 2
+     Similarity: 0.5131
+     ID: a4cc9551-7f26-42e4-a105-8f2bde678afd
+
+  2. Public and Private Schools How Management and Funding Relate to their Socio-economic Profile
+     Similarity: 0.5117
+     ID: 867660bf-085c-48e6-b652-d49731a92623
+
+  3. Fair Student Funding Budget Detail 1
+     Similarity: 0.5110
+     ID: c72cf97f-d42a-404e-89ac-51756f36d7ca
+
+  4. 2014 - 2015 School Budget Overview
+     Similarity: 0.4749
+     ID: 68709789-5e5c-4609-a894-87d6444d0cda
+
+  5. School Spending Since 1990
+     Similarity: 0.4704
+     ID: 24f01ad1-c939-40dd-b6ee-c0bec5fd87a9
+
+
+================================================================================
+
+Query 6: "healthcare access in rural areas"
+--------------------------------------------------------------------------------
+
+FAISS search: 7 results in 5.4732 seconds
+
+  1. Access to Intercity Air, Bus, and Rail Transportation in Rural Areas
+     Similarity: 0.5487
+     ID: 95240f74-b6a1-4511-a468-dd0cbab65f61
+
+  2. Health Professional Shortage Areas
+     Similarity: 0.4919
+     ID: 347ff366-5818-4678-a4da-b763f4b748b6
+
+  3. Delay or nonreceipt of needed medical care, prescription drugs, or dental care during the past 12 months due to cost: United States
+     Similarity: 0.4735
+     ID: c3543d1e-35af-4b6f-b79a-2a521a56c2a5
+
+  4. Rural Medicaid and CHIP enrollees
+     Similarity: 0.4710
+     ID: 651fbe2d-7d9a-485b-8383-75126f62bb18
+
+  5. Rural Health Clinic Enrollments
+     Similarity: 0.4691
+     ID: babdf770-9dd2-4434-b378-04b27bc393d9
+
+
+================================================================================
+
+Query 7: "renewable energy production by state"
+--------------------------------------------------------------------------------
+
+FAISS search: 1 results in 5.2797 seconds
+
+  1. Renewable Energy Generation Capacity: 2006 - 2017
+     Similarity: 0.5438
+     ID: bde3cf47-9f57-48c3-bcaa-a3d751132913
+
+
+================================================================================
+
+Query 8: "income inequality trends 2010-2020"
+--------------------------------------------------------------------------------
+
+FAISS search: 5 results in 5.4219 seconds
+
+  1. Income Inequality
+     Similarity: 0.4698
+     ID: 131ee6ba-d633-4892-8c00-50c944c5a821
+
+  2. School Neighborhood Poverty Estimates - Current
+     Similarity: 0.4073
+     ID: 44b6e77d-9a76-4b76-b8f8-88cf12629dfb
+
+  3. Trends in SNAP Rates: Fiscal Year 2010 to Fiscal Year 2012 Report
+     Similarity: 0.4050
+     ID: dcbf628d-6fb3-4a6d-a8a3-6cd8af88daed
+
+  4. Strategic Measure_EOA.B.2 Distribution of Household Income
+     Similarity: 0.4043
+     ID: 7f3bdfe7-4647-4171-afc3-2524b982e930
+
+  5. School Neighborhood Poverty Estimates, 2020-21
+     Similarity: 0.4029
+     ID: 6418de21-4a5c-49ae-83a8-b5a96d8201f6
+
+
+================================================================================
+
+Query 9: "opioid crisis statistics by county"
+--------------------------------------------------------------------------------
+
+FAISS search: 7 results in 5.2274 seconds
+
+  1. 1.31 Opioid EMS Calls (summary) - archived
+     Similarity: 0.5896
+     ID: d80913c3-deb5-462c-b81a-03cfb29a89c8
+
+  2. 1.31 Opioid EMS Calls (summary)
+     Similarity: 0.5786
+     ID: 90b4ad74-4570-4e8e-981f-7ed44a3b558d
+
+  3. Opiate Overdoses by Age Range, Gender, and Drug Type FY 2018
+     Similarity: 0.5707
+     ID: 34793417-cd04-47c9-93c6-c90bc5fb0f20
+
+  4. EMS-Opiate Overdoses by Race FY 2018
+     Similarity: 0.5653
+     ID: dda74744-8fec-43e6-9171-bb097d024b5a
+
+  5. EMS-Opiate Overdoses by Age FY 2018
+     Similarity: 0.5574
+     ID: a1a0a7e0-8266-4a3d-9919-e7efdc6bf939
+
+
+================================================================================
+
+Query 10: "water quality in the great lakes"
+--------------------------------------------------------------------------------
+
+FAISS search: 10 results in 4.6333 seconds
+
+  1. Water Chemistry of Great Lakes Tributaries, 2017-2018
+     Similarity: 0.6449
+     ID: 2172ab36-eb55-4cdc-9dd7-dd35250731b0
+
+  2. Great Lakes tributary pharmaceutical water samples from water year 2018
+     Similarity: 0.6256
+     ID: 044828d9-7260-4b15-8f6e-19be67a56795
+
+  3. Chemicals of Emerging Concern in Water and Bottom Sediment in the Great Lakes Basin, 2014 - Analytical Methods, Collection Methods, Quality-Assurance Analyses, and Data
+     Similarity: 0.6251
+     ID: 311ba19d-3b27-4289-8700-f3ece1ba52bd
+
+  4. Chemicals of Emerging Concern in Water and Bottom Sediment in the Great Lakes Basin, 2014 - Field and Laboratory Quality Assurance
+     Similarity: 0.6222
+     ID: 86033053-e6cb-4d0b-b5a4-82281209a659
+
+  5. Chemicals of Emerging Concern in Water and Bottom Sediment in Great Lakes Areas of Concern, 2013 - Analytical Methods, Collection Methods, Environmental Data, and Quality Assurance
+     Similarity: 0.6217
+     ID: bb3da1e5-8cf1-4d31-a395-5f43f8e2af93
+
+
+================================================================================
+
+Query 11: "affordable housing availability in major cities"
+--------------------------------------------------------------------------------
+
+FAISS search: 6 results in 5.8148 seconds
+
+  1. Affordable Rental Housing Developments
+     Similarity: 0.6035
+     ID: 4bfa4557-2f34-49d0-aaf2-1a8f112bba35
+
+  2. Comprehensive Affordable Housing Directory
+     Similarity: 0.5547
+     ID: 0ee8430d-2edc-4578-9a24-1d9520774f5d
+
+  3. Affordable and Available Rental Units per 100 Households
+     Similarity: 0.5542
+     ID: a92c853e-e7e4-4282-9892-f266e6ffe1a1
+
+  4. Affordable Housing Inventory
+     Similarity: 0.5483
+     ID: 4378de75-39b7-40db-8c77-1c0259a1fd27
+
+  5. Affordable Housing
+     Similarity: 0.5466
+     ID: fa835ff5-0451-47d1-8339-23099dcf28a9
+
+
+================================================================================
+
+Query 12: "broadband internet access in underserved communities"
+--------------------------------------------------------------------------------
+
+FAISS search: 9 results in 5.5528 seconds
+
+  1. Internet Master Plan: Broadband Adoption & Demographic Citywide
+     Similarity: 0.5566
+     ID: 6d2cb7a2-ff15-418d-8862-6f3d945ab651
+
+  2. Broadband Summary API - Nation
+     Similarity: 0.5455
+     ID: 3c047f6b-5eef-4924-aa31-6cd0b2c3361a
+
+  3. Internet Master Plan: Broadband Adoption and Infrastructure by Community District
+     Similarity: 0.5438
+     ID: 74fac92f-8d45-4245-b325-1f728d0672fb
+
+  4. Universal Solicitation of Broadband Target Neighborhoods
+     Similarity: 0.5413
+     ID: 064fb277-023f-48ea-863b-bc476c306661
+
+  5. Broadband Community Anchor Institution Listings
+     Similarity: 0.5410
+     ID: 6f2876c4-9452-4623-aebd-2d315dec48e6
+
+
+================================================================================
+
+Query 13: "vaccination rates by demographic groups"
+--------------------------------------------------------------------------------
+
+FAISS search: 10 results in 5.3001 seconds
+
+  1. COVID-19 Vaccination Demographics in the United States,National
+     Similarity: 0.6379
+     ID: a9bcd188-51ee-4b40-95b0-2c9d0e935295
+
+  2. COVID-19 Vaccination Age and Sex Trends in the United States, National and Jurisdictional
+     Similarity: 0.6248
+     ID: 15e8e190-c486-4955-a69e-f65786c563c8
+
+  3. Vaccination Coverage among Adults (18+ Years)
+     Similarity: 0.6117
+     ID: c66beeae-8853-480c-ab6e-6359d5e31430
+
+  4. Vaccination Rates by Neighborhood
+     Similarity: 0.6073
+     ID: 22eae85f-5b60-4be2-bf5e-2aabe88ebbd3
+
+  5. Archive: COVID-19 Vaccination Demographic Trends by Report Date, National
+     Similarity: 0.6069
+     ID: e53fe1ad-8016-40c7-bbe0-2c9fd55e8663
+
+
+================================================================================
+
+Query 14: "food deserts in urban areas"
+--------------------------------------------------------------------------------
+
+FAISS search: 4 results in 4.8105 seconds
+
+  1. Low Food Access Areas
+     Similarity: 0.4704
+     ID: e5afd254-784a-4c01-b42c-3a13bfb5f440
+
+  2. Urban Agriculture Areas
+     Similarity: 0.4559
+     ID: e0c590ce-20d4-4880-a385-608f0d391fc7
+
+  3. Grocery Stores - 2011
+     Similarity: 0.4557
+     ID: b1ccf703-0c40-43f3-8d91-0b77cdafcadb
+
+  4. Urban Agriculture Sites
+     Similarity: 0.4467
+     ID: 1a92ec33-f1f3-43b0-8340-b67b0b3fddad
+
+
+================================================================================
+
+Query 15: "public transportation usage trends"
+--------------------------------------------------------------------------------
+
+FAISS search: 5 results in 4.6445 seconds
+
+  1. Average Weekday Interzonal Shared Mobility Trips
+     Similarity: 0.5522
+     ID: f32625b6-726b-48b7-bc9c-23079bc2d25e
+
+  2. Daily Transit Ridership
+     Similarity: 0.5467
+     ID: 655517cc-7811-4179-8139-5b7bc0e3f68e
+
+  3. Passenger Indicators (weekly)
+     Similarity: 0.5460
+     ID: ee1a2f29-d654-4cd7-8d27-1bc99d5c8e7b
+
+  4. Average Weekday Intrazonal Shared Mobility Trips
+     Similarity: 0.5454
+     ID: edcc748d-5467-46ab-a51c-b2c0b444b812
+
+  5. Transit Ridership
+     Similarity: 0.5432
+     ID: a15311f4-8317-4cbe-9f37-2c69c30621ff
+
+
+================================================================================
+
+Query 16: "small business growth after covid-19"
+--------------------------------------------------------------------------------
+
+FAISS search: 7 results in 4.5776 seconds
+
+  1. Small Business Lending in the United States-2020
+     Similarity: 0.5053
+     ID: 60e84cd1-3794-447c-800f-4d5ffc003f73
+
+  2. Small Business Lending In The United States - 2019
+     Similarity: 0.4617
+     ID: c4ff04f3-2d7d-412d-b530-2a234c50313d
+
+  3. Boost Your Business Program
+     Similarity: 0.4502
+     ID: 0b38f3f3-999b-474b-94e8-c19904796db0
+
+  4. COVID-19 Assistance
+     Similarity: 0.4343
+     ID: e16e8f79-142e-4754-b6b8-4a433995aa1f
+
+  5. 9228, Businesses Who Reported Growth
+     Similarity: 0.4328
+     ID: 664721e6-ceea-4021-9dad-bda3d6e1a7c9
+
+
+================================================================================
+
+Query 17: "forest fire frequency and severity"
+--------------------------------------------------------------------------------
+
+FAISS search: 9 results in 6.0356 seconds
+
+  1. Next Generation Fire Severity Mapping (Image Service)
+     Similarity: 0.6022
+     ID: 027ee12f-e01b-4e41-8ce6-099d288db5e5
+
+  2. 2023 Fire Frequency of Sequoia and Kings Canyon National Parks
+     Similarity: 0.5636
+     ID: abfcbed7-838e-4280-a3b6-ce4b3f64ee67
+
+  3. Fire caused tree mortality in western US national parks (2018) (ver. 2.0, February 2020)
+     Similarity: 0.5458
+     ID: 3978e6d6-2d5c-4232-b8d3-86bdcd9ea3f2
+
+  4. Wildfire Risk to Communities Flame Length Exceedance Probability - 8 foot (Image Service)
+     Similarity: 0.5391
+     ID: bd4d61ad-0f2c-4f42-ac8c-7dc57a53aa16
+
+  5. Wildfire Risk to Communities Flame Length Exceedance Probability - 4 foot (Image Service)
+     Similarity: 0.5378
+     ID: 95faa49d-ac93-4823-8e5c-d10ca33587ab
+
+
+================================================================================
+
+Query 18: "student loan debt distribution by age"
+--------------------------------------------------------------------------------
+
+FAISS search: 2 results in 5.3608 seconds
+
+  1. Approved Debt Relief by State
+     Similarity: 0.4862
+     ID: d2d399e1-256d-41a8-83e9-edcf9649139d
+
+  2. Loan Forgiveness Awards Administered by Higher Education Services Corp:  Beginning 2011
+     Similarity: 0.4642
+     ID: 3d01169e-9838-448b-beda-7257a3cb1352
+
+
+================================================================================
+
+Query 19: "maternal mortality rates by state"
+--------------------------------------------------------------------------------
+
+FAISS search: 10 results in 4.4586 seconds
+
+  1. VSRR Provisional Maternal Death Counts and Rates
+     Similarity: 0.5960
+     ID: bdca426f-4162-45aa-b79e-abda7645996a
+
+  2. Infant, neonatal, postneonatal, fetal, and perinatal mortality rates, by detailed race and Hispanic origin of mother: United States
+     Similarity: 0.5908
+     ID: 5e28571e-d1e2-45b3-bf47-fff0ae6052cb
+
+  3. Pregnancy-Associated Mortality
+     Similarity: 0.5770
+     ID: 45911376-2f0f-418e-8448-c6524f254dd3
+
+  4. Infant Mortality, Deaths Per 1,000 Live Births (LGHC Indicator)
+     Similarity: 0.5623
+     ID: 64a3b299-6a06-4eb9-a39e-f089a23ebf3c
+
+  5. NCHS - Birth Rates for Females by Age Group: United States
+     Similarity: 0.5487
+     ID: a9f945c4-3a28-4f4f-a177-5979e36b6593
+
+
+================================================================================
+
+Query 20: "solar panel adoption in residential areas"
+--------------------------------------------------------------------------------
+
+FAISS search: 5 results in 5.0180 seconds
+
+  1. Modeled Performance of the Hathaway Solar Patriot house - Washington D.C
+     Similarity: 0.4788
+     ID: 9588d0f4-e250-403b-9d53-c48bba594148
+
+  2. Annual Solar Photovoltaic Module Shipments Report
+     Similarity: 0.4722
+     ID: 975b14b6-bf02-4a3a-82f5-81e98deea1c5
+
+  3. Rooftop Photovoltaic Technical Potential in the United States
+     Similarity: 0.4720
+     ID: 2859dcde-5af8-4903-8f73-73f1ed780ba6
+
+  4. Tracking the Sun
+     Similarity: 0.4667
+     ID: 3acf48f2-b29b-4fdb-a0fb-1e91d7c961bd
+
+  5. Screening Tool for Equitable Adoption and Deployment of Solar (STEADy Solar)
+     Similarity: 0.4579
+     ID: a3a2a104-a3cc-443c-976e-73b9198a0d41
+
+
+================================================================================
+
+SUMMARY
+--------------------------------------------------------------------------------
+
+Total queries: 20
+Total results: 126
+Average results per query: 6.3
+Total search time: 104.9925 seconds
+Average time per query: 5.2496 seconds
+FAISS index load time: 1.1190 seconds

@@ -47,3 +47,9 @@ data_gov_catalog.json
 
 .DS_Store
 __pycache__
+
+# FAISS index files
+faiss_index/
+faiss_index/*
+*.index
+dataset_ids.pkl
