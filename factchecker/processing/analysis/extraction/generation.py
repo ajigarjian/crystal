@@ -96,6 +96,7 @@ Based on the user query and column analysis, generate pandas code to extract the
 2. If multiple columns have relevant values, combine the filters appropriately
 3. If no relevant columns or values were identified, return a suitable subset of the data that might be relevant
 4. Include aggregate and comparison values to improve the response.
+5. Do not generate any visualizations.
 
 Return ONLY the Python code, with no additional text or explanation. Use 'df' as the variable name for the input DataFrame.
 
