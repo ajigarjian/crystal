@@ -195,6 +195,11 @@ def summarize_findings_alternate(
         
         # Process the extracted data for serialization
         processed_data = process_result_for_serialization(data)
+        
+        # Include subset_df in the extracted data if it exists
+        if "subset_df" in data:
+            processed_data["subset_df"] = process_result_for_serialization(data["subset_df"])
+        
         result["extracted_data"].append(processed_data)
     
     # Add dataset context from analyses
