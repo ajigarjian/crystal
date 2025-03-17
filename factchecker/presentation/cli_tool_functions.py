@@ -142,8 +142,10 @@ def summarize_findings_alternate(
     Returns:
         JSON-formatted string containing comprehensive findings and extracted data
     """
-    if not extracted_data_list:
-        return json.dumps({"error": "No relevant data was found to answer your query."})
+    start_time = time.time()
+    
+    # Get the text summary from the original function
+    summary_text = summarize_findings(query, extracted_data_list, dataset_analyses)
     
     # Initialize the result structure
     result = {
@@ -153,322 +155,46 @@ def summarize_findings_alternate(
         "timestamp": datetime.datetime.now().isoformat(),
         "relevant_datasets": [],
         "extracted_data": [],
-        "summary": {},
+        "summary": {
+            "text": summary_text,
+            "confidence": 0.85
+        },
         "analysis_steps": {
+            "extraction_time_sec": 0,
             "processing_notes": ""
         }
     }
     
-    # Debug information - log what fields are available
-    logging.debug(f"Keys in first extracted_data item: {extracted_data_list[0].keys() if extracted_data_list else 'None'}")
-    
-    # Add relevant_datasets info
-    start_time = time.time()
-    
-    # Add debug logging
-    debug_file_paths = True  # Always log for now
-    
-    # Create dictionaries to store dataset metadata fetched from the database
-    dataset_descriptions = {}
-    dataset_org_names = {}
-    
-    # Fetch all needed dataset metadata in one query for efficiency
-    dataset_ids = [data.get("dataset_id", "") for data in extracted_data_list]
-    try:
-        db_datasets = DatasetCatalog.objects.filter(dataset_id__in=dataset_ids)
-        
-        # Create lookup dictionaries for quick access
-        for db_dataset in db_datasets:
-            dataset_descriptions[db_dataset.dataset_id] = db_dataset.description
-            dataset_org_names[db_dataset.dataset_id] = db_dataset.organization_name
-        
-        # Debug log the information found
-        if debug_file_paths:  # Reuse existing debug flag
-            print(f"\n[DEBUG] Found {len(db_datasets)} datasets in database")
-            for dataset_id in dataset_ids:
-                if dataset_id in dataset_descriptions:
-                    org_name = dataset_org_names.get(dataset_id, "Unknown")
-                    print(f"  Dataset {dataset_id}: Org={org_name}")
-                else:
-                    print(f"  Dataset {dataset_id}: Not found in database")
-    except Exception as e:
-        print(f"[ERROR] Failed to fetch dataset metadata: {e}")
-        # Continue with empty dictionaries
-    
-    # Process each dataset with the metadata
+    # Add dataset information to the result
     for data in extracted_data_list:
-        dataset_id = data.get("dataset_id", "unknown-id")
-        dataset_title = data.get("dataset_title", "Unnamed Dataset")
-        
-        # Get description from our cached lookup
-        description = dataset_descriptions.get(dataset_id, "")
-        
-        # Get organization name
-        organization_name = dataset_org_names.get(dataset_id, "")
-        
-        # If not found in database, try the existing fields or fall back to defaults
-        if not description:
-            description = data.get("description", "")
-            if not description and "dataset_metadata" in data:
-                description = data.get("dataset_metadata", {}).get("description", "")
-        
-        # Try multiple paths to get the file_path
-        file_path = data.get("file_path", "")
-        
-        # If file_path is missing but we have dataset_id, try to reconstruct
-        if not file_path and data.get("dataset_id"):
-            # Use default data directory - can be updated to match your command
-            output_dir = "data_files"  # This should match the --output parameter
-            possible_files = []
-            
-            # Try to find files in output directory that might match
-            if os.path.exists(output_dir):
-                for filename in os.listdir(output_dir):
-                    # Look for files that contain dataset id or have a name similar to the title
-                    if (data.get("dataset_id") in filename or 
-                        any(word in filename.lower() for word in data.get("dataset_title", "").lower().split())):
-                        possible_files.append(os.path.join(output_dir, filename))
-            
-            if possible_files:
-                # Use the first matching file
-                file_path = possible_files[0]
-                if debug_file_paths:
-                    print(f"    Reconstructed file_path: {file_path}")
-        
-        # Validate file paths
-        if "all_file_paths" in data:
-            valid_paths = []
-            for path in data["all_file_paths"]:
-                if os.path.exists(path):
-                    valid_paths.append(path)
-                else:
-                    if debug_file_paths:
-                        print(f"    Warning: File path does not exist: {path}")
-            
-            # Update all_file_paths with only valid paths
-            data["all_file_paths"] = valid_paths
-        
-        # Determine filename and format
-        filename = "unknown"
-        file_format = "unknown"
-        
-        if file_path:
-            filename = os.path.basename(file_path)
-            _, ext = os.path.splitext(file_path)
-            if ext:
-                file_format = ext.lstrip(".").lower()
-        
-        # Add to relevant_datasets section with flat organization_name field
         dataset_info = {
-            "dataset_id": dataset_id,
-            "title": dataset_title,
-            "description": description or "No description available",
-            "organization_name": organization_name or "Unknown",
-            "score": data.get("relevance_score", data.get("similarity", 1.0)),
+            "dataset_id": data.get("dataset_id", "Unknown ID"),
+            "title": data.get("dataset_title", "Unnamed Dataset"),
+            "source": data.get("dataset_source", "Unknown Source"),
             "files": []
         }
-
-        # Add file information for each file path
-        if "all_file_paths" in data and data["all_file_paths"]:
-            for i, path in enumerate(data["all_file_paths"]):
-                filename = os.path.basename(path)
-                _, ext = os.path.splitext(path)
-                file_format = ext.lstrip(".").lower() if ext else "unknown"
-                
-                dataset_info["files"].append({
-                    "file_id": f"{dataset_id}-file-{i+1}",
-                    "filename": filename,
-                    "format": file_format,
-                    "description": "Extracted data file"
-                })
-        else:
-            # Fallback to single file if all_file_paths is not available
-            filename = os.path.basename(file_path) if file_path else "unknown"
-            _, ext = os.path.splitext(file_path) if file_path else ("", "")
-            file_format = ext.lstrip(".").lower() if ext else "unknown"
-            
+        
+        # Add file information
+        if "file_path" in data:
             dataset_info["files"].append({
-                "file_id": f"{dataset_id}-file-1",
-                "filename": filename,
-                "format": file_format,
-                "description": "Extracted data file"
+                "path": data.get("file_path", ""),
+                "format": os.path.splitext(data.get("file_path", ""))[1][1:].upper()
             })
-
+        
+        # Add all file paths if available
+        if "all_file_paths" in data and data["all_file_paths"]:
+            for path in data["all_file_paths"]:
+                if path != data.get("file_path", ""):  # Skip the main file that's already added
+                    dataset_info["files"].append({
+                        "path": path,
+                        "format": os.path.splitext(path)[1][1:].upper()
+                    })
+        
         result["relevant_datasets"].append(dataset_info)
         
-        # Get the actual extracted data - try multiple possible keys
-        extracted = None
-        aggregations = None
-
-        # First try to get results_dict
-        for extracted_key in ["results_dict", "extracted_data", "data", "result"]:
-            if extracted_key in data and data[extracted_key]:
-                extracted = data[extracted_key]
-                break
-
-        # Then try to get aggregations separately - check multiple possible locations
-        if "aggregations" in data and data["aggregations"]:
-            aggregations = data["aggregations"]
-        elif extracted and isinstance(extracted, dict):
-            # Check if aggregations is inside the extracted data
-            if "aggregations" in extracted:
-                aggregations = extracted["aggregations"]
-            # Check if data.aggregations exists (nested structure)
-            elif "data" in extracted and isinstance(extracted["data"], dict) and "aggregations" in extracted["data"]:
-                aggregations = extracted["data"]["aggregations"]
-
-        # Get printed output if available
-        printed_output = data.get("printed_output", "")
-                
-        # Add this before creating extraction_data
-        if debug_file_paths:
-            print(f"\n[DEBUG] Data keys for dataset {dataset_id}: {list(data.keys())}")
-        
-        # Add to extracted_data section
-        extraction_data = {
-            "dataset_id": dataset_id,
-            "dataset_title": dataset_title,
-            "file_extractions": []
-        }
-
-        # Only add these keys if they exist in the data
-        if "results_dict" in data:
-            extraction_data["results_df"] = data["results_dict"]
-        if "aggregations" in data:
-            extraction_data["aggregations"] = data["aggregations"]
-        if "result" in data:
-            extraction_data["result"] = data["result"]
-
-        file_extraction = {
-            "file_id": f"{dataset_id}-file-1",
-            "filename": filename,
-        }
-        
-        # Format the extracted data based on its type
-        if isinstance(extracted, pd.DataFrame):
-            # For DataFrames, include column info and sample rows
-            file_extraction["columns"] = extracted.columns.tolist()
-            
-            # Get up to 10 sample rows
-            sample_rows = min(10, len(extracted))
-            rows_data = []
-            
-            for i in range(sample_rows):
-                row = extracted.iloc[i]
-                # Convert to a simple dict instead of a list for better readability
-                row_dict = {col: row[col] for col in extracted.columns}
-                rows_data.append(row_dict)
-            
-            file_extraction["rows"] = rows_data
-            
-            # Add statistics for numerical columns
-            stats = {}
-            numeric_cols = extracted.select_dtypes(include=[np.number]).columns
-            for col in numeric_cols:
-                stats[col] = {
-                    "min": float(extracted[col].min()) if not pd.isna(extracted[col].min()) else None,
-                    "max": float(extracted[col].max()) if not pd.isna(extracted[col].max()) else None,
-                    "mean": float(extracted[col].mean()) if not pd.isna(extracted[col].mean()) else None,
-                }
-            
-            if stats:
-                file_extraction["statistics"] = stats
-                
-        elif isinstance(extracted, dict):
-            # For dictionaries, include as key-value pairs
-            file_extraction["key_value_data"] = extracted
-        elif isinstance(extracted, (list, tuple)):
-            # For lists of data
-            file_extraction["array_data"] = extracted
-        else:
-            # For other formats or None
-            file_extraction["extraction_notes"] = f"Data format: {type(extracted).__name__}"
-            if extracted:
-                file_extraction["data_preview"] = str(extracted)[:500]
-            elif printed_output:
-                file_extraction["data_preview"] = printed_output[:500]
-            else:
-                file_extraction["data_preview"] = "No data extracted"
-        
-        # Add aggregations if available
-        if aggregations:
-            file_extraction["aggregations"] = aggregations
-        
-        # Add code used for extraction if available
-        if "code" in data:
-            file_extraction["extraction_code"] = data.get("code", "")
-            
-        # Add extraction strategy from multiple possible sources
-        explanation = ""
-        for exp_key in ["explanation", "extraction_strategy", "strategy", "extraction_explanation"]:
-            if exp_key in data and data[exp_key]:
-                explanation = data[exp_key]
-                break
-                
-        file_extraction["relevance_notes"] = explanation
-        
-        # Add any error information
-        if "error" in data and data["error"]:
-            file_extraction["error"] = data["error"]
-            
-        extraction_data["file_extractions"].append(file_extraction)
-        result["extracted_data"].append(extraction_data)
-        
-        if debug_file_paths:
-            print(f"\n[DEBUG] Processing dataset: {dataset_id}")
-            print(f"    Title: {dataset_title}")
-            print(f"    file_path: {data.get('file_path', 'Not provided')}")
-            print(f"    all_file_paths: {data.get('all_file_paths', 'Not provided')}")
-            if "all_file_paths" in data and data["all_file_paths"]:
-                for i, path in enumerate(data["all_file_paths"]):
-                    print(f"      {i+1}: {path}")
-    
-    # Create a prompt for OpenAI to generate the text summary
-    prompt = f"""
-    You are analyzing data to answer: "{query}"
-    
-    The following datasets were analyzed:
-    {chr(10).join([f"- {data.get('dataset_title', 'Unnamed Dataset')}" for data in extracted_data_list])}
-    
-    Based on the extracted data, please provide:
-    1. A concise summary paragraph of the findings (max 3 sentences)
-    2. A confidence score (0-1) representing how well the data answers the query
-    
-    Format your response as a JSON object with these fields:
-    {{
-      "text": "Your summary paragraph here",
-      "confidence": 0.XX
-    }}
-    
-    Only return the JSON object, nothing else.
-    """
-    
-    # Call OpenAI API for summary
-    response = chat_completion(
-    prompt,
-    system_message="You are a data analyst who provides concise data summaries in JSON format.",
-    max_tokens=400
-    )
-
-    try:
-        # Parse the JSON response - handle the case where it might include ```json wrapping
-        content = response.strip()
-        if content.startswith('```json'):
-            content = content.replace('```json', '', 1).strip()
-        if content.endswith('```'):
-            content = content[:-3].strip()
-        
-        # Parse the cleaned JSON
-        summary_json = json.loads(content)
-        result["summary"] = summary_json
-    except Exception as e:
-        # Log the error
-        logging.error(f"Error parsing summary JSON: {e}")
-        # Fallback if JSON parsing fails
-        result["summary"] = {
-            "text": response,
-            "confidence": 0.7
-        }
+        # Process the extracted data for serialization
+        processed_data = process_result_for_serialization(data)
+        result["extracted_data"].append(processed_data)
     
     # Add analysis steps info
     result["analysis_steps"]["extraction_time_sec"] = round(time.time() - start_time, 1)
@@ -477,8 +203,5 @@ def summarize_findings_alternate(
     dataset_ids = [data.get("dataset_id", "unknown") for data in extracted_data_list]
     result["analysis_steps"]["processing_notes"] = f"Analysis based on {len(dataset_ids)} datasets: {', '.join(dataset_ids)}"
     
-    # Process the result to ensure all values are serializable
-    result = process_result_for_serialization(result)
-
     # Return formatted JSON string
     return json.dumps(result, indent=2, cls=ExtendedJSONEncoder)
