@@ -82,7 +82,6 @@ class Command(BaseCommand):
         start_time = time.time()
         
         query = options['query']
-        similarity_threshold = options.get('similarity_threshold', 0.3)  # Default to 0.3 for FAISS
         output_dir = options['output']
         show_preview = options['preview']
         relevance_threshold = options['relevance_threshold']
@@ -104,7 +103,7 @@ class Command(BaseCommand):
             return
         
         # Base threshold for vector search (FAISS)
-        similarity_threshold = options.get('similarity_threshold', 0.3)  # Default to 0.3 for FAISS
+        similarity_threshold = options.get('similarity_threshold', 0.4)  # Default to 0.4 for FAISS
         
         # Higher threshold for keyword search
         keyword_threshold = 0.6  # Fixed at 0.6 for keyword search
@@ -131,7 +130,7 @@ class Command(BaseCommand):
             if search_method == 'vector':
                 # Vector search with specified threshold
                 self.stdout.write(f"Searching for datasets matching '{query}' using vector search with similarity threshold {similarity_threshold:.2f}...")
-                relevant_datasets = vector_search_datasets(query, similarity_threshold=similarity_threshold)
+                relevant_datasets = vector_search_datasets(query, similarity_threshold=similarity_threshold, verbose=True)
                 
                 # Display all results
                 if relevant_datasets:
