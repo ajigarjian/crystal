@@ -74,10 +74,11 @@ class Command(BaseCommand):
                     dataset_obj = DatasetCatalog(
                         dataset_id=dataset.get('id', ''),
                         title=dataset.get('title', ''),
-                        description=dataset.get('description', ''),
+                        organization_description=dataset.get('organization', {}).get('description', ''),
                         notes=dataset.get('notes', ''),
                         organization_name=dataset.get('organization', {}).get('name', ''),
                         organization_title=dataset.get('organization', {}).get('title', ''),
+                        image_url=dataset.get('organization', {}).get('image_url'),
                         search_text=search_text,
                         license_id=dataset.get('license_id'),
                         license_title=dataset.get('license_title'),
@@ -90,7 +91,6 @@ class Command(BaseCommand):
                         extras_json=json.dumps(dataset.get('extras', [])),
                         groups_json=json.dumps(dataset.get('groups', [])),
                         indexed=False,
-                        image_url=dataset.get('image_url'),
                     )
                     
                     batch_data.append(dataset_obj)
@@ -124,7 +124,7 @@ class Command(BaseCommand):
                             batch_data,
                             update_conflicts=True,
                             unique_fields=['dataset_id'],
-                            update_fields=['title', 'description', 'notes', 'organization_name', 
+                            update_fields=['title', 'organization_description', 'notes', 'organization_name', 
                                         'organization_title', 'search_text', 'license_id',
                                         'license_title', 'license_url', 'maintainer',
                                         'maintainer_email', 'metadata_created',
@@ -159,7 +159,7 @@ class Command(BaseCommand):
                     batch_data,
                     update_conflicts=True,
                     unique_fields=['dataset_id'],
-                    update_fields=['title', 'description', 'notes', 'organization_name',
+                    update_fields=['title', 'organization_description', 'notes', 'organization_name',
                                 'organization_title', 'search_text', 'license_id',
                                 'license_title', 'license_url', 'maintainer',
                                 'maintainer_email', 'metadata_created',
@@ -193,11 +193,10 @@ class Command(BaseCommand):
         components = [
             # Core dataset information
             f"Title: {dataset.get('title', '')}",
-            f"Description: {dataset.get('notes', '')}",
+            f"Notes: {dataset.get('notes', '')}",
             
-            # Organization context
+            # Organization name only, not description
             f"Organization: {dataset.get('organization', {}).get('title', '')}",
-            f"Organization Description: {dataset.get('organization', {}).get('description', '')}",
             
             # Tags (very important for search)
             f"Tags: {' '.join(tag.get('name', '') for tag in dataset.get('tags', []))}",

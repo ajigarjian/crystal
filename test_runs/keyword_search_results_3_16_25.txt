@@ -1,0 +1,436 @@
+Keyword Search Results
+Generated on: 2025-03-17 00:28:34
+================================================================================
+
+Query 1: "air quality in greenwich village"
+--------------------------------------------------------------------------------
+
+Keyword search: 0 results in 2.4986 seconds
+
+
+================================================================================
+
+Query 2: "electric vehicle adoption rates by state"
+--------------------------------------------------------------------------------
+
+Keyword search: 4 results in 8.7729 seconds
+
+  1. Electric Vehicle Population Size History By County
+     Similarity: 0.3000
+     ID: 49227ac1-3484-4dff-91f9-cee23909ce98
+
+  2. Vehicle Fuel Type Count by Zip Code
+     Similarity: 0.3000
+     ID: 490d789c-0684-4987-8592-e6660016e3a6
+
+  3. Electric Vehicle Population Size History
+     Similarity: 0.3000
+     ID: 95a4aa73-6a97-41f8-a949-970dee5dd706
+
+  4. MDOT/MVA Electric and Plug-in Hybrid Vehicle Registrations by County as of each month end from July 2020 to January 2025
+     Similarity: 0.3000
+     ID: eb7193c2-53c3-47f9-a683-0a9eacdf0040
+
+
+================================================================================
+
+Query 3: "gun murder rates in the southwest since 2015"
+--------------------------------------------------------------------------------
+
+Keyword search: 0 results in 2.8693 seconds
+
+
+================================================================================
+
+Query 4: "climate change impact on coastal communities"
+--------------------------------------------------------------------------------
+
+Keyword search: 10 results in 9.9313 seconds
+
+  1. NOAA Digital Coast Sea Level Rise and Coastal Flooding Impacts Viewer
+     Similarity: 0.9000
+     ID: cc50ea39-8d24-48a9-9085-6cc1a7818ac0
+
+  2. Social Vulnerability Index (SoVI) for the U.S. Coastal States based on the 2010 Census Tracts
+     Similarity: 0.9000
+     ID: ef2fa416-b28b-45b6-9930-2b1bb597210e
+
+  3. Social Vulnerability Index (SoVI) for Coastal States based on 2000 Census Block Groups
+     Similarity: 0.9000
+     ID: 6e2fb6c2-aae8-4a96-a8ca-d95b285acc80
+
+  4. New York City Climate Projections: Extreme Events and Sea Level Rise
+     Similarity: 0.8500
+     ID: 37b26944-4975-41b1-980f-b55d8b17de01
+
+  5. Sea Level Trends: Sea Level Variations of the United States Derived from National Water Level Observation Network Stations
+     Similarity: 0.8000
+     ID: 5efc9a70-0295-4916-a103-c9b935edec8e
+
+
+================================================================================
+
+Query 5: "public school funding disparities"
+--------------------------------------------------------------------------------
+
+Keyword search: 0 results in 13.4167 seconds
+
+
+================================================================================
+
+Query 6: "healthcare access in rural areas"
+--------------------------------------------------------------------------------
+
+Keyword search: 12 results in 9.4276 seconds
+
+  1. Health Professional Shortage Areas in California
+     Similarity: 0.8000
+     ID: 9dd61d50-04d7-405a-acec-0bdc39c2176f
+
+  2. Primary Care Shortage Areas in California
+     Similarity: 0.8000
+     ID: f9505779-2620-4d63-9eea-8297a0ca94aa
+
+  3. Drought and Water Shortage Risk: Small Suppliers and Rural Communities (Version 2021)
+     Similarity: 0.8000
+     ID: 67b96bca-3c0a-42c9-9a39-4d9cbbd466ae
+
+  4. Health Professional Shortage Areas
+     Similarity: 0.7000
+     ID: 347ff366-5818-4678-a4da-b763f4b748b6
+
+  5. Healthcare Workforce Geography Crosswalk
+     Similarity: 0.7000
+     ID: 77aedc3f-ded6-4f14-83d8-1d8a79168b1d
+
+
+================================================================================
+
+Query 7: "renewable energy production by state"
+--------------------------------------------------------------------------------
+
+Keyword search: 2 results in 9.1918 seconds
+
+  1. United States Wind Turbine Database
+     Similarity: 0.9000
+     ID: cc5fb962-f2fe-4480-b46a-3e37175bed24
+
+  2. State Energy Data System (SEDS)
+     Similarity: 0.8000
+     ID: 36c98e72-32f3-4fff-9f7b-a82c0e3b0e5d
+
+
+================================================================================
+
+Query 8: "income inequality trends 2010-2020"
+--------------------------------------------------------------------------------
+
+Keyword search: 3 results in 3.3611 seconds
+
+  1. Quarterly Census of Employment and Wages (QCEW)
+     Similarity: 0.3000
+     ID: 32d75c34-fc7a-4fd5-b3d5-e0f94c0436a0
+
+  2. Strategic Measure_Median Family Income
+     Similarity: 0.3000
+     ID: ac3b4504-dfca-46e4-991f-49aad065559a
+
+  3. Strategic Measure_Median City Property Tax as a Percentage of Median Family Income
+     Similarity: 0.3000
+     ID: af0ff717-7630-4748-8f59-927ed8077e12
+
+
+================================================================================
+
+Query 9: "opioid crisis statistics by county"
+--------------------------------------------------------------------------------
+
+Keyword search: 2 results in 2.0424 seconds
+
+  1. Medicaid Opioid Prescribing Rates - by Geography
+     Similarity: 0.8000
+     ID: 1fad91a7-803a-4b00-a788-746d0a998aac
+
+  2. Medicare Part D Opioid Prescribing Rates - by Geography
+     Similarity: 0.8000
+     ID: 7afb5890-d5a5-47c6-8c73-d1ed9abb2810
+
+
+================================================================================
+
+Query 10: "water quality in the great lakes"
+--------------------------------------------------------------------------------
+
+Keyword search: 6 results in 9.6686 seconds
+
+  1. Data for multiple linear regression models for predicting microcystin concentration action-level exceedances in selected lakes in Ohio
+     Similarity: 0.9000
+     ID: 372313ea-5f6e-4176-96ff-175d8a95259d
+
+  2. Estimates of lake nitrogen, phosphorus, and chlorophyll-a concentrations to characterize harmful algal bloom risk across the United States
+     Similarity: 0.8000
+     ID: 5dccba1d-a2ae-4339-9696-069bc4edcf5c
+
+  3. 1987-2018 cyanobacteria and water quality data for 20 reservoirs
+     Similarity: 0.8000
+     ID: b908b06e-ec8e-4125-b762-c4ff80f13206
+
+  4. Beach Water Quality - Automated Sensors
+     Similarity: 0.7000
+     ID: cb5ae6b1-3ba6-483e-8dc7-4e1161e85863
+
+  5. USGS Water-Quality Data for the Nation - National Water Information System (NWIS)
+     Similarity: 0.4000
+     ID: c82dba20-8aef-4bb8-a889-3555e998f2d3
+
+
+================================================================================
+
+Query 11: "affordable housing availability in major cities"
+--------------------------------------------------------------------------------
+
+Keyword search: 16 results in 10.1456 seconds
+
+  1. Housing Indicators
+     Similarity: 0.9000
+     ID: 224a145c-d8b8-4ca2-90ce-be4ee10bbf70
+
+  2. Affordable Rental Housing Developments
+     Similarity: 0.9000
+     ID: 4bfa4557-2f34-49d0-aaf2-1a8f112bba35
+
+  3. Locations of mines and mining activity in the contiguous United States 2013
+     Similarity: 0.9000
+     ID: 51ba8c9b-5356-4089-921d-4cfe1efd8c91
+
+  4. 421-a(16) Affordable New York Housing Program Completion Extension - Letters of Intent
+     Similarity: 0.9000
+     ID: ddeb8f88-2ea2-4ccb-9257-59af6a416f22
+
+  5. Housing Market Value Analysis 2021
+     Similarity: 0.8000
+     ID: f48de060-8fea-4d45-a99b-2ffe6233683c
+
+
+================================================================================
+
+Query 12: "broadband internet access in underserved communities"
+--------------------------------------------------------------------------------
+
+Keyword search: 18 results in 7.1587 seconds
+
+  1. Broadband Data by Town - 2024
+     Similarity: 0.9000
+     ID: 5c8ebef4-3872-4d21-94ac-d614efc97636
+
+  2. Broadband Data by Town - 2023
+     Similarity: 0.9000
+     ID: 5df62440-e08d-43c2-b0b7-4900ccafb39a
+
+  3. BIL and IRA Funded Projects, Fiscal Years 2022-2025
+     Similarity: 0.8000
+     ID: 9b730ae4-ca4c-4475-b851-dbd3eb7cecc1
+
+  4. BTOP Map
+     Similarity: 0.6000
+     ID: e1c4cdea-0a95-4a87-901d-ab220897257b
+
+  5. Universal Solicitation of Broadband Target Neighborhoods
+     Similarity: 0.6000
+     ID: 064fb277-023f-48ea-863b-bc476c306661
+
+
+================================================================================
+
+Query 13: "vaccination rates by demographic groups"
+--------------------------------------------------------------------------------
+
+Keyword search: 10 results in 7.1667 seconds
+
+  1. COVID-19 Vaccine Progress Dashboard Data
+     Similarity: 0.9000
+     ID: 88d58e6b-5572-4f00-a09b-2f536e0f1b12
+
+  2. COVID-19 Vaccination Coverage, Citywide
+     Similarity: 0.9000
+     ID: 02b55c1e-2ee0-4377-a760-c3120dbd9894
+
+  3. Influenza Vaccination Coverage, Citywide
+     Similarity: 0.9000
+     ID: da017ec4-ebe8-4088-a14d-4742281951ca
+
+  4. Data on separated and dead foals from Conger and Frisco Herd Management Areas, Utah, USA, between 2017 and 2020
+     Similarity: 0.9000
+     ID: 0ba21e49-bdd3-481d-8cd6-1009b1cdd702
+
+  5. COVID-19 Vaccine Progress Dashboard Data by ZIP Code
+     Similarity: 0.8000
+     ID: eeb8a675-9c07-47bf-b3e4-25bb423add0b
+
+
+================================================================================
+
+Query 14: "food deserts in urban areas"
+--------------------------------------------------------------------------------
+
+Keyword search: 2 results in 6.3484 seconds
+
+  1. Low Food Access Areas
+     Similarity: 0.9000
+     ID: e5afd254-784a-4c01-b42c-3a13bfb5f440
+
+  2. Produce Carts
+     Similarity: 0.8000
+     ID: b62f3410-7a2a-4f74-a0fe-9f4b66904d61
+
+
+================================================================================
+
+Query 15: "public transportation usage trends"
+--------------------------------------------------------------------------------
+
+Keyword search: 12 results in 9.0121 seconds
+
+  1. MTA Subway Turnstile Usage Data: 2022
+     Similarity: 0.9000
+     ID: 2f1a0ee9-47e3-415b-8c16-a24c40e5157f
+
+  2. MTA Subway Turnstile Usage Data: 2018
+     Similarity: 0.9000
+     ID: dd7b4d18-f479-4932-b8e1-970f3094f78b
+
+  3. MTA Subway Turnstile Usage Data: 2015
+     Similarity: 0.9000
+     ID: 5ab8de15-e7bd-4c05-9808-608463e95c4e
+
+  4. MTA Subway Turnstile Usage Data: 2020
+     Similarity: 0.9000
+     ID: aa8dadc1-02b4-4040-9659-1c9926decf76
+
+  5. MTA Subway Turnstile Usage Data: 2021
+     Similarity: 0.9000
+     ID: 91416f0b-e4ad-4884-ba68-2eb451641a30
+
+
+================================================================================
+
+Query 16: "small business growth after covid-19"
+--------------------------------------------------------------------------------
+
+Keyword search: 2 results in 3.5839 seconds
+
+  1. FIN - Small Business Innovation Research And Small Business Technology Transfer Matching Grant Program
+     Similarity: 0.7000
+     ID: 8d3b2493-1524-4982-a8a6-df45f81a3ff9
+
+  2. SBS Certified Business List
+     Similarity: 0.3000
+     ID: 25ed2062-ad2e-4fd9-95a8-ea8d467fe90e
+
+
+================================================================================
+
+Query 17: "forest fire frequency and severity"
+--------------------------------------------------------------------------------
+
+Keyword search: 21 results in 12.6698 seconds
+
+  1. Monitoring Trends in Burn Severity Burned Area Boundaries (Feature Layer)
+     Similarity: 0.9000
+     ID: 8474677e-8f7d-4ff5-bed2-dac9753bb8b4
+
+  2. MTBS Wildfire Burned Area Boundaries
+     Similarity: 0.9000
+     ID: fb0d1f61-f30d-4eca-a8ce-46afa25a9dd8
+
+  3. National Park Service Burned Areas Boundaries for 1984-2024
+     Similarity: 0.9000
+     ID: 9d3ea51e-a66a-4bb7-b9c8-3e038791695c
+
+  4. Rapid Assessment of Vegetation Condition after Wildfire (RAVG) Canopy Cover Percent Change (Image Service)
+     Similarity: 0.9000
+     ID: 84b353bf-31ad-4170-9354-257dbe9eed43
+
+  5. Rapid Assessment of Vegetation Condition after Wildfire (RAVG) Basal Area Percent Change (Map Service)
+     Similarity: 0.9000
+     ID: 15cf18a6-0f50-41a8-80f6-6cbdc4f14a0e
+
+
+================================================================================
+
+Query 18: "student loan debt distribution by age"
+--------------------------------------------------------------------------------
+
+Keyword search: 3 results in 4.0130 seconds
+
+  1. Federal Student Loan Portfolio
+     Similarity: 0.9000
+     ID: 1c249f51-eb6d-4f04-86fc-a7979bcc8518
+
+  2. Title IV Program Volume Reports
+     Similarity: 0.5000
+     ID: 149e8441-c03d-4386-b59b-8b343c52d2a1
+
+  3. Approved Debt Relief by State
+     Similarity: 0.3000
+     ID: d2d399e1-256d-41a8-83e9-edcf9649139d
+
+
+================================================================================
+
+Query 19: "maternal mortality rates by state"
+--------------------------------------------------------------------------------
+
+Keyword search: 3 results in 10.0428 seconds
+
+  1. Prematurity and severe maternal morbidity among Medicaid- and CHIP-covered live births
+     Similarity: 0.6000
+     ID: b265f0ac-3216-4df0-bc18-58ee815f1c0e
+
+  2. Pregnancy-Associated Mortality
+     Similarity: 0.3000
+     ID: 45911376-2f0f-418e-8448-c6524f254dd3
+
+  3. VSRR Provisional Maternal Death Counts and Rates
+     Similarity: 0.3000
+     ID: bdca426f-4162-45aa-b79e-abda7645996a
+
+
+================================================================================
+
+Query 20: "solar panel adoption in residential areas"
+--------------------------------------------------------------------------------
+
+Keyword search: 8 results in 8.3963 seconds
+
+  1. Puerto Rico Solar-for-All: LMI PV Rooftop Technical Potential and Solar Savings Potential
+     Similarity: 0.9000
+     ID: 756e9f55-5285-468d-9d8e-bf5b27a40957
+
+  2. Solar-to-Grid Public Data File for Utility-scale (UPV) and Distributed Photovoltaics (DPV) Generation, Capacity Credit, and Value
+     Similarity: 0.9000
+     ID: 65402158-cbc7-4058-a370-9e7525ee417e
+
+  3. Screening Tool for Equitable Adoption and Deployment of Solar (STEADy Solar)
+     Similarity: 0.9000
+     ID: a3a2a104-a3cc-443c-976e-73b9198a0d41
+
+  4. Rooftop Energy Potential of Low Income Communities in America REPLICA
+     Similarity: 0.8000
+     ID: 00b0afea-888c-4ca7-8479-8bcd07c5e4b4
+
+  5. Distributed Generation Market Demand (dGen) model
+     Similarity: 0.7000
+     ID: 7fd4dfea-ccb9-40c3-a908-0c56f0852939
+
+
+================================================================================
+
+SUMMARY
+--------------------------------------------------------------------------------
+
+Total queries: 20
+Total results: 134
+Average results per query: 6.7
+Total search time: 149.7177 seconds
+Average time per query: 7.4859 seconds

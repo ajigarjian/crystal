@@ -31,3 +31,45 @@ export async function processQuery(query: string, options = {}) {
     throw error;
   }
 }
+
+// Add this function to fetch datasets
+export async function fetchDatasets(offset = 0, limit = 15) {
+  try {
+    const response = await fetch(`/api/datasets?limit=${limit}&offset=${offset}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`API error: ${response.status}`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching datasets:', error);
+    throw error;
+  }
+}
+
+// Add this function to fetch a single dataset's details
+export async function fetchDatasetDetails(datasetId: string) {
+  try {
+    const response = await fetch(`/api/datasets/${datasetId}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`API error: ${response.status}`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error(`Error fetching dataset details for ${datasetId}:`, error);
+    throw error;
+  }
+}

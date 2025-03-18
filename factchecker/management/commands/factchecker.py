@@ -4,8 +4,9 @@ from django.core.management.base import BaseCommand
 
 # For searching for the right datasets to download, we use vector search, and have support for keyword search using the gov api
 from factchecker.processing.analysis.extraction.execution import execute_relevant_data
-from factchecker.search import vector_search_datasets
+from factchecker.search.faiss_search import vector_search_datasets_faiss as vector_search_datasets
 from factchecker.search import preprocess_query, search_datasets, filter_relevant_datasets
+from factchecker.search.search_utils import parallel_search
 
 # For downloading the resources in the datasets, we use the download_resource function for now
 from factchecker.download import download_resource
@@ -42,7 +43,7 @@ class Command(BaseCommand):
     
     def add_arguments(self, parser):
         parser.add_argument("query", help="Natural language query to search for datasets")
-        parser.add_argument("--similarity-threshold", type=float, default=0.5, 
+        parser.add_argument("--similarity-threshold", type=float, default=0.3, 
                            help="Minimum similarity score (0-1) for including datasets in vector search results")
         parser.add_argument("--output", default="downloads", help="Directory to save downloaded files")
         parser.add_argument("--preview", action="store_true", help="Show data preview")
@@ -77,7 +78,7 @@ class Command(BaseCommand):
         start_time = time.time()
         
         query = options['query']
-        similarity_threshold = options.get('similarity_threshold', 0.5)
+        similarity_threshold = options.get('similarity_threshold', 0.3)  # Default to 0.3 for FAISS
         output_dir = options['output']
         show_preview = options['preview']
         relevance_threshold = options['relevance_threshold']
@@ -98,11 +99,11 @@ class Command(BaseCommand):
             self.stderr.write(self.style.ERROR(f"Error initializing API keys: {e}"))
             return
         
-        # Base threshold for vector search
-        similarity_threshold = options.get('similarity_threshold', 0.5)  # Default to 0.5 if not specified
+        # Base threshold for vector search (FAISS)
+        similarity_threshold = options.get('similarity_threshold', 0.3)  # Default to 0.3 for FAISS
         
         # Higher threshold for keyword search
-        keyword_threshold = similarity_threshold + 0.2  # 0.2 higher than vector threshold (so default 0.7)
+        keyword_threshold = 0.6  # Fixed at 0.6 for keyword search
         
         # Modified dataset search logic
         if force_datasets:
@@ -149,31 +150,51 @@ class Command(BaseCommand):
                     self.stdout.write("No datasets found.")
         else:
             # DEFAULT: Use hybrid search approach with vector search as primary method
-            self.stdout.write(f"Searching for datasets matching '{query}' using hybrid search...")
-            self.stdout.write(f"Vector search threshold: {similarity_threshold:.2f}, Keyword search threshold: {keyword_threshold:.2f}")
+            self.stdout.write(f"Searching for datasets matching '{query}' using hybrid search")
+            self.stdout.write(f"• FAISS vector search threshold: {similarity_threshold:.2f}")
+            self.stdout.write(f"• Keyword search threshold: {keyword_threshold:.2f}")
 
-            # Get vector search results with threshold (primary method)
-            self.stdout.write(f"Performing vector search (primary method)...")
-            vector_datasets = vector_search_datasets(query, similarity_threshold=similarity_threshold)
+            # Get FAISS vector search results with threshold (primary method)
+            self.stdout.write(f"\n1. Performing FAISS vector search with query variations:")
+            from factchecker.search.search_utils import parallel_search
+
+            # Use parallel search with the original query and variations
+            vector_datasets = parallel_search(
+                query=query,
+                search_function=vector_search_datasets,
+                similarity_threshold=similarity_threshold,
+                max_results=15,
+                use_variations=True,
+                verbose=False  # Disable verbose output
+            )
 
             if vector_datasets:
-                # Display similarity scores for ALL vector search results
-                self.stdout.write(f"Found {len(vector_datasets)} datasets via vector search with similarity >= {similarity_threshold:.2f}")
-                self.stdout.write("Vector search results with similarity scores:")
-                for i, dataset in enumerate(vector_datasets):  # Show all datasets
+                self.stdout.write(f"Found {len(vector_datasets)} datasets via FAISS search")
+                
+                # Show top 5 results only
+                self.stdout.write("\nTop FAISS search results:")
+                for i, dataset in enumerate(vector_datasets[:5]):
                     self.stdout.write(f"  {i+1}. {dataset['title']} - Similarity: {dataset.get('similarity', 0):.4f}")
+                
+                if len(vector_datasets) > 5:
+                    self.stdout.write(f"  ... and {len(vector_datasets) - 5} more results")
             else:
                 self.stdout.write("No datasets found via vector search. Will rely on keyword search.")
 
             # Get keyword search results with higher threshold (supplementary method)
-            self.stdout.write(f"Performing keyword search (supplementary method) with threshold {keyword_threshold:.2f}...")
+            self.stdout.write(f"\n2. Performing keyword search:")
             keyword_datasets = search_datasets(query, gov_api_key, similarity_threshold=keyword_threshold)
 
             if keyword_datasets:
-                self.stdout.write(f"Found {len(keyword_datasets)} datasets via keyword search with similarity >= {keyword_threshold:.2f}")
-                self.stdout.write("Keyword search results with similarity scores:")
-                for i, dataset in enumerate(keyword_datasets):  # Show all datasets
+                self.stdout.write(f"Found {len(keyword_datasets)} datasets via keyword search")
+                
+                # Show top 5 results only
+                self.stdout.write("\nTop keyword search results:")
+                for i, dataset in enumerate(keyword_datasets[:5]):
                     self.stdout.write(f"  {i+1}. {dataset['title']} - Similarity: {dataset.get('similarity', 0):.4f}")
+                
+                if len(keyword_datasets) > 5:
+                    self.stdout.write(f"  ... and {len(keyword_datasets) - 5} more results")
             else:
                 self.stdout.write("No datasets found via keyword search.")
             
@@ -183,7 +204,10 @@ class Command(BaseCommand):
             
             # Find overlap (datasets found by both methods)
             overlap_ids = vector_ids.intersection(keyword_ids)
-            self.stdout.write(f"Found {len(overlap_ids)} datasets in both search results")
+            self.stdout.write(f"\n3. Combining results:")
+            self.stdout.write(f"• {len(vector_ids)} unique datasets from FAISS search")
+            self.stdout.write(f"• {len(keyword_ids)} unique datasets from keyword search")
+            self.stdout.write(f"• {len(overlap_ids)} datasets found by both methods")
             
             # Merge results, removing duplicates
             all_datasets = []

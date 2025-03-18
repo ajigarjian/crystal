@@ -9,4 +9,6 @@ urlpatterns = [
     path('', include(router.urls)),
     path('query/', views.process_query, name='process-query'),
     path('waitlist/register/', views.register_waitlist, name='register_waitlist'),
+    path('api/datasets/', views.get_datasets, name='get_datasets'),
+    path('search/', views.search_datasets_api, name='search_datasets_api'),
 ]
