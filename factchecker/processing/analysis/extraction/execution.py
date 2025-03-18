@@ -150,7 +150,7 @@ def execute_relevant_data(relevant_data) -> Dict[str, Any]:
             # Use the improved code from previous attempt
             code = result.get("code", code)
         
-        print(f"Executing code (attempt {attempts}):\n{code}")
+        print(f"Executing code (attempt {attempts}):\n")
         
         try:
             # Execute the code and capture results
@@ -203,7 +203,7 @@ def execute_relevant_data(relevant_data) -> Dict[str, Any]:
                     print(f"Reasoning: {evaluation.reasoning}")
                     
                     # Check if the answer is considered optimal
-                    if evaluation.is_optimal or evaluation.answer_quality >= 0.85:
+                    if evaluation.is_optimal or evaluation.answer_quality >= 0.80:
                         print(f"Answer quality validation successful (Quality: {evaluation.answer_quality:.2f})")
                         success = True
                         
@@ -318,7 +318,6 @@ def execute_relevant_data(relevant_data) -> Dict[str, Any]:
             result["answer_quality_reasoning"] = best_attempt["reasoning"]
     
     print("Extraction and answer quality validation completed")
-    print(f"DEBUG PRINT EXTRACTED_DATA: {result}")
     
     return result
 
@@ -454,7 +453,7 @@ def validate_query_answer_quality(
         })
         
         # Check if the answer is considered optimal
-        if evaluation.is_optimal or evaluation.answer_quality >= 0.85:
+        if evaluation.is_optimal or evaluation.answer_quality >= 0.80:
             logger.info(f"Answer quality validation successful (Quality: {evaluation.answer_quality:.2f})")
             success = True
             
@@ -522,7 +521,7 @@ def validate_query_answer_quality(
                     # Keep the original result and continue
         
         # If no improved code was provided but we're not optimal
-        elif attempts < max_attempts and evaluation.answer_quality < 0.85:
+        elif attempts < max_attempts and evaluation.answer_quality < 0.80:
             logger.info(f"Generating improved code based on suggestions")
             
             # Generate improved code based on the suggestions
