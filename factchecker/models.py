@@ -8,9 +8,10 @@ class DatasetCatalog(models.Model):
     # Primary fields from the JSON data
     dataset_id = models.CharField(max_length=255, primary_key=True)
     title = models.CharField(max_length=500)
-    description = models.TextField(blank=True, null=True)
+    notes = models.TextField(blank=True, null=True)
     organization_name = models.CharField(max_length=255, blank=True, null=True)
     organization_title = models.CharField(max_length=500, blank=True, null=True)
+    organization_description = models.TextField(blank=True, null=True)
     
     # New field for tags (stored as JSON string)
     tags_json = models.TextField(blank=True, null=True)
@@ -36,9 +37,6 @@ class DatasetCatalog(models.Model):
     metadata_modified = models.DateTimeField(blank=True, null=True)
     extras_json = models.TextField(blank=True, null=True)  # Store extras as JSON
     groups_json = models.TextField(blank=True, null=True)  # Store groups as JSON
-    
-    # Add this new field
-    notes = models.TextField(blank=True, null=True)
     
     # New field for image URL
     image_url = models.URLField(max_length=1000, blank=True, null=True)

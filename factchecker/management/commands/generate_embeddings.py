@@ -2,6 +2,8 @@ import numpy as np
 from openai import OpenAI
 import os
 import time
+import re
+import json
 from django.core.management.base import BaseCommand
 from factchecker.models import DatasetCatalog
 from tqdm import tqdm
@@ -45,10 +47,12 @@ class Command(BaseCommand):
         # Get datasets that need embeddings
         if force:
             datasets = DatasetCatalog.objects.all()
-            self.stdout.write(f"Generating embeddings for all datasets (force mode)")
+            count = datasets.count()
+            self.stdout.write(f"Generating embeddings for all datasets (force mode): {count} datasets found")
         else:
             datasets = DatasetCatalog.objects.filter(indexed=False)
-            self.stdout.write(f"Generating embeddings for unindexed datasets")
+            count = datasets.count()
+            self.stdout.write(f"Generating embeddings for unindexed datasets: {count} datasets found")
         
         # Apply limit if specified
         if limit:
@@ -67,8 +71,54 @@ class Command(BaseCommand):
             
             # Prepare batch of texts to embed
             for dataset in batch:
-                # Create text to embed (combine title, description, and organization)
-                text_to_embed = f"Title: {dataset.title}\nDescription: {dataset.description or ''}\nOrganization: {dataset.organization_title or ''}"
+                # Extract theme from extras
+                theme = ''
+                if dataset.extras:
+                    for extra in dataset.extras:
+                        if extra.get('key') == 'theme' and extra.get('value'):
+                            theme_value = extra.get('value')
+                            if isinstance(theme_value, list):
+                                theme = ', '.join(theme_value)
+                            else:
+                                theme = str(theme_value)
+                            break
+                
+                # Extract groups information
+                groups_text = ''
+                if dataset.groups:
+                    group_names = []
+                    for group in dataset.groups:
+                        if group.get('title'):
+                            group_names.append(group.get('title'))
+                        elif group.get('name'):
+                            group_names.append(group.get('name'))
+                    groups_text = ', '.join(group_names)
+                
+                # Clean text fields
+                clean_title = self.clean_text(dataset.title)
+                clean_notes = self.clean_text(self.remove_html_tags(dataset.notes or ''))
+                clean_org = self.clean_text(dataset.organization_title or '')
+                
+                # Extract tag names from the tag dictionaries
+                tag_names = []
+                if dataset.tags:
+                    for tag in dataset.tags:
+                        if isinstance(tag, dict) and 'name' in tag:
+                            tag_names.append(tag['name'])
+                        elif isinstance(tag, str):
+                            tag_names.append(tag)
+                
+                # Create text to embed with all relevant fields
+                text_to_embed = f"""Title: {clean_title}
+                    Notes: {clean_notes}
+                    Organization: {clean_org}
+                    Tags: {', '.join(tag_names)}
+                    Theme: {theme}
+                    Groups: {groups_text}"""
+                
+                # Truncate if text is too long
+                text_to_embed = self.truncate_text(text_to_embed)
+                
                 batch_texts.append(text_to_embed)
                 batch_ids.append(dataset.dataset_id)
             
@@ -90,7 +140,8 @@ class Command(BaseCommand):
                     # Update the dataset
                     DatasetCatalog.objects.filter(dataset_id=dataset_id).update(
                         embedding=embedding_bytes,
-                        indexed=True
+                        indexed=True,
+                        search_text=batch_texts[j]  # Store the processed text for reference
                     )
                 
                 total_processed += len(batch)
@@ -104,3 +155,38 @@ class Command(BaseCommand):
                 # Continue with next batch
         
         self.stdout.write(self.style.SUCCESS(f"Embedding generation complete! {total_processed} datasets processed."))
+    
+    def remove_html_tags(self, text):
+        """Remove HTML tags from text"""
+        if not text:
+            return ""
+        return re.sub(r'<[^>]+>', ' ', text)
+    
+    def clean_text(self, text):
+        """Clean and normalize text"""
+        if not text:
+            return ""
+        # Remove special characters but keep important ones
+        text = re.sub(r'[^\w\s\-\.,;:#&\'"/()]', ' ', text)
+        # Normalize whitespace
+        return ' '.join(text.split())
+    
+    def truncate_text(self, text, max_chars=12000):
+        """Truncate text while preserving complete sections"""
+        if len(text) <= max_chars:
+            return text
+            
+        sections = text.split('\n')
+        result = []
+        current_length = 0
+        
+        for section in sections:
+            section_name = section.split(':', 1)[0] if ':' in section else ''
+            # Always include title and tags even if we're close to the limit
+            if (current_length + len(section) + 1 > max_chars and 
+                not section_name in ["Title", "Tags"]):
+                break
+            result.append(section)
+            current_length += len(section) + 1
+            
+        return '\n'.join(result)
