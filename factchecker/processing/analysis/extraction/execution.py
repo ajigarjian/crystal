@@ -101,6 +101,11 @@ def execute_relevant_data(relevant_data) -> Dict[str, Any]:
         
     Returns:
         extracted_data: Dictionary containing extracted data
+        
+        {
+            "results_dict": Pandas dataframe or dict of result records,
+            "code": Code used to extract the results_dict data
+        }
     """
     logger = logging.getLogger("data_extraction")
     
@@ -108,13 +113,20 @@ def execute_relevant_data(relevant_data) -> Dict[str, Any]:
     result = {}
 
     # Get variables
-    dataset_stats = relevant_data["dataset_stats"]
-    column_info = relevant_data["column_info"]
-    numerical_stats = relevant_data["numerical_stats"]
-    column_values_analysis = relevant_data["column_values_analysis"]
-    extraction_code = relevant_data["extraction_code"]
-    dataset_content = relevant_data["dataset_content"]
-    query = relevant_data["user_query"]
+    dataset_stats = relevant_data.get("dataset_stats", {})
+    column_info = relevant_data.get("column_info", {})
+    numerical_stats = relevant_data.get("numerical_stats", {})
+    column_values_analysis = relevant_data.get("column_values_analysis", {})
+    extraction_code = relevant_data.get("extraction_code", "")
+    dataset_content = relevant_data.get("dataset_content")
+    query = relevant_data.get("user_query", "")
+    
+    # Add dataset metadata to result
+    result["dataset_title"] = relevant_data.get("dataset_title", "")
+    result["dataset_source"] = relevant_data.get("dataset_source", "")
+    result["dataset_id"] = relevant_data.get("dataset_id", "")
+    result["file_path"] = relevant_data.get("file_path", "")
+    result["all_file_paths"] = relevant_data.get("all_file_paths", [])
 
     # Initialize result with default values
     # Track attempts
@@ -122,29 +134,40 @@ def execute_relevant_data(relevant_data) -> Dict[str, Any]:
     attempts = 0
     success = False
     
+    # Store validation history
+    result["validation_history"] = []
+    
+    print(f"Starting extraction for query: {query}")
+    print(f"Dataset shape: {dataset_content.shape if hasattr(dataset_content, 'shape') else 'Unknown'}")
+    
     while attempts < max_attempts and not success:
         attempts += 1
-        logger.info(f"Extraction attempt {attempts}/{max_attempts}")
+        print(f"Extraction attempt {attempts}/{max_attempts}")
         
         # Get the current code to execute
         code = relevant_data.get("extraction_code", "").strip()
+        if attempts > 1:
+            # Use the improved code from previous attempt
+            code = result.get("code", code)
         
-        logger.info(f"Executing code:\n{extraction_code}")
+        print(f"Executing code (attempt {attempts}):\n{code}")
         
         try:
             # Execute the code and capture results
             execution_result, printed_output = execute_code(dataset_content, code)
+            print(f"Code execution completed. Result type: {type(execution_result)}")
+            print(f"Printed output: {printed_output[:200]}..." if len(printed_output) > 200 else f"Printed output: {printed_output}")
 
             # Check for an empty response before calling the validation LLM.
             response_check = check_execute_code_response(execution_result, printed_output)
 
             # If the response is None, there were no initial validation errors. Continue.
             if not response_check:
-
                 # Debug print the extracted data
-                print("Execution Result:", execution_result)
+                print(f"Execution Result: {str(execution_result)[:200]}..." if len(str(execution_result)) > 200 else f"Execution Result: {execution_result}")
 
-                # Validate the results
+                # First validate the basic extraction results
+                print("Validating extraction results...")
                 validation_result = validate_extraction_results(
                     execution_result, 
                     dataset_content, 
@@ -153,52 +176,117 @@ def execute_relevant_data(relevant_data) -> Dict[str, Any]:
                     code
                 )
                 
+                print(f"Validation result: is_valid={validation_result.is_valid}, reason={validation_result.reason}")
+                
                 if validation_result.is_valid:
-                    # If valid, update the result and break the loop
-                    success = True
+                    # If valid, now validate and improve the answer quality
+                    print("Basic extraction validated, now validating answer quality...")
                     
-                    # Package the results
-                    if isinstance(execution_result, pd.DataFrame):
-                        result["results_dict"] = execution_result.to_dict(orient="records")
-                    elif isinstance(execution_result, dict):
-                        # Check that it conforms to the expected response
-                        if "subset_df" in execution_result and "aggregations" in execution_result:
-                            result["results_dict"] = execution_result["subset_df"]
-                            result["aggregations"] = execution_result["aggregations"]
+                    # Use the function to evaluate the answer quality
+                    evaluation = evaluate_query_answer_quality(
+                        execution_result,
+                        dataset_content,
+                        query,
+                        code,
+                        printed_output
+                    )
+                    
+                    # Add to validation history
+                    result["validation_history"].append({
+                        "attempt": attempts,
+                        "answer_quality": evaluation.answer_quality,
+                        "reasoning": evaluation.reasoning,
+                        "is_optimal": evaluation.is_optimal
+                    })
+                    
+                    print(f"Answer quality: {evaluation.answer_quality:.2f}, is_optimal: {evaluation.is_optimal}")
+                    print(f"Reasoning: {evaluation.reasoning}")
+                    
+                    # Check if the answer is considered optimal
+                    if evaluation.is_optimal or evaluation.answer_quality >= 0.85:
+                        print(f"Answer quality validation successful (Quality: {evaluation.answer_quality:.2f})")
+                        success = True
+                        
+                        # Package the results
+                        if isinstance(execution_result, pd.DataFrame):
+                            result["results_dict"] = execution_result.to_dict(orient="records")
                         else:
-                            # If it doesn't match the expected format, just use the dict as is
-                            result["results_dict"] = execution_result
-                    else:
-                        result["results_dict"] = {"data": execution_result}
+                            result["results_dict"] = {"data": execution_result}
+                        
+                        result["printed_output"] = printed_output
+                        result["code"] = code
+                        result["answer_quality"] = evaluation.answer_quality
+                        result["answer_quality_reasoning"] = evaluation.reasoning
                     
-                    result["printed_output"] = printed_output
-                    logger.info("Extraction successful and validated")
+                    # If not optimal and we have improvement suggestions, try to improve
+                    elif attempts < max_attempts and evaluation.improvement_suggestions:
+                        print(f"Answer quality needs improvement (Quality: {evaluation.answer_quality:.2f})")
+                        print(f"Reason: {evaluation.reasoning}")
+                        
+                        # Generate improved code using generate_extraction_code instead of using evaluation.improved_code
+                        improved_code = generate_extraction_code(
+                            dataset_content, 
+                            column_values_analysis, 
+                            query, 
+                            evaluation.improvement_suggestions, 
+                            code
+                        )
+                        
+                        print(f"Generated improved code:\n{improved_code}")
+                        
+                        # Update for next iteration
+                        result["code"] = improved_code
+                    
+                    # If no improved code was provided but we're not optimal
+                    elif attempts < max_attempts:
+                        print(f"Generating improved code based on suggestions")
+                        
+                        # Generate improved code based on the suggestions
+                        improved_code = generate_extraction_code(
+                            dataset_content, 
+                            column_values_analysis, 
+                            query, 
+                            evaluation.improvement_suggestions or "Improve the extraction code to better answer the query", 
+                            code
+                        )
+
+                        print(f"Generated improved code:\n{improved_code}")
+                        
+                        # Update for next iteration
+                        result["code"] = improved_code
                 
                 else:
                     # If not valid, update the extraction plan with new code
-                    logger.info(f"Validation failed: {validation_result.reason}")
+                    print(f"Validation failed: {validation_result.reason}")
                     
+                    # Generate improved code
                     improved_code = generate_extraction_code(dataset_content, column_values_analysis, query, validation_result.reason, code)
+
+
+                    print(f"Generated improved code:\n{improved_code}")
                     
                     result["code"] = improved_code
 
             # If the initial check_execute_code_response check fails
             else:
-                    # debug log
-                    print(f"Debug: Initial check failed for", execution_result, printed_output, code)
-                    # Generate improved code
-                    improved_code = generate_extraction_code(dataset_content, column_values_analysis, query, response_check, code)
-                    
-                    result["code"] = improved_code
-                    
+                print(f"Initial check failed: {response_check}")
+                # Generate improved code
+                improved_code = generate_extraction_code(dataset_content, column_values_analysis, query, response_check, code)
+                
+                print(f"Generated improved code:\n{improved_code}")
+                
+                result["code"] = improved_code
+                
         except Exception as e:
             error_msg = f"Execution error: {str(e)}"
-            logger.error(f"{error_msg}\n{traceback.format_exc()}")
+            print(f"{error_msg}\n{traceback.format_exc()}")
             
             if attempts < max_attempts:
                 # Try to generate improved code that fixes the error
                 improved_code = generate_extraction_code(dataset_content, column_values_analysis, query, error_msg, code)
-                        
+
+                print(f"Generated improved code after error:\n{improved_code}")
+                
                 # Update the extraction plan with the new code
                 result["code"] = improved_code
             else:
@@ -210,6 +298,27 @@ def execute_relevant_data(relevant_data) -> Dict[str, Any]:
                 result["printed_output"] = f"Error occurred: {str(e)}"
                 result["extraction_strategy"] = "Fallback strategy: showing first 10 rows due to error"
                 result["explanation"] = f"Original extraction failed with error: {str(e)}"
+    
+    # If we've exhausted all attempts without success, use the last result
+    if not success:
+        print(f"Using best available result after {attempts} attempts")
+        
+        # Package the results
+        if isinstance(execution_result, pd.DataFrame):
+            result["results_dict"] = execution_result.to_dict(orient="records")
+        else:
+            result["results_dict"] = {"data": execution_result}
+        
+        result["printed_output"] = printed_output
+        
+        # Get the highest quality score from the validation history
+        if result["validation_history"]:
+            best_attempt = max(result["validation_history"], key=lambda x: x["answer_quality"])
+            result["answer_quality"] = best_attempt["answer_quality"]
+            result["answer_quality_reasoning"] = best_attempt["reasoning"]
+    
+    print("Extraction and answer quality validation completed")
+    print(f"DEBUG PRINT EXTRACTED_DATA: {result}")
     
     return result
 
@@ -473,238 +582,4 @@ def validate_query_answer_quality(
             final_result["subset_df"] = subset_df.to_dict(orient="records")
     
     return final_result
-
-def execute_relevant_data(relevant_data) -> Dict[str, Any]:
-    """
-    Execute the relevant data and return the extracted data
-    
-    Args:
-        relevant_data:
-
-        {
-            "dataset_stats": dataset_stats,
-            "column_info": column_info,
-            "numerical_stats": numerical_stats,
-            "column_values_analysis": column_values_analysis,
-            "extraction_code": extraction_code,
-            "dataset_content": dataset_content
-        }
-        
-    Returns:
-        extracted_data: Dictionary containing extracted data
-        
-        {
-            "results_dict": Pandas dataframe or dict of result records,
-            "code": Code used to extract the results_dict data
-        }
-    """
-    logger = logging.getLogger("data_extraction")
-    
-    # Result 
-    result = {}
-
-    # Get variables
-    dataset_stats = relevant_data.get("dataset_stats", {})
-    column_info = relevant_data.get("column_info", {})
-    numerical_stats = relevant_data.get("numerical_stats", {})
-    column_values_analysis = relevant_data.get("column_values_analysis", {})
-    extraction_code = relevant_data.get("extraction_code", "")
-    dataset_content = relevant_data.get("dataset_content")
-    query = relevant_data.get("user_query", "")
-    
-    # Add dataset metadata to result
-    result["dataset_title"] = relevant_data.get("dataset_title", "")
-    result["dataset_source"] = relevant_data.get("dataset_source", "")
-    result["dataset_id"] = relevant_data.get("dataset_id", "")
-    result["file_path"] = relevant_data.get("file_path", "")
-    result["all_file_paths"] = relevant_data.get("all_file_paths", [])
-
-    # Initialize result with default values
-    # Track attempts
-    max_attempts = 3
-    attempts = 0
-    success = False
-    
-    # Store validation history
-    result["validation_history"] = []
-    
-    print(f"Starting extraction for query: {query}")
-    print(f"Dataset shape: {dataset_content.shape if hasattr(dataset_content, 'shape') else 'Unknown'}")
-    
-    while attempts < max_attempts and not success:
-        attempts += 1
-        print(f"Extraction attempt {attempts}/{max_attempts}")
-        
-        # Get the current code to execute
-        code = relevant_data.get("extraction_code", "").strip()
-        if attempts > 1:
-            # Use the improved code from previous attempt
-            code = result.get("code", code)
-        
-        print(f"Executing code (attempt {attempts}):\n{code}")
-        
-        try:
-            # Execute the code and capture results
-            execution_result, printed_output = execute_code(dataset_content, code)
-            print(f"Code execution completed. Result type: {type(execution_result)}")
-            print(f"Printed output: {printed_output[:200]}..." if len(printed_output) > 200 else f"Printed output: {printed_output}")
-
-            # Check for an empty response before calling the validation LLM.
-            response_check = check_execute_code_response(execution_result, printed_output)
-
-            # If the response is None, there were no initial validation errors. Continue.
-            if not response_check:
-                # Debug print the extracted data
-                print(f"Execution Result: {str(execution_result)[:200]}..." if len(str(execution_result)) > 200 else f"Execution Result: {execution_result}")
-
-                # First validate the basic extraction results
-                print("Validating extraction results...")
-                validation_result = validate_extraction_results(
-                    execution_result, 
-                    dataset_content, 
-                    query, 
-                    printed_output,
-                    code
-                )
-                
-                print(f"Validation result: is_valid={validation_result.is_valid}, reason={validation_result.reason}")
-                
-                if validation_result.is_valid:
-                    # If valid, now validate and improve the answer quality
-                    print("Basic extraction validated, now validating answer quality...")
-                    
-                    # Use the function to evaluate the answer quality
-                    evaluation = evaluate_query_answer_quality(
-                        execution_result,
-                        dataset_content,
-                        query,
-                        code,
-                        printed_output
-                    )
-                    
-                    # Add to validation history
-                    result["validation_history"].append({
-                        "attempt": attempts,
-                        "answer_quality": evaluation.answer_quality,
-                        "reasoning": evaluation.reasoning,
-                        "is_optimal": evaluation.is_optimal
-                    })
-                    
-                    print(f"Answer quality: {evaluation.answer_quality:.2f}, is_optimal: {evaluation.is_optimal}")
-                    print(f"Reasoning: {evaluation.reasoning}")
-                    
-                    # Check if the answer is considered optimal
-                    if evaluation.is_optimal or evaluation.answer_quality >= 0.85:
-                        print(f"Answer quality validation successful (Quality: {evaluation.answer_quality:.2f})")
-                        success = True
-                        
-                        # Package the results
-                        if isinstance(execution_result, pd.DataFrame):
-                            result["results_dict"] = execution_result.to_dict(orient="records")
-                        else:
-                            result["results_dict"] = {"data": execution_result}
-                        
-                        result["printed_output"] = printed_output
-                        result["code"] = code
-                        result["answer_quality"] = evaluation.answer_quality
-                        result["answer_quality_reasoning"] = evaluation.reasoning
-                    
-                    # If not optimal and we have improvement suggestions, try to improve
-                    elif attempts < max_attempts and evaluation.improved_code:
-                        print(f"Answer quality needs improvement (Quality: {evaluation.answer_quality:.2f})")
-                        print(f"Reason: {evaluation.reasoning}")
-                        
-                        # Get the improved code
-                        improved_code = evaluation.improved_code
-                        
-                        # Clean the code if needed
-                        if improved_code.startswith("```python"):
-                            improved_code = improved_code.replace("```python", "", 1)
-                        if improved_code.endswith("```"):
-                            improved_code = improved_code[:-3]
-                        improved_code = improved_code.strip()
-                        
-                        print(f"Improved code generated:\n{improved_code}")
-                        
-                        # Update for next iteration
-                        result["code"] = improved_code
-                    
-                    # If no improved code was provided but we're not optimal
-                    elif attempts < max_attempts:
-                        print(f"Generating improved code based on suggestions")
-                        
-                        # Generate improved code based on the suggestions
-                        improved_code = generate_extraction_code(dataset_content, column_values_analysis, query, evaluation.improvement_suggestions, code)
-
-                        print(f"Generated improved code:\n{improved_code}")
-                        
-                        # Update for next iteration
-                        result["code"] = improved_code
-                
-                else:
-                    # If not valid, update the extraction plan with new code
-                    print(f"Validation failed: {validation_result.reason}")
-                    
-                    # Generate improved code
-                    improved_code = generate_extraction_code(dataset_content, column_values_analysis, query, validation_result.reason, code)
-
-
-                    print(f"Generated improved code:\n{improved_code}")
-                    
-                    result["code"] = improved_code
-
-            # If the initial check_execute_code_response check fails
-            else:
-                print(f"Initial check failed: {response_check}")
-                # Generate improved code
-                improved_code = generate_extraction_code(dataset_content, column_values_analysis, query, response_check, code)
-                
-                print(f"Generated improved code:\n{improved_code}")
-                
-                result["code"] = improved_code
-                
-        except Exception as e:
-            error_msg = f"Execution error: {str(e)}"
-            print(f"{error_msg}\n{traceback.format_exc()}")
-            
-            if attempts < max_attempts:
-                # Try to generate improved code that fixes the error
-                improved_code = generate_extraction_code(dataset_content, column_values_analysis, query, error_msg, code)
-
-                print(f"Generated improved code after error:\n{improved_code}")
-                
-                # Update the extraction plan with the new code
-                result["code"] = improved_code
-            else:
-                # If this was the last attempt, record the error
-                result["error"] = error_msg
-                
-                # Fallback to a simple extraction
-                result["results_dict"] = dataset_content.head(10).to_dict(orient="records")
-                result["printed_output"] = f"Error occurred: {str(e)}"
-                result["extraction_strategy"] = "Fallback strategy: showing first 10 rows due to error"
-                result["explanation"] = f"Original extraction failed with error: {str(e)}"
-    
-    # If we've exhausted all attempts without success, use the last result
-    if not success:
-        print(f"Using best available result after {attempts} attempts")
-        
-        # Package the results
-        if isinstance(execution_result, pd.DataFrame):
-            result["results_dict"] = execution_result.to_dict(orient="records")
-        else:
-            result["results_dict"] = {"data": execution_result}
-        
-        result["printed_output"] = printed_output
-        
-        # Get the highest quality score from the validation history
-        if result["validation_history"]:
-            best_attempt = max(result["validation_history"], key=lambda x: x["answer_quality"])
-            result["answer_quality"] = best_attempt["answer_quality"]
-            result["answer_quality_reasoning"] = best_attempt["reasoning"]
-    
-    print("Extraction and answer quality validation completed")
-    print(f"DEBUG PRINT EXTRACTED_DATA: {result}")
-    
-    return result
     
