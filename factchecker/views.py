@@ -21,7 +21,7 @@ from threading import Lock
 import traceback
 import numpy as np
 import json
-from django.http import JsonResponse
+from django.http import JsonResponse, StreamingHttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from corsheaders.defaults import default_headers
 from django.db import models
@@ -257,6 +257,7 @@ def search_datasets_api(request):
     """
     API endpoint that searches for datasets matching a query.
     Returns a list of relevant datasets without performing full analysis.
+    Uses the same hybrid search approach as the factchecker CLI tool.
     """
     print("Search API endpoint called")
     # Get the query parameter
@@ -271,8 +272,9 @@ def search_datasets_api(request):
     # Get optional parameters with defaults
     similarity_threshold = float(request.data.get('similarity_threshold', 0.3))
     search_method = request.data.get('search_method', None)  # 'vector', 'keyword', or None for hybrid
+    max_results = int(request.data.get('max_results', 15))
     
-    print(f"Parameters: method={search_method}, threshold={similarity_threshold}")
+    print(f"Parameters: method={search_method}, threshold={similarity_threshold}, max_results={max_results}")
     logger.info(f"[API] Received dataset search request: '{query}' (method: {search_method}, threshold: {similarity_threshold})")
     
     try:
@@ -293,21 +295,43 @@ def search_datasets_api(request):
         
         # Perform search based on method
         if search_method == 'vector':
-            print("Starting vector search...")
-            # Vector search only
-            datasets = vector_search_datasets(query, similarity_threshold=similarity_threshold)
+            print("Starting vector search with query variations...")
+            # Import the parallel search utility
+            from factchecker.search.search_utils import parallel_search
+            
+            # Vector search with query variations (matches CLI behavior)
+            datasets = parallel_search(
+                query=query,
+                search_function=vector_search_datasets,
+                similarity_threshold=similarity_threshold,
+                max_results=max_results,
+                use_variations=True,
+                verbose=False
+            )
             print(f"Vector search complete. Found {len(datasets)} datasets")
+            
         elif search_method == 'keyword':
             print("Starting keyword search...")
             # Keyword search only
             datasets = search_datasets(query, gov_api_key, similarity_threshold=keyword_threshold)
             print(f"Keyword search complete. Found {len(datasets)} datasets")
+            
         else:
             print("Starting hybrid search...")
             # Hybrid search (default)
-            # Get vector search results
-            print("Performing vector search...")
-            vector_datasets = vector_search_datasets(query, similarity_threshold=similarity_threshold)
+            
+            # Get vector search results with query variations (matches CLI behavior)
+            print("Performing vector search with query variations...")
+            from factchecker.search.search_utils import parallel_search
+            
+            vector_datasets = parallel_search(
+                query=query,
+                search_function=vector_search_datasets,
+                similarity_threshold=similarity_threshold,
+                max_results=max_results,
+                use_variations=True,
+                verbose=False
+            )
             print(f"Vector search complete. Found {len(vector_datasets)} datasets")
             
             # Get keyword search results
@@ -315,17 +339,22 @@ def search_datasets_api(request):
             keyword_datasets = search_datasets(query, gov_api_key, similarity_threshold=keyword_threshold)
             print(f"Keyword search complete. Found {len(keyword_datasets)} datasets")
             
+            # Get IDs from both search methods
+            vector_ids = {dataset['id'] for dataset in vector_datasets}
+            keyword_ids = {dataset['id'] for dataset in keyword_datasets}
+            
+            # Find overlap (datasets found by both methods)
+            overlap_ids = vector_ids.intersection(keyword_ids)
+            print(f"Search statistics:")
+            print(f"• {len(vector_ids)} unique datasets from vector search")
+            print(f"• {len(keyword_ids)} unique datasets from keyword search")
+            print(f"• {len(overlap_ids)} datasets found by both methods")
+            
             # Merge results, removing duplicates
             all_datasets = []
             seen_ids = set()
             
             # Process vector datasets first
-            vector_ids = {dataset['id'] for dataset in vector_datasets}
-            keyword_ids = {dataset['id'] for dataset in keyword_datasets}
-            overlap_ids = vector_ids.intersection(keyword_ids)
-            print(f"Found {len(overlap_ids)} datasets in both search results")
-            
-            # Add vector datasets
             for dataset in vector_datasets:
                 dataset_id = dataset['id']
                 if dataset_id in overlap_ids:
@@ -341,12 +370,54 @@ def search_datasets_api(request):
                 if dataset_id not in seen_ids:
                     dataset['search_source'] = 'keyword'
                     all_datasets.append(dataset)
+                    seen_ids.add(dataset_id)
             
             # Sort by similarity score (higher is better)
             all_datasets.sort(key=lambda x: x.get('similarity', 0), reverse=True)
             
             datasets = all_datasets
-            print(f"Combined search complete. Found {len(datasets)} unique datasets")
+            print(f"Combined search complete. Found {len(datasets)} unique datasets after deduplication")
+        
+        # Enrich datasets with additional information from database where available
+        enriched_datasets = []
+        for dataset in datasets:
+            dataset_id = dataset['id']
+            
+            # Try to find the dataset in our database to get additional information
+            try:
+                db_dataset = DatasetCatalog.objects.get(dataset_id=dataset_id)
+                # Add image URL to the dataset
+                dataset['image_url'] = db_dataset.image_url
+                
+                # Get resources for this dataset
+                resources = DatasetResource.objects.filter(dataset=db_dataset)
+                if resources:
+                    # Format resources data to match the get_datasets endpoint
+                    resources_data = [
+                        {
+                            'id': resource.resource_id,
+                            'name': resource.name,
+                            'url': resource.url,
+                            'description': resource.description,
+                            'format': resource.format
+                        }
+                        for resource in resources
+                    ]
+                    dataset['resources'] = resources_data
+                
+                # Add or update organization information if available
+                dataset['organization_name'] = db_dataset.organization_name
+                dataset['organization_title'] = db_dataset.organization_title
+                
+                # Add tags if available
+                if db_dataset.tags:
+                    dataset['tags'] = db_dataset.tags
+                
+            except DatasetCatalog.DoesNotExist:
+                # Dataset not in our database, keep original data
+                pass
+            
+            enriched_datasets.append(dataset)
         
         # Calculate execution time
         execution_time = time.time() - start_time
@@ -355,9 +426,10 @@ def search_datasets_api(request):
         # Prepare response
         response_data = {
             'query': query,
-            'datasets': datasets,
+            'datasets': enriched_datasets,
             'execution_time': execution_time,
-            'search_method': search_method if search_method else 'hybrid'
+            'search_method': search_method if search_method else 'hybrid',
+            'total_count': len(enriched_datasets)
         }
         
         print("Returning response")
@@ -374,3 +446,297 @@ def search_datasets_api(request):
             'error': str(e),
             'traceback': traceback.format_exc()
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+from django.http import StreamingHttpResponse
+import json
+
+@api_view(['POST'])
+def stream_search_datasets(request):
+    """
+    Streaming API endpoint that searches for datasets matching a query.
+    Returns datasets incrementally as they are found.
+    """
+    print("Streaming search API endpoint called")
+    
+    # Get the query parameter
+    query = request.data.get('query', '')
+    
+    if not query:
+        print("No query provided")
+        return Response({'error': 'Query is required'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Get optional parameters with defaults
+    similarity_threshold = float(request.data.get('similarity_threshold', 0.3))
+    search_method = request.data.get('search_method', None)  # 'vector', 'keyword', or None for hybrid
+    max_results = int(request.data.get('max_results', 15))
+    
+    print(f"Parameters: method={search_method}, threshold={similarity_threshold}, max_results={max_results}")
+    logger.info(f"[API] Received streaming search request: '{query}' (method: {search_method}, threshold: {similarity_threshold})")
+    
+    # Create a generator function that yields dataset results as they come in
+    def dataset_stream():
+        try:
+            start_time = time.time()
+            
+            # Send initial message
+            yield json.dumps({
+                'type': 'status',
+                'message': f'Starting search for relevant datasets about "{query}"...',
+                'timestamp': time.time() - start_time
+            }) + '\n'
+            
+            # Initialize API key for Data.gov
+            from django.conf import settings
+            gov_api_key = settings.DATA_GOV_API_KEY
+            
+            if not gov_api_key:
+                yield json.dumps({
+                    'type': 'error',
+                    'message': 'API key configuration issue. Please try again later.',
+                    'timestamp': time.time() - start_time
+                }) + '\n'
+                return
+            
+            # Higher threshold for keyword search
+            keyword_threshold = similarity_threshold + 0.2
+            
+            vector_datasets = []
+            keyword_datasets = []
+            all_datasets_count = 0
+            
+            # Helper function to enrich and yield a dataset
+            def process_and_yield_dataset(dataset, source):
+                nonlocal all_datasets_count
+                dataset_id = dataset['id']
+                dataset_title = dataset['title']
+                all_datasets_count += 1
+                
+                # Set search source (but we'll make it less prominent in the UI)
+                dataset['search_source'] = source
+                
+                # Try to find the dataset in our database to get additional information
+                try:
+                    db_dataset = DatasetCatalog.objects.get(dataset_id=dataset_id)
+                    # Add image URL to the dataset
+                    dataset['image_url'] = db_dataset.image_url
+                    
+                    # Get resources for this dataset
+                    resources = DatasetResource.objects.filter(dataset=db_dataset)
+                    if resources:
+                        # Format resources data
+                        resources_data = [
+                            {
+                                'id': resource.resource_id,
+                                'name': resource.name,
+                                'url': resource.url,
+                                'description': resource.description,
+                                'format': resource.format
+                            }
+                            for resource in resources
+                        ]
+                        dataset['resources'] = resources_data
+                    
+                    # Add organization information if available
+                    dataset['organization_name'] = db_dataset.organization_name
+                    dataset['organization_title'] = db_dataset.organization_title
+                    
+                    # Add tags if available
+                    if db_dataset.tags:
+                        dataset['tags'] = db_dataset.tags
+                    
+                except DatasetCatalog.DoesNotExist:
+                    # Dataset not in our database, keep original data
+                    pass
+                
+                # Yield status update about finding this dataset
+                yield json.dumps({
+                    'type': 'discovery',
+                    'message': f'Found dataset: {dataset_title}',
+                    'count': all_datasets_count,
+                    'timestamp': time.time() - start_time
+                }) + '\n'
+                
+                # Then yield the enriched dataset
+                yield json.dumps({
+                    'type': 'dataset',
+                    'data': dataset,
+                    'timestamp': time.time() - start_time
+                }) + '\n'
+            
+            # Vector search with streaming results
+            if search_method in ['vector', None]:  # Vector or hybrid
+                yield json.dumps({
+                    'type': 'status',
+                    'message': 'Searching government databases...',
+                    'timestamp': time.time() - start_time
+                }) + '\n'
+                
+                # Import the parallel search utility
+                from factchecker.search.search_utils import generate_similar_queries
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+                
+                # Generate query variations
+                queries = generate_similar_queries(query)
+                
+                # Keep track of seen dataset IDs
+                seen_vector_ids = set()
+                
+                # Function to search with a single query variation
+                def search_with_variation(variation):
+                    try:
+                        results = vector_search_datasets(
+                            variation,
+                            similarity_threshold=similarity_threshold,
+                            max_results=max_results,
+                            verbose=False
+                        )
+                        
+                        # Add the query variation to each result
+                        for result in results:
+                            result['query_variation'] = variation
+                            
+                        return results
+                    except Exception as e:
+                        print(f"Error searching with query '{variation}': {e}")
+                        return []
+                
+                # Run searches in parallel but yield results as they come in
+                with ThreadPoolExecutor(max_workers=min(len(queries), 5)) as executor:
+                    future_to_query = {executor.submit(search_with_variation, q): q for q in queries}
+                    
+                    for future in as_completed(future_to_query):
+                        query_variation = future_to_query[future]
+                        try:
+                            results = future.result()
+                            
+                            # Process and yield each result if not seen before
+                            for result in results:
+                                if result['id'] not in seen_vector_ids:
+                                    seen_vector_ids.add(result['id'])
+                                    vector_datasets.append(result)
+                                    yield from process_and_yield_dataset(result, 'vector')
+                        except Exception as e:
+                            print(f"Error processing results for query '{query_variation}': {e}")
+                
+                # Status update after vector search
+                if vector_datasets:
+                    yield json.dumps({
+                        'type': 'status',
+                        'message': f'Found {len(vector_datasets)} datasets that might be relevant',
+                        'timestamp': time.time() - start_time
+                    }) + '\n'
+            
+            # Keyword search with streaming results
+            if search_method in ['keyword', None]:  # Keyword or hybrid
+                yield json.dumps({
+                    'type': 'status',
+                    'message': 'Checking additional government data sources...',
+                    'timestamp': time.time() - start_time
+                }) + '\n'
+                
+                try:
+                    # Get keyword search results
+                    keyword_results = search_datasets(query, gov_api_key, similarity_threshold=keyword_threshold)
+                    keyword_datasets = keyword_results
+                    
+                    # In hybrid mode, only yield keyword results that weren't found by vector search
+                    if search_method is None:  # hybrid mode
+                        vector_ids = {dataset['id'] for dataset in vector_datasets}
+                        
+                        # Find datasets that appear in both searches
+                        overlap_ids = set()
+                        for dataset in keyword_datasets:
+                            if dataset['id'] in vector_ids:
+                                overlap_ids.add(dataset['id'])
+                                # Update the search source for overlapping datasets
+                                for vd in vector_datasets:
+                                    if vd['id'] == dataset['id']:
+                                        vd['search_source'] = 'both'
+                                        # Re-yield the updated dataset
+                                        yield json.dumps({
+                                            'type': 'dataset_update',
+                                            'data': vd,
+                                            'timestamp': time.time() - start_time
+                                        }) + '\n'
+                                        break
+                        
+                        # Don't share technical details about vector/keyword distinction
+                        # Just provide a simple update on progress
+                        if keyword_datasets:
+                            yield json.dumps({
+                                'type': 'status',
+                                'message': 'Discovering additional datasets...',
+                                'timestamp': time.time() - start_time
+                            }) + '\n'
+                        
+                        # Process and yield only new keyword datasets
+                        for dataset in keyword_datasets:
+                            if dataset['id'] not in vector_ids:
+                                yield from process_and_yield_dataset(dataset, 'keyword')
+                    else:
+                        # In keyword-only mode, yield all results
+                        for dataset in keyword_datasets:
+                            yield from process_and_yield_dataset(dataset, 'keyword')
+                except Exception as e:
+                    yield json.dumps({
+                        'type': 'error',
+                        'message': f'Error finding additional datasets: {str(e)}',
+                        'timestamp': time.time() - start_time
+                    }) + '\n'
+            
+            # Calculate execution time and send completion message
+            execution_time = time.time() - start_time
+            
+            # Determine total unique datasets
+            if search_method is None:  # hybrid search
+                all_datasets = vector_datasets.copy()
+                vector_ids = {dataset['id'] for dataset in vector_datasets}
+                
+                # Add keyword datasets that weren't in vector results
+                for dataset in keyword_datasets:
+                    if dataset['id'] not in vector_ids:
+                        all_datasets.append(dataset)
+                
+                # Sort by similarity score (higher is better)
+                all_datasets.sort(key=lambda x: x.get('similarity', 0), reverse=True)
+                
+                total_count = len(all_datasets)
+            else:
+                # Either vector or keyword only
+                total_count = len(vector_datasets if search_method == 'vector' else keyword_datasets)
+            
+            # Send completion message
+            yield json.dumps({
+                'type': 'complete',
+                'data': {
+                    'query': query,
+                    'execution_time': execution_time,
+                    'total_count': total_count
+                },
+                'message': f'Search complete. Found {total_count} datasets in {execution_time:.1f} seconds.',
+                'timestamp': execution_time
+            }) + '\n'
+            
+        except Exception as e:
+            # Send error message
+            error_message = str(e)
+            traceback_str = traceback.format_exc()
+            logger.error(f"[API] Error in stream_search_datasets: {error_message}")
+            logger.error(traceback_str)
+            
+            yield json.dumps({
+                'type': 'error',
+                'message': "Sorry, we encountered an error while searching. Please try again.",
+                'details': error_message,
+                'timestamp': time.time() - start_time
+            }) + '\n'
+    
+    # Create and return the streaming response
+    response = StreamingHttpResponse(
+        dataset_stream(),
+        content_type='text/event-stream'
+    )
+    # Add headers to disable buffering
+    response['Cache-Control'] = 'no-cache'
+    response['X-Accel-Buffering'] = 'no'
+    return response
