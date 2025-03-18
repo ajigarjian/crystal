@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 def assess_datafile_relevance_predownload(
     query: str, 
     dataset_metadata: Dict[str, Any],
-    relevance_threshold: float = 0.5
+    relevance_threshold: float = 0.4
 ) -> Tuple[bool, float, str]:
     """
     Assess if a dataset is likely to be relevant to the user's query using only metadata,
@@ -89,8 +89,8 @@ REASONING: [your reasoning]
         else:
             # Fallback if parsing fails
             logger.warning(f"Failed to parse relevance assessment response: {response_text}")
-            return (True, 0.6, "Failed to parse relevance assessment, defaulting to somewhat relevant")
+            return (False, 0.3, "Failed to parse relevance assessment, defaulting to not relevant")
     except Exception as e:
         logger.error(f"Error in pre-download relevance assessment: {str(e)}")
-        # Default to True in case of error to avoid skipping potentially relevant datasets
-        return (True, 0.6, f"Error in assessment: {str(e)}") 
+        # Default to False in case of error to avoid downloading potentially irrelevant datasets
+        return (False, 0.3, f"Error in assessment: {str(e)}") 

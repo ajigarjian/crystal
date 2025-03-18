@@ -267,15 +267,19 @@ class Command(BaseCommand):
                 self.stdout.write(f"\n{dataset_short_id} Processing dataset (Query similarity: {similarity_score:.4f})")
             
             try:
-                print("METADATA DEBUG", dataset)
                 # Pre-download relevance assessment
                 with self.stdout_lock:
                     self.stdout.write(f"{dataset_short_id} Assessing dataset relevance from metadata...")
                 
+                # Debug print metadata
+                if debug_file_paths:
+                    with self.stdout_lock:
+                        self.stdout.write(f"METADATA DEBUG {dataset}")
+                
                 is_relevant_predownload, relevance_score_predownload, reasoning_predownload = assess_datafile_relevance_predownload(
                     query, 
                     dataset,
-                    relevance_threshold * 0.5  # Use a lower threshold for pre-download assessment
+                    relevance_threshold=0.4  # Use a fixed threshold for pre-download assessment
                 )
                 
                 with self.stdout_lock:
@@ -287,16 +291,17 @@ class Command(BaseCommand):
                             f"{dataset_short_id} Pre-assessment: Likely not relevant (Score: {relevance_score_predownload:.2f})"
                         ))
                         self.stdout.write(f"{dataset_short_id} Reasoning: {reasoning_predownload}")
+                        self.stdout.write(self.style.WARNING(f"Skipping {dataset_title} for being irrelevant."))
                         
-                        # Skip download if pre-assessment indicates low relevance
+                        # Return early with minimal information for irrelevant datasets
                         return {
-                            "id": dataset["id"],
-                            "title": dataset["title"],
-                            "similarity": dataset.get("similarity", 0),
+                            "id": dataset.get("id", "unknown"),
+                            "title": dataset.get("title", "Unnamed Dataset"),
                             "is_relevant": False,
                             "relevance_score": relevance_score_predownload,
                             "relevance_reasoning": reasoning_predownload,
-                            "skipped_download": True
+                            "skipped_download": True,
+                            "similarity": similarity_score
                         }, None, None
                 
                 # Handle the dataset - either use local path or download
