@@ -152,7 +152,7 @@ class FAISSSearcher:
                 
         return formatted_results
 
-def vector_search_datasets_faiss(query: str, similarity_threshold: float = 0.3, verbose: bool = False, max_results: int = 10):
+def vector_search_datasets_faiss(query: str, similarity_threshold: float = 0.3, verbose: bool = True, max_results: int = 10):
     """
     FAISS-powered version of vector_search_datasets with the same interface
     
@@ -165,6 +165,7 @@ def vector_search_datasets_faiss(query: str, similarity_threshold: float = 0.3, 
     Returns:
         List of datasets with similarity scores above the threshold, limited to max_results
     """
+    verbose=True
     try:
         if verbose:
             print("Starting FAISS vector search process...")
