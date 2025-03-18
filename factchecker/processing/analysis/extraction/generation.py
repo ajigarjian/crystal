@@ -97,7 +97,7 @@ Based on the user query and column analysis, generate pandas code to extract the
 3. If multiple columns have relevant values, combine the filters appropriately
 4. If no relevant columns or values were identified, return a suitable subset of the data that might be relevant
 5. Include aggregate and comparison values to improve the response.
-6. Do not use any libraries besides pandas or numpy.
+6. Code should be simple, no more than 25 lines.
 
 Return ONLY the Python code, with no additional text or explanation. Use 'df' as the variable name for the input DataFrame.
 
