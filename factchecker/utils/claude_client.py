@@ -22,7 +22,7 @@ def chat_completion_claude(
     prompt: str, 
     system_message: str = "You are a helpful assistant.",
     temperature: float = 0.2,
-    max_tokens: int = 1200,
+    max_tokens: int = 1500,
     response_format: Optional[Dict[str, str]] = None
 ) -> str:
     """
