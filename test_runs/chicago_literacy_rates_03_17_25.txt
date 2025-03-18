@@ -1,0 +1,295 @@
+(venv) (base) cedricfitzgerald@Cedrics-MacBook-Pro crystal % python manage.py factchecker "What is Chicago's literacy rate versus other US cities?"
+Using provider azure for all OpenAI calls.
+Factchecker query: 'What is Chicago's literacy rate versus other US cities?'
+Searching for datasets matching 'What is Chicago's literacy rate versus other US cities?' using hybrid search
+• FAISS vector search threshold: 0.30
+• Keyword search threshold: 0.60
+
+1. Performing FAISS vector search with query variations:
+Searching with 3 variations: "What is Chicago's literacy rate versus other US cities?", "How does Chicago's literacy rate compare to other cities in the US?", "What is the literacy rate in Chicago compared to nationwide city averages?"
+Initializing FAISS index with 309,208 datasets (one-time operation)
+Search results by variation:
+  • "How does Chicago's literacy rate compare to other cities in the US?": 15 results
+  • "What is the literacy rate in Chicago compared to nationwide city averages?": 15 results
+  • "What is Chicago's literacy rate versus other US cities?": 15 results
+Found 45 total results, 18 unique results
+Returning top 15 results after deduplication
+Found 15 datasets via FAISS search
+
+Top FAISS search results:
+  1. Libraries - 2023 Circulation by Location - Similarity: 0.5287
+  2. Libraries - 2025 Circulation by Location - Similarity: 0.5240
+  3. Libraries - 2024 Circulation by Location - Similarity: 0.5226
+  4. Libraries - 2022 Circulation by Location - Similarity: 0.5165
+  5. Libraries - 2016 Visitors by Location - Similarity: 0.5099
+  ... and 10 more results
+
+2. Performing keyword search:
+Found 0 datasets via keyword search with similarity >= 0.6
+No datasets found via keyword search.
+
+3. Combining results:
+• 15 unique datasets from FAISS search
+• 0 unique datasets from keyword search
+• 0 datasets found by both methods
+Combined into 15 unique datasets after deduplication
+
+[1/15] Libraries - 2023 Circulation by Location Processing dataset (Query similarity: 0.5287)
+[1/15] Libraries - 2023 Circulation by Location Assessing dataset relevance from metadata...
+
+[2/15] Libraries - 2025 Circulation by Location Processing dataset (Query similarity: 0.5240)
+[2/15] Libraries - 2025 Circulation by Location Assessing dataset relevance from metadata...
+
+[3/15] Libraries - 2024 Circulation by Location Processing dataset (Query similarity: 0.5226)
+[3/15] Libraries - 2024 Circulation by Location Assessing dataset relevance from metadata...
+[2/15] Libraries - 2025 Circulation by Location Pre-assessment: Likely not relevant (Score: 0.30)
+[2/15] Libraries - 2025 Circulation by Location Reasoning: The dataset focuses on library circulation figures, including checkouts and downloadable materials, which are not directly related to literacy rates or comparisons between Chicago and other US cities. While libraries are tangentially connected to literacy, the metadata does not suggest the dataset contains relevant information for the user's query.
+Skipping Libraries - 2025 Circulation by Location for being irrelevant.
+
+[4/15] Libraries - 2022 Circulation by Location Processing dataset (Query similarity: 0.5165)
+[4/15] Libraries - 2022 Circulation by Location Assessing dataset relevance from metadata...
+Skipping Libraries - 2025 Circulation by Location for being irrelevant.
+[1/15] Libraries - 2023 Circulation by Location Pre-assessment: Likely relevant (Score: 0.40)
+[1/15] Libraries - 2023 Circulation by Location Reasoning: The dataset focuses on library circulation figures, which may indirectly relate to literacy rates through library usage patterns. However, it does not explicitly mention literacy rates or comparisons between cities, making it only somewhat relevant to the query.
+[1/15] Libraries - 2023 Circulation by Location Downloading dataset resources...
+[3/15] Libraries - 2024 Circulation by Location Pre-assessment: Likely not relevant (Score: 0.30)
+[3/15] Libraries - 2024 Circulation by Location Reasoning: The dataset focuses on library circulation figures, including checkouts and downloadable materials, which do not directly relate to literacy rates or comparisons between Chicago and other U.S. cities. While libraries are tangentially related to literacy, the metadata does not suggest the dataset contains relevant information for the user's query.
+Skipping Libraries - 2024 Circulation by Location for being irrelevant.
+
+[5/15] Libraries - 2016 Visitors by Location Processing dataset (Query similarity: 0.5099)
+[5/15] Libraries - 2016 Visitors by Location Assessing dataset relevance from metadata...
+Skipping Libraries - 2024 Circulation by Location for being irrelevant.
+Downloading https://data.cityofchicago.org/api/views/6v4c-vqh3/rows.csv?accessType=DOWNLOAD to downloads/Libraries_2023_Circulation_by_Location_Comma_Separated_Values_File.csv (attempt 1)
+[4/15] Libraries - 2022 Circulation by Location Pre-assessment: Likely relevant (Score: 0.40)
+[4/15] Libraries - 2022 Circulation by Location Reasoning: The dataset focuses on library circulation figures, which could indirectly relate to literacy rates through library usage patterns. However, it does not explicitly mention literacy rates or comparisons between cities, making it only somewhat relevant to the query.
+[4/15] Libraries - 2022 Circulation by Location Downloading dataset resources...
+Download successful on attempt 1
+Downloading https://data.cityofchicago.org/api/views/6v4c-vqh3/rows.json?accessType=DOWNLOAD to downloads/Libraries_2023_Circulation_by_Location_JSON_File.json (attempt 1)
+Download successful on attempt 1
+Downloading https://data.cityofchicago.org/api/views/er3q-e4ek/rows.csv?accessType=DOWNLOAD to downloads/Libraries_2022_Circulation_by_Location_Comma_Separated_Values_File.csv (attempt 1)
+[5/15] Libraries - 2016 Visitors by Location Pre-assessment: Likely not relevant (Score: 0.30)
+[5/15] Libraries - 2016 Visitors by Location Reasoning: The dataset focuses on visitor statistics for Chicago Public Library locations, which does not directly relate to literacy rates or comparisons between Chicago and other US cities. While libraries are associated with literacy, the metadata does not suggest the dataset contains literacy rate data.
+Skipping Libraries - 2016 Visitors by Location for being irrelevant.
+
+[6/15] Libraries -  2015 Circulation by Location Processing dataset (Query similarity: 0.5096)
+[6/15] Libraries -  2015 Circulation by Location Assessing dataset relevance from metadata...
+Skipping Libraries - 2016 Visitors by Location for being irrelevant.
+Downloading https://data.cityofchicago.org/api/views/6v4c-vqh3/rows.xml?accessType=DOWNLOAD to downloads/Libraries_2023_Circulation_by_Location_XML_File.xml (attempt 1)
+Download successful on attempt 1
+Download successful on attempt 1
+[1/15] Libraries - 2023 Circulation by Location Downloaded 3 files
+  File 1: downloads/Libraries_2023_Circulation_by_Location_Comma_Separated_Values_File.csv
+  File 2: downloads/Libraries_2023_Circulation_by_Location_JSON_File.json
+  File 3: downloads/Libraries_2023_Circulation_by_Location_XML_File.xml
+[1/15] Libraries - 2023 Circulation by Location Analyzing multiple dataset files...
+[ANALYSIS] INFO: Starting multi-file dataset analysis for query: What is Chicago's literacy rate versus other US cities?
+[ANALYSIS] INFO: Dataset: Libraries - 2023 Circulation by Location
+[ANALYSIS] INFO: Analyzing 3 files
+[ANALYSIS] INFO: Analyzing file 1/3: Libraries_2023_Circulation_by_Location_Comma_Separated_Values_File.csv
+[ANALYSIS] INFO: Starting dataset analysis for query: What is Chicago's literacy rate versus other US cities?
+[ANALYSIS] INFO: Dataset: Libraries - 2023 Circulation by Location - Libraries_2023_Circulation_by_Location_Comma_Separated_Values_File.csv
+[ANALYSIS] INFO: Sending analysis prompt to OpenAI
+Downloading https://data.cityofchicago.org/api/views/er3q-e4ek/rows.json?accessType=DOWNLOAD to downloads/Libraries_2022_Circulation_by_Location_JSON_File.json (attempt 1)
+Download successful on attempt 1
+Downloading https://data.cityofchicago.org/api/views/er3q-e4ek/rows.xml?accessType=DOWNLOAD to downloads/Libraries_2022_Circulation_by_Location_XML_File.xml (attempt 1)
+[6/15] Libraries -  2015 Circulation by Location Pre-assessment: Likely not relevant (Score: 0.30)
+[6/15] Libraries -  2015 Circulation by Location Reasoning: The dataset focuses on library circulation figures in Chicago, which does not directly address literacy rates or comparisons with other US cities. While libraries are tangentially related to literacy, the metadata does not suggest the dataset contains information relevant to the user's query.
+Skipping Libraries -  2015 Circulation by Location for being irrelevant.
+
+[7/15] Libraries - 2013 Circulation by Location Processing dataset (Query similarity: 0.5096)
+[7/15] Libraries - 2013 Circulation by Location Assessing dataset relevance from metadata...
+Skipping Libraries -  2015 Circulation by Location for being irrelevant.
+Download successful on attempt 1
+[4/15] Libraries - 2022 Circulation by Location Downloaded 3 files
+  File 1: downloads/Libraries_2022_Circulation_by_Location_Comma_Separated_Values_File.csv
+  File 2: downloads/Libraries_2022_Circulation_by_Location_JSON_File.json
+  File 3: downloads/Libraries_2022_Circulation_by_Location_XML_File.xml
+[4/15] Libraries - 2022 Circulation by Location Analyzing multiple dataset files...
+[ANALYSIS] INFO: Starting multi-file dataset analysis for query: What is Chicago's literacy rate versus other US cities?
+[ANALYSIS] INFO: Dataset: Libraries - 2022 Circulation by Location
+[ANALYSIS] INFO: Analyzing 3 files
+[ANALYSIS] INFO: Analyzing file 1/3: Libraries_2022_Circulation_by_Location_Comma_Separated_Values_File.csv
+[ANALYSIS] INFO: Starting dataset analysis for query: What is Chicago's literacy rate versus other US cities?
+[ANALYSIS] INFO: Dataset: Libraries - 2022 Circulation by Location - Libraries_2022_Circulation_by_Location_Comma_Separated_Values_File.csv
+[ANALYSIS] INFO: Sending analysis prompt to OpenAI
+[7/15] Libraries - 2013 Circulation by Location Pre-assessment: Likely not relevant (Score: 0.30)
+[7/15] Libraries - 2013 Circulation by Location Reasoning: The dataset focuses on library circulation figures in Chicago, which is not directly related to literacy rates or comparisons with other US cities. While library usage might indirectly correlate with literacy, the metadata does not suggest it contains relevant literacy rate data.
+Skipping Libraries - 2013 Circulation by Location for being irrelevant.
+
+[8/15] Libraries - 2025 Visitors by Location Processing dataset (Query similarity: 0.5079)
+[8/15] Libraries - 2025 Visitors by Location Assessing dataset relevance from metadata...
+Skipping Libraries - 2013 Circulation by Location for being irrelevant.
+[ANALYSIS] INFO: Received analysis from OpenAI
+[ANALYSIS] INFO: Analyzing file 2/3: Libraries_2023_Circulation_by_Location_JSON_File.json
+Error flattening JSON: Length of values (86) does not match length of index (1)
+[ANALYSIS] INFO: Starting dataset analysis for query: What is Chicago's literacy rate versus other US cities?
+[ANALYSIS] INFO: Dataset: Libraries - 2023 Circulation by Location - Libraries_2023_Circulation_by_Location_JSON_File.json
+[ANALYSIS] INFO: Sending analysis prompt to OpenAI
+[ANALYSIS] INFO: Received analysis from OpenAI
+[ANALYSIS] INFO: Analyzing file 2/3: Libraries_2022_Circulation_by_Location_JSON_File.json
+Error flattening JSON: Length of values (86) does not match length of index (1)
+[ANALYSIS] INFO: Starting dataset analysis for query: What is Chicago's literacy rate versus other US cities?
+[ANALYSIS] INFO: Dataset: Libraries - 2022 Circulation by Location - Libraries_2022_Circulation_by_Location_JSON_File.json
+[ANALYSIS] INFO: Sending analysis prompt to OpenAI
+[8/15] Libraries - 2025 Visitors by Location Pre-assessment: Likely not relevant (Score: 0.30)
+[8/15] Libraries - 2025 Visitors by Location Reasoning: The dataset's title and description focus on library visitor statistics and locations, which are not directly related to literacy rates or comparisons between Chicago and other U.S. cities. While libraries are tangentially connected to literacy, the metadata does not suggest the dataset contains relevant information for the query.
+Skipping Libraries - 2025 Visitors by Location for being irrelevant.
+
+[9/15] Libraries - 2023 Visitors by Location Processing dataset (Query similarity: 0.5079)
+[9/15] Libraries - 2023 Visitors by Location Assessing dataset relevance from metadata...
+Skipping Libraries - 2025 Visitors by Location for being irrelevant.
+[9/15] Libraries - 2023 Visitors by Location Pre-assessment: Likely not relevant (Score: 0.30)
+[9/15] Libraries - 2023 Visitors by Location Reasoning: The dataset focuses on visitor statistics for Chicago Public Library locations, which does not directly relate to literacy rates or comparisons between cities. While libraries are associated with literacy, the metadata does not suggest the dataset contains information about literacy rates.
+Skipping Libraries - 2023 Visitors by Location for being irrelevant.
+
+[10/15] Libraries - 2014 Circulation by Location Processing dataset (Query similarity: 0.5079)
+[10/15] Libraries - 2014 Circulation by Location Assessing dataset relevance from metadata...
+Skipping Libraries - 2023 Visitors by Location for being irrelevant.
+[ANALYSIS] INFO: Received analysis from OpenAI
+[ANALYSIS] INFO: Analyzing file 3/3: Libraries_2022_Circulation_by_Location_XML_File.xml
+[ANALYSIS] INFO: Starting dataset analysis for query: What is Chicago's literacy rate versus other US cities?
+[ANALYSIS] INFO: Dataset: Libraries - 2022 Circulation by Location - Libraries_2022_Circulation_by_Location_XML_File.xml
+[ANALYSIS] INFO: Sending analysis prompt to OpenAI
+[ANALYSIS] INFO: Received analysis from OpenAI
+[ANALYSIS] INFO: Analyzing file 3/3: Libraries_2023_Circulation_by_Location_XML_File.xml
+[ANALYSIS] INFO: Starting dataset analysis for query: What is Chicago's literacy rate versus other US cities?
+[ANALYSIS] INFO: Dataset: Libraries - 2023 Circulation by Location - Libraries_2023_Circulation_by_Location_XML_File.xml
+[ANALYSIS] INFO: Sending analysis prompt to OpenAI
+[10/15] Libraries - 2014 Circulation by Location Pre-assessment: Likely not relevant (Score: 0.30)
+[10/15] Libraries - 2014 Circulation by Location Reasoning: The dataset focuses on library circulation figures in Chicago, which is not directly related to literacy rates or comparisons with other U.S. cities. While library usage might indirectly correlate with literacy, the metadata does not suggest it contains explicit information on literacy rates.
+Skipping Libraries - 2014 Circulation by Location for being irrelevant.
+
+[11/15] Chicago Population Counts Processing dataset (Query similarity: 0.5054)
+[11/15] Chicago Population Counts Assessing dataset relevance from metadata...
+Skipping Libraries - 2014 Circulation by Location for being irrelevant.
+[11/15] Chicago Population Counts Pre-assessment: Likely not relevant (Score: 0.30)
+[11/15] Chicago Population Counts Reasoning: The dataset's title and description focus on population counts and ZIP code groupings, with no mention of literacy rates or comparisons between cities. While population data might indirectly relate to literacy studies, the metadata does not suggest it contains the specific information needed for the query.
+Skipping Chicago Population Counts for being irrelevant.
+
+[12/15] Libraries - 2021 Circulation by Location Processing dataset (Query similarity: 0.5046)
+[12/15] Libraries - 2021 Circulation by Location Assessing dataset relevance from metadata...
+Skipping Chicago Population Counts for being irrelevant.
+[ANALYSIS] INFO: Received analysis from OpenAI
+[12/15] Libraries - 2021 Circulation by Location Pre-assessment: Likely not relevant (Score: 0.30)
+[12/15] Libraries - 2021 Circulation by Location Reasoning: The dataset focuses on library circulation figures in Chicago, which is not directly related to literacy rates or comparisons with other US cities. While library usage might correlate with literacy indirectly, the metadata does not suggest the dataset contains explicit information about literacy rates.
+Skipping Libraries - 2021 Circulation by Location for being irrelevant.
+
+[13/15] Libraries - 2015 Visitors by Location Processing dataset (Query similarity: 0.5034)
+[13/15] Libraries - 2015 Visitors by Location Assessing dataset relevance from metadata...
+Skipping Libraries - 2021 Circulation by Location for being irrelevant.
+[ANALYSIS] INFO: Received analysis from OpenAI
+[13/15] Libraries - 2015 Visitors by Location Pre-assessment: Likely not relevant (Score: 0.30)
+[13/15] Libraries - 2015 Visitors by Location Reasoning: The dataset focuses on visitor statistics for Chicago Public Library locations in 2015, which is not directly related to literacy rates or comparisons between cities. While libraries are tangentially related to literacy, the metadata does not suggest the dataset contains information about literacy rates.
+Skipping Libraries - 2015 Visitors by Location for being irrelevant.
+
+[14/15] Libraries - 2019 Circulation by Location Processing dataset (Query similarity: 0.5027)
+[14/15] Libraries - 2019 Circulation by Location Assessing dataset relevance from metadata...
+Skipping Libraries - 2015 Visitors by Location for being irrelevant.
+[14/15] Libraries - 2019 Circulation by Location Pre-assessment: Likely relevant (Score: 0.40)
+[14/15] Libraries - 2019 Circulation by Location Reasoning: The dataset focuses on library circulation figures in Chicago, which could indirectly relate to literacy rates through library usage patterns. However, it does not explicitly mention literacy rates or comparisons with other cities, making its relevance somewhat limited but plausible.
+[14/15] Libraries - 2019 Circulation by Location Downloading dataset resources...
+Downloading https://data.cityofchicago.org/api/views/8rsv-tvu9/rows.csv?accessType=DOWNLOAD to downloads/Libraries_2019_Circulation_by_Location_Comma_Separated_Values_File.csv (attempt 1)
+Download successful on attempt 1
+
+[4/15] Libraries - 2022 Circulation by Location Dataset contains 3 files:
+  - Libraries_2022_Circulation_by_Location_Comma_Separated_Values_File.csv: 86 rows, 18 columns
+  - Libraries_2022_Circulation_by_Location_JSON_File.json: 1 rows, 0 columns
+  - Libraries_2022_Circulation_by_Location_XML_File.xml: 87 rows, 23 columns
+
+COMBINED FILE ANALYSIS:
+1. **DATASET STRUCTURE**: The files represent different formats of the same dataset focused on Chicago Public Library circulation data for 2022. They contain overlapping information but differ in structure and completeness.
+
+2. **RELEVANCE**: The dataset is not directly relevant to the user's query about literacy rates in Chicago versus other U.S. cities. It provides library usage data, which may indirectly correlate with literacy but lacks metrics or comparisons necessary to answer the query.
+
+3. **RECOMMENDED APPROACH**: The CSV and XML files are most useful for analyzing library engagement trends in Chicago, which could serve as a proxy for literacy-related activities. However, none of the files can directly address the query.
+
+4. **SUGGESTED DATAFILES**: ["Libraries_2022_Circulation_by_Location_Comma_Separated_Values_File.csv", "Libraries_2022_Circulation_by_Location_XML_File.xml"]
+
+[4/15] Libraries - 2022 Circulation by Location Using Libraries_2022_Circulation_by_Location_Comma_Separated_Values_File.csv as primary file for detailed analysis
+
+[4/15] Libraries - 2022 Circulation by Location Assessing datafile relevance...
+Downloading https://data.cityofchicago.org/api/views/8rsv-tvu9/rows.json?accessType=DOWNLOAD to downloads/Libraries_2019_Circulation_by_Location_JSON_File.json (attempt 1)
+Download successful on attempt 1
+Downloading https://data.cityofchicago.org/api/views/8rsv-tvu9/rows.xml?accessType=DOWNLOAD to downloads/Libraries_2019_Circulation_by_Location_XML_File.xml (attempt 1)
+Download successful on attempt 1
+[14/15] Libraries - 2019 Circulation by Location Downloaded 3 files
+  File 1: downloads/Libraries_2019_Circulation_by_Location_Comma_Separated_Values_File.csv
+  File 2: downloads/Libraries_2019_Circulation_by_Location_JSON_File.json
+  File 3: downloads/Libraries_2019_Circulation_by_Location_XML_File.xml
+[14/15] Libraries - 2019 Circulation by Location Analyzing multiple dataset files...
+[ANALYSIS] INFO: Starting multi-file dataset analysis for query: What is Chicago's literacy rate versus other US cities?
+[ANALYSIS] INFO: Dataset: Libraries - 2019 Circulation by Location
+[ANALYSIS] INFO: Analyzing 3 files
+[ANALYSIS] INFO: Analyzing file 1/3: Libraries_2019_Circulation_by_Location_Comma_Separated_Values_File.csv
+[ANALYSIS] INFO: Starting dataset analysis for query: What is Chicago's literacy rate versus other US cities?
+[ANALYSIS] INFO: Dataset: Libraries - 2019 Circulation by Location - Libraries_2019_Circulation_by_Location_Comma_Separated_Values_File.csv
+[ANALYSIS] INFO: Sending analysis prompt to OpenAI
+
+[1/15] Libraries - 2023 Circulation by Location Dataset contains 3 files:
+  - Libraries_2023_Circulation_by_Location_Comma_Separated_Values_File.csv: 86 rows, 18 columns
+  - Libraries_2023_Circulation_by_Location_JSON_File.json: 1 rows, 0 columns
+  - Libraries_2023_Circulation_by_Location_XML_File.xml: 87 rows, 23 columns
+
+COMBINED FILE ANALYSIS:
+1. **DATASET STRUCTURE:** The files represent different formats of the same dataset, focusing on library circulation data in Chicago. They contain overlapping information but vary in completeness and structure.
+
+2. **RELEVANCE:** The dataset is not directly relevant to the query about literacy rates in Chicago versus other U.S. cities. It provides library usage data for Chicago only, which may indirectly reflect literacy engagement but lacks comparative data for other cities.
+
+3. **RECOMMENDED APPROACH:** The CSV and XML files are the most useful for analyzing library usage trends in Chicago, as they contain more complete data. However, none of the files can directly address the query about literacy rate comparisons.
+
+4. **SUGGESTED DATAFILES:** ["Libraries_2023_Circulation_by_Location_Comma_Separated_Values_File.csv", "Libraries_2023_Circulation_by_Location_XML_File.xml"]
+
+[1/15] Libraries - 2023 Circulation by Location Using Libraries_2023_Circulation_by_Location_Comma_Separated_Values_File.csv as primary file for detailed analysis
+
+[1/15] Libraries - 2023 Circulation by Location Assessing datafile relevance...
+[4/15] Libraries - 2022 Circulation by Location Datafile is not relevant enough (Score: 0.20)
+
+[15/15] Libraries - 2011 Circulation by Location Processing dataset (Query similarity: 0.5025)
+[15/15] Libraries - 2011 Circulation by Location Assessing dataset relevance from metadata...
+Skipping Libraries - 2022 Circulation by Location for being irrelevant.
+[15/15] Libraries - 2011 Circulation by Location Pre-assessment: Likely not relevant (Score: 0.30)
+[15/15] Libraries - 2011 Circulation by Location Reasoning: The dataset focuses on library circulation figures in Chicago, which is not directly related to literacy rates or comparisons with other US cities. While library usage might indirectly correlate with literacy, the metadata does not suggest the dataset contains explicit information about literacy rates.
+Skipping Libraries - 2011 Circulation by Location for being irrelevant.
+Skipping Libraries - 2011 Circulation by Location for being irrelevant.
+[1/15] Libraries - 2023 Circulation by Location Datafile is not relevant enough (Score: 0.20)
+Skipping Libraries - 2023 Circulation by Location for being irrelevant.
+[ANALYSIS] INFO: Received analysis from OpenAI
+[ANALYSIS] INFO: Analyzing file 2/3: Libraries_2019_Circulation_by_Location_JSON_File.json
+Error flattening JSON: Length of values (84) does not match length of index (1)
+[ANALYSIS] INFO: Starting dataset analysis for query: What is Chicago's literacy rate versus other US cities?
+[ANALYSIS] INFO: Dataset: Libraries - 2019 Circulation by Location - Libraries_2019_Circulation_by_Location_JSON_File.json
+[ANALYSIS] INFO: Sending analysis prompt to OpenAI
+[ANALYSIS] INFO: Received analysis from OpenAI
+[ANALYSIS] INFO: Analyzing file 3/3: Libraries_2019_Circulation_by_Location_XML_File.xml
+[ANALYSIS] INFO: Starting dataset analysis for query: What is Chicago's literacy rate versus other US cities?
+[ANALYSIS] INFO: Dataset: Libraries - 2019 Circulation by Location - Libraries_2019_Circulation_by_Location_XML_File.xml
+[ANALYSIS] INFO: Sending analysis prompt to OpenAI
+[ANALYSIS] INFO: Received analysis from OpenAI
+[ANALYSIS] INFO: Extracted suggested datafiles: ['Libraries_2019_Circulation_by_Location_Comma_Separated_Values_File.csv', 'Libraries_2019_Circulation_by_Location_XML_File.xml']
+
+[14/15] Libraries - 2019 Circulation by Location Dataset contains 3 files:
+  - Libraries_2019_Circulation_by_Location_Comma_Separated_Values_File.csv: 84 rows, 17 columns
+  - Libraries_2019_Circulation_by_Location_JSON_File.json: 1 rows, 0 columns
+  - Libraries_2019_Circulation_by_Location_XML_File.xml: 85 rows, 22 columns
+
+COMBINED FILE ANALYSIS:
+1. **DATASET STRUCTURE:** All files represent the same dataset on Chicago library circulation in 2019 but differ in format and completeness. They do not provide complementary information beyond format variations.
+
+2. **RELEVANCE:** The dataset is not directly relevant to the query. It focuses on library usage in Chicago, which may indirectly correlate with literacy but lacks comparative data for other U.S. cities or direct literacy metrics.
+
+3. **RECOMMENDED APPROACH:** The CSV and XML files are most useful for analyzing library usage patterns in Chicago, which could offer indirect insights into literacy engagement. However, none can directly address the query.
+
+SUGGESTED DATAFILES: ["Libraries_2019_Circulation_by_Location_Comma_Separated_Values_File.csv", "Libraries_2019_Circulation_by_Location_XML_File.xml"]
+
+[14/15] Libraries - 2019 Circulation by Location Using Libraries_2019_Circulation_by_Location_Comma_Separated_Values_File.csv as primary file for detailed analysis
+
+[14/15] Libraries - 2019 Circulation by Location Assessing datafile relevance...
+[14/15] Libraries - 2019 Circulation by Location Datafile is not relevant enough (Score: 0.20)
+Skipping Libraries - 2019 Circulation by Location for being irrelevant.
+
+Successfully processed 0 datasets
+
+No relevant data found to answer the query.
+
+Query execution completed in 47.58 seconds
+(venv) (base) cedricfitzgerald@Cedrics-MacBook-Pro crystal % 

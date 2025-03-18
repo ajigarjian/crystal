@@ -1,0 +1,148 @@
+(venv) (base) cedricfitzgerald@Cedrics-MacBook-Pro crystal % python manage.py factchecker "Information about puzzle game collectors in the Americas" --sequential
+Using provider azure for all OpenAI calls.
+Factchecker query: 'Information about puzzle game collectors in the Americas'
+Searching for datasets matching 'Information about puzzle game collectors in the Americas' using hybrid search
+• FAISS vector search threshold: 0.30
+• Keyword search threshold: 0.60
+
+1. Performing FAISS vector search with query variations:
+Searching with 3 variations: "Information about puzzle game collectors in the Americas", "Details about enthusiasts collecting puzzle games across the Americas", "Overview of puzzle game collection hobbyists in American regions"
+Initializing FAISS index with 309,208 datasets (one-time operation)
+Search results by variation:
+  • "Information about puzzle game collectors in the Americas": 3 results
+  • "Details about enthusiasts collecting puzzle games across the Americas": 15 results
+  • "Overview of puzzle game collection hobbyists in American regions": 15 results
+Found 33 total results, 29 unique results
+Returning top 15 results after deduplication
+Found 15 datasets via FAISS search
+
+Top FAISS search results:
+  1. Series Information for the 2019 Region for United States Shapefile - Similarity: 0.3404
+  2. Series Information for the 2019 Region for United States KML - Similarity: 0.3390
+  3. Collection Information for the 2010 Public Use Microdata Areas (PUMA) State-Based TIGER/Line Shapefiles, 2020 - Similarity: 0.3334
+  4. Children's Play Areas (CPAs) - Similarity: 0.3318
+  5. Conservation Priorities for Open Space Recreation Access in the Southeast United States, by Census Block Group (2018) - Similarity: 0.3299
+  ... and 10 more results
+
+2. Performing keyword search:
+Found 0 datasets via keyword search with similarity >= 0.6
+No datasets found via keyword search.
+
+3. Combining results:
+• 15 unique datasets from FAISS search
+• 0 unique datasets from keyword search
+• 0 datasets found by both methods
+Combined into 15 unique datasets after deduplication
+Processing datasets sequentially (parallel processing disabled)
+
+[1/15] Series Information for the 2019 Region for United States Shapefile Processing dataset (Query similarity: 0.3404)
+[1/15] Series Information for the 2019 Region for United States Shapefile Assessing dataset relevance from metadata...
+[1/15] Series Information for the 2019 Region for United States Shapefile Pre-assessment: Likely not relevant (Score: 0.20)
+[1/15] Series Information for the 2019 Region for United States Shapefile Reasoning: The dataset metadata focuses on cartographic boundary shapefiles for geographic areas in the United States, which is unrelated to puzzle game collectors or their activities in the Americas. There is no indication in the title, description, or tags that the dataset contains information relevant to the user's query.
+Skipping Series Information for the 2019 Region for United States Shapefile for being irrelevant.
+Skipping Series Information for the 2019 Region for United States Shapefile for being irrelevant.
+
+[2/15] Series Information for the 2019 Region for United States KML Processing dataset (Query similarity: 0.3390)
+[2/15] Series Information for the 2019 Region for United States KML Assessing dataset relevance from metadata...
+[2/15] Series Information for the 2019 Region for United States KML Pre-assessment: Likely not relevant (Score: 0.20)
+[2/15] Series Information for the 2019 Region for United States KML Reasoning: The dataset metadata focuses on cartographic boundary shapefiles for the United States, which are geographic representations and do not suggest any connection to puzzle game collectors or related demographics in the Americas. The title and description lack any indication of relevance to the user's query.
+Skipping Series Information for the 2019 Region for United States KML for being irrelevant.
+Skipping Series Information for the 2019 Region for United States KML for being irrelevant.
+
+[3/15] Collection Information for the 2010 Public Use Microdata Areas (PUMA) State-Based TIGER/Line Shapefiles, 2020 Processing dataset (Query similarity: 0.3334)
+[3/15] Collection Information for the 2010 Public Use Microdata Areas (PUMA) State-Based TIGER/Line Shapefiles, 2020 Assessing dataset relevance from metadata...
+[3/15] Collection Information for the 2010 Public Use Microdata Areas (PUMA) State-Based TIGER/Line Shapefiles, 2020 Pre-assessment: Likely not relevant (Score: 0.20)
+[3/15] Collection Information for the 2010 Public Use Microdata Areas (PUMA) State-Based TIGER/Line Shapefiles, 2020 Reasoning: The dataset metadata focuses on geographic and cartographic information related to U.S. Census Bureau shapefiles, which is unrelated to puzzle game collectors or their activities in the Americas. There is no indication in the title or description that the dataset contains information about hobbies, games, or collectors.
+Skipping Collection Information for the 2010 Public Use Microdata Areas (PUMA) State-Based TIGER/Line Shapefiles, 2020 for being irrelevant.
+Skipping Collection Information for the 2010 Public Use Microdata Areas (PUMA) State-Based TIGER/Line Shapefiles, 2020 for being irrelevant.
+
+[4/15] Children's Play Areas (CPAs) Processing dataset (Query similarity: 0.3318)
+[4/15] Children's Play Areas (CPAs) Assessing dataset relevance from metadata...
+[4/15] Children's Play Areas (CPAs) Pre-assessment: Likely not relevant (Score: 0.20)
+[4/15] Children's Play Areas (CPAs) Reasoning: The dataset's title and description focus on children's play areas in NYC Parks, which are unrelated to puzzle game collectors or their activities in the Americas. There is no indication in the metadata that the dataset contains information about games, collectors, or geographic regions beyond NYC.
+Skipping Children's Play Areas (CPAs) for being irrelevant.
+Skipping Children's Play Areas (CPAs) for being irrelevant.
+
+[5/15] Conservation Priorities for Open Space Recreation Access in the Southeast United States, by Census Block Group (2018) Processing dataset (Query similarity: 0.3299)
+[5/15] Conservation Priorities for Open Space Recreation Access in the Southeast United States, by Census Block Group (2018) Assessing dataset relevance from metadata...
+[5/15] Conservation Priorities for Open Space Recreation Access in the Southeast United States, by Census Block Group (2018) Pre-assessment: Likely not relevant (Score: 0.20)
+[5/15] Conservation Priorities for Open Space Recreation Access in the Southeast United States, by Census Block Group (2018) Reasoning: The dataset focuses on open space recreation access in the Southeast United States and does not mention puzzle games, collectors, or the Americas as a whole. The metadata does not suggest any plausible connection to the user's query about puzzle game collectors.
+Skipping Conservation Priorities for Open Space Recreation Access in the Southeast United States, by Census Block Group (2018) for being irrelevant.
+Skipping Conservation Priorities for Open Space Recreation Access in the Southeast United States, by Census Block Group (2018) for being irrelevant.
+
+[6/15] Compilation of in situ and detrital zircon U-Pb ages for the Jurassic-Paleocene North American Cordillera (28-50 degrees north) Processing dataset (Query similarity: 0.3290)
+[6/15] Compilation of in situ and detrital zircon U-Pb ages for the Jurassic-Paleocene North American Cordillera (28-50 degrees north) Assessing dataset relevance from metadata...
+[6/15] Compilation of in situ and detrital zircon U-Pb ages for the Jurassic-Paleocene North American Cordillera (28-50 degrees north) Pre-assessment: Likely not relevant (Score: 0.10)
+[6/15] Compilation of in situ and detrital zircon U-Pb ages for the Jurassic-Paleocene North American Cordillera (28-50 degrees north) Reasoning: The dataset metadata focuses on zircon U-Pb ages and the geological history of the North American Cordillera, which is unrelated to puzzle game collectors or their activities in the Americas. There is no plausible connection between the dataset's content and the user's query.
+Skipping Compilation of in situ and detrital zircon U-Pb ages for the Jurassic-Paleocene North American Cordillera (28-50 degrees north) for being irrelevant.
+Skipping Compilation of in situ and detrital zircon U-Pb ages for the Jurassic-Paleocene North American Cordillera (28-50 degrees north) for being irrelevant.
+
+[7/15] PPR Playgrounds Processing dataset (Query similarity: 0.3270)
+[7/15] PPR Playgrounds Assessing dataset relevance from metadata...
+[7/15] PPR Playgrounds Pre-assessment: Likely not relevant (Score: 0.20)
+[7/15] PPR Playgrounds Reasoning: The dataset's title and description focus on playground locations and equipment within specific boundaries, which is unrelated to puzzle game collectors or their activities in the Americas. There is no indication in the metadata that the dataset contains information relevant to the user's query.
+Skipping PPR Playgrounds for being irrelevant.
+Skipping PPR Playgrounds for being irrelevant.
+
+[8/15] Undergraduates Develop Job Skills by Creating Interactive Software for Reserve Visitors - NERRS/NSC(NERRS Science Collaborative) Processing dataset (Query similarity: 0.3269)
+[8/15] Undergraduates Develop Job Skills by Creating Interactive Software for Reserve Visitors - NERRS/NSC(NERRS Science Collaborative) Assessing dataset relevance from metadata...
+[8/15] Undergraduates Develop Job Skills by Creating Interactive Software for Reserve Visitors - NERRS/NSC(NERRS Science Collaborative) Pre-assessment: Likely not relevant (Score: 0.20)
+[8/15] Undergraduates Develop Job Skills by Creating Interactive Software for Reserve Visitors - NERRS/NSC(NERRS Science Collaborative) Reasoning: The dataset's title and description focus on the development of interactive software for visitor displays at estuarine research reserves, which is unrelated to puzzle game collectors in the Americas. There is no indication in the metadata that the dataset contains information about games, collectors, or the Americas.
+Skipping Undergraduates Develop Job Skills by Creating Interactive Software for Reserve Visitors - NERRS/NSC(NERRS Science Collaborative) for being irrelevant.
+Skipping Undergraduates Develop Job Skills by Creating Interactive Software for Reserve Visitors - NERRS/NSC(NERRS Science Collaborative) for being irrelevant.
+
+[9/15] Play Equipment Processing dataset (Query similarity: 0.3244)
+[9/15] Play Equipment Assessing dataset relevance from metadata...
+[9/15] Play Equipment Pre-assessment: Likely not relevant (Score: 0.20)
+[9/15] Play Equipment Reasoning: The dataset focuses on play equipment and play areas for children in Seattle parks, which is unrelated to puzzle game collectors or the Americas as a whole. The metadata does not suggest any plausible connection to the user's query.
+Skipping Play Equipment for being irrelevant.
+Skipping Play Equipment for being irrelevant.
+
+[10/15] Predicting wildlife distribution patterns in New England USA with expert elicitation techniques Processing dataset (Query similarity: 0.3239)
+[10/15] Predicting wildlife distribution patterns in New England USA with expert elicitation techniques Assessing dataset relevance from metadata...
+[10/15] Predicting wildlife distribution patterns in New England USA with expert elicitation techniques Pre-assessment: Likely not relevant (Score: 0.10)
+[10/15] Predicting wildlife distribution patterns in New England USA with expert elicitation techniques Reasoning: The dataset focuses on wildlife distribution patterns in New England, USA, and does not mention puzzle games, collectors, or the Americas as a whole. There is no plausible connection between the metadata and the user's query.
+Skipping Predicting wildlife distribution patterns in New England USA with expert elicitation techniques for being irrelevant.
+Skipping Predicting wildlife distribution patterns in New England USA with expert elicitation techniques for being irrelevant.
+
+[11/15] Educational Attainment of Washington Population by Age, Race/Ethnicity/, and PUMA Region Processing dataset (Query similarity: 0.3238)
+[11/15] Educational Attainment of Washington Population by Age, Race/Ethnicity/, and PUMA Region Assessing dataset relevance from metadata...
+[11/15] Educational Attainment of Washington Population by Age, Race/Ethnicity/, and PUMA Region Pre-assessment: Likely not relevant (Score: 0.20)
+[11/15] Educational Attainment of Washington Population by Age, Race/Ethnicity/, and PUMA Region Reasoning: The dataset's title and description focus on educational attainment and population characteristics in Washington, which are unrelated to puzzle game collectors or the Americas as a whole. There is no indication in the metadata that the dataset contains information relevant to the user's query.
+Skipping Educational Attainment of Washington Population by Age, Race/Ethnicity/, and PUMA Region for being irrelevant.
+Skipping Educational Attainment of Washington Population by Age, Race/Ethnicity/, and PUMA Region for being irrelevant.
+
+[12/15] Sequence Information from the Mitogenome and Ten Nuclear Genes from Martes Species (Martes americana, M. caurina) of North America, 1972-2010 Processing dataset (Query similarity: 0.3219)
+[12/15] Sequence Information from the Mitogenome and Ten Nuclear Genes from Martes Species (Martes americana, M. caurina) of North America, 1972-2010 Assessing dataset relevance from metadata...
+[12/15] Sequence Information from the Mitogenome and Ten Nuclear Genes from Martes Species (Martes americana, M. caurina) of North America, 1972-2010 Pre-assessment: Likely not relevant (Score: 0.20)
+[12/15] Sequence Information from the Mitogenome and Ten Nuclear Genes from Martes Species (Martes americana, M. caurina) of North America, 1972-2010 Reasoning: The dataset metadata focuses on genetic information about Martes species in North America, which is unrelated to puzzle game collectors or their activities in the Americas. Neither the title nor the description suggests any connection to the user's query.
+Skipping Sequence Information from the Mitogenome and Ten Nuclear Genes from Martes Species (Martes americana, M. caurina) of North America, 1972-2010 for being irrelevant.
+Skipping Sequence Information from the Mitogenome and Ten Nuclear Genes from Martes Species (Martes americana, M. caurina) of North America, 1972-2010 for being irrelevant.
+
+[13/15] Bingo Conductor Locations Processing dataset (Query similarity: 0.3217)
+[13/15] Bingo Conductor Locations Assessing dataset relevance from metadata...
+[13/15] Bingo Conductor Locations Pre-assessment: Likely not relevant (Score: 0.20)
+[13/15] Bingo Conductor Locations Reasoning: The dataset's title and description focus on bingo conductors and their locations, which is unrelated to puzzle game collectors or their activities. There is no indication in the metadata that the dataset pertains to puzzle games or collectors in the Americas.
+Skipping Bingo Conductor Locations for being irrelevant.
+Skipping Bingo Conductor Locations for being irrelevant.
+
+[14/15] Hunting Game Processing dataset (Query similarity: 0.3216)
+[14/15] Hunting Game Assessing dataset relevance from metadata...
+[14/15] Hunting Game Pre-assessment: Likely not relevant (Score: 0.20)
+[14/15] Hunting Game Reasoning: The dataset's title and description focus on hunting seasons in Maryland, which is unrelated to puzzle game collectors or the Americas as a whole. There is no indication in the metadata that the dataset could plausibly contain information relevant to the user's query.
+Skipping Hunting Game for being irrelevant.
+Skipping Hunting Game for being irrelevant.
+
+[15/15] Open Space Access Index for the Southeast United States (2018) Processing dataset (Query similarity: 0.3214)
+[15/15] Open Space Access Index for the Southeast United States (2018) Assessing dataset relevance from metadata...
+[15/15] Open Space Access Index for the Southeast United States (2018) Pre-assessment: Likely not relevant (Score: 0.20)
+[15/15] Open Space Access Index for the Southeast United States (2018) Reasoning: The dataset focuses on open space access in the Southeast United States and does not mention puzzle games, collectors, or the Americas as a whole. The metadata does not suggest any plausible connection to the user's query about puzzle game collectors.
+Skipping Open Space Access Index for the Southeast United States (2018) for being irrelevant.
+Skipping Open Space Access Index for the Southeast United States (2018) for being irrelevant.
+
+Successfully processed 0 datasets
+
+No relevant data found to answer the query.
+
+Query execution completed in 44.42 seconds
+(venv) (base) cedricfitzgerald@Cedrics-MacBook-Pro crystal % 
