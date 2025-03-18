@@ -169,15 +169,14 @@ PRINTED OUTPUT:
 EVALUATION TASK:
 1. Assess how well the current result answers the user's query
 2. Determine if there are ways to improve the answer using the available data
-3. Consider if additional analysis, filtering, aggregation, or visualization would better address the query
+3. Consider if additional analysis, filtering, or aggregation would better address the query
 4. Consider if the user's query may benefit from a comparison against other values in the dataset.
 
 Respond with a JSON object containing these fields:
 - answer_quality: float (0.0 to 1.0, where 1.0 is perfect)
 - is_optimal: boolean (true if this is the best possible answer from this dataset)
 - reasoning: string (explanation of your assessment)
-- improvement_suggestions: string (specific suggestions to improve the answer if not optimal)
-- improved_code: string (Simple pandas code that computes and returns a value or dict of values.)
+- improvement_suggestions: string (specific suggestions to improve the answer if not optimal) (Max 3 sentences.)
 """
     
     response = chat_completion(
@@ -191,17 +190,19 @@ Respond with a JSON object containing these fields:
         import json
         evaluation = json.loads(response)
         
-        # Create and return the Pydantic model
+        # Create and return the Pydantic model - no improved_code field
         return QueryAnswerValidation(
             answer_quality=evaluation.get("answer_quality", 0.0),
             is_optimal=evaluation.get("is_optimal", False),
             reasoning=evaluation.get("reasoning", "No reasoning provided"),
-            improvement_suggestions=evaluation.get("improvement_suggestions", ""),
-            improved_code=evaluation.get("improved_code", "")
+            improvement_suggestions=evaluation.get("improvement_suggestions", "")
         )
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
+        # Improved error handling with more details
+        logging.error(f"JSON parsing error: {e}")
+        logging.error(f"Response content (first 500 chars): {response[:500]}...")
+        
         # Fallback in case JSON parsing fails
-        print(f"Error parsing JSON response: {response}")
         return QueryAnswerValidation(
             answer_quality=0.0,
             is_optimal=False,
