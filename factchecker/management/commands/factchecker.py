@@ -7,6 +7,7 @@ from factchecker.processing.analysis.extraction.execution import execute_relevan
 from factchecker.search.faiss_search import vector_search_datasets_faiss as vector_search_datasets
 from factchecker.search import preprocess_query, search_datasets, filter_relevant_datasets
 from factchecker.search.search_utils import parallel_search
+from factchecker.download.download_gov_data import download_all_resources
 
 # For downloading the resources in the datasets, we use the download_resource function for now
 from factchecker.download import download_resource
@@ -32,6 +33,9 @@ import concurrent.futures
 from threading import Lock
 import os
 import json
+
+# Add the import for the new function
+from factchecker.processing.analysis.search_result_analyzer import assess_datafile_relevance_predownload
 
 class Command(BaseCommand):
     help = 'Search for and analyze datasets based on a user query. Uses hybrid search (combination of vector and keyword) by default.'
@@ -263,6 +267,38 @@ class Command(BaseCommand):
                 self.stdout.write(f"\n{dataset_short_id} Processing dataset (Query similarity: {similarity_score:.4f})")
             
             try:
+                print("METADATA DEBUG", dataset)
+                # Pre-download relevance assessment
+                with self.stdout_lock:
+                    self.stdout.write(f"{dataset_short_id} Assessing dataset relevance from metadata...")
+                
+                is_relevant_predownload, relevance_score_predownload, reasoning_predownload = assess_datafile_relevance_predownload(
+                    query, 
+                    dataset,
+                    relevance_threshold * 0.5  # Use a lower threshold for pre-download assessment
+                )
+                
+                with self.stdout_lock:
+                    if is_relevant_predownload:
+                        self.stdout.write(f"{dataset_short_id} Pre-assessment: Likely relevant (Score: {relevance_score_predownload:.2f})")
+                        self.stdout.write(f"{dataset_short_id} Reasoning: {reasoning_predownload}")
+                    else:
+                        self.stdout.write(self.style.WARNING(
+                            f"{dataset_short_id} Pre-assessment: Likely not relevant (Score: {relevance_score_predownload:.2f})"
+                        ))
+                        self.stdout.write(f"{dataset_short_id} Reasoning: {reasoning_predownload}")
+                        
+                        # Skip download if pre-assessment indicates low relevance
+                        return {
+                            "id": dataset["id"],
+                            "title": dataset["title"],
+                            "similarity": dataset.get("similarity", 0),
+                            "is_relevant": False,
+                            "relevance_score": relevance_score_predownload,
+                            "relevance_reasoning": reasoning_predownload,
+                            "skipped_download": True
+                        }, None, None
+                
                 # Handle the dataset - either use local path or download
                 if 'local_path' in dataset:
                     output_path = dataset['local_path']
@@ -274,8 +310,6 @@ class Command(BaseCommand):
                     with self.stdout_lock:
                         self.stdout.write(f"{dataset_short_id} Downloading dataset resources...")
                     
-                    # Modified to download all CSV/XLSX resources
-                    from factchecker.download.download_gov_data import download_all_resources
                     output_paths = download_all_resources(gov_api_key, dataset["id"], output_dir=output_dir)
                     
                     if not output_paths:
@@ -429,7 +463,7 @@ class Command(BaseCommand):
                             # Display DataFrame preview
                             self.stdout.write(str(datafile_content.head()))
                 
-                # Assess dataset relevance with Azure options
+                # Assess dataset relevance
                 with self.stdout_lock:
                     self.stdout.write(f"\n{dataset_short_id} Assessing datafile relevance...")
                 is_relevant, relevance_score, reasoning = assess_datafile_relevance(
