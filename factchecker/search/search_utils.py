@@ -36,12 +36,44 @@ def get_usable_resources(dataset_id: str, verbose: bool = False) -> List[Dict]:
         base_url = "https://catalog.data.gov/api/3"
         headers = {"Authorization": api_key}
         
-        response = requests.get(
-            f"{base_url}/action/package_show?id={dataset_id}", 
-            headers=headers
-        )
-        response.raise_for_status()
-        data = response.json()
+        # Simple retry logic
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                response = requests.get(
+                    f"{base_url}/action/package_show?id={dataset_id}", 
+                    headers=headers
+                )
+                
+                # Check for rate limiting or other errors
+                if response.status_code == 403:
+                    print(f"Rate limited by Data.gov API (403 Forbidden). Attempt {attempt+1}/{max_retries}")
+                    if attempt < max_retries - 1:
+                        # Simple backoff: wait longer with each retry
+                        wait_time = 2 * (attempt + 1)  # 2, 4, 6 seconds
+                        print(f"Waiting {wait_time} seconds before retrying...")
+                        import time
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        print("Maximum retry attempts reached for Data.gov API.")
+                        return []
+                
+                # For other error codes, raise the exception
+                response.raise_for_status()
+                
+                # If we get here, the request was successful
+                data = response.json()
+                break
+                
+            except requests.exceptions.RequestException as e:
+                if verbose:
+                    print(f"Error on attempt {attempt+1}: {e}")
+                if attempt == max_retries - 1:
+                    raise  # Re-raise on last attempt
+                # Simple backoff for other exceptions too
+                import time
+                time.sleep(2 * (attempt + 1))
         
         if "result" not in data or "resources" not in data["result"]:
             return []
@@ -81,7 +113,7 @@ def get_usable_resources(dataset_id: str, verbose: bool = False) -> List[Dict]:
             print(f"Error getting resources for dataset {dataset_id}: {e}")
         return []
 
-def generate_similar_queries(original_query: str, num_variations: int = 2) -> List[str]:
+def generate_similar_queries(original_query: str, num_variations: int = 3) -> List[str]:
     """
     Generate similar queries to the original query using LLM.
     
@@ -94,7 +126,7 @@ def generate_similar_queries(original_query: str, num_variations: int = 2) -> Li
     """
     try:
         # Prepare the prompt for the LLM
-        prompt = f"""Generate {num_variations} alternative search queries that are semantically similar to the original query but use different wording or focus on different aspects of the same topic. Format the response as a JSON array of strings.
+        prompt = f"""You are looking for datasets on the web. Generate {num_variations} simple (max 2-3 words) similar search queries for locating related datasets. Format the response as a JSON array of strings.
 
 Original query: "{original_query}"
 
@@ -106,7 +138,7 @@ Your response (JSON array only):"""
         # Call the LLM using the correct function name
         response = chat_completion(
             prompt=prompt,
-            system_message="You are a helpful assistant that generates alternative search queries.",
+            system_message="You are a helpful assistant that generates dataset search queries.",
             temperature=0.7,
             max_tokens=150
         )
