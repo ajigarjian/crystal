@@ -11,6 +11,7 @@ import traceback
 import re
 
 from factchecker.utils.openai_client import chat_completion
+from factchecker.utils.claude_client import chat_completion_claude
 from factchecker.processing.analysis.extraction.shared import ExtractionPlan
 
 # Define TypedDict classes for better typing
@@ -91,7 +92,7 @@ PREVIOUSLY GENERATED CODE TO IMPROVE UPON:
 {code}
 
 Based on the user query and column analysis, generate pandas code to extract the relevant data. The code should:
-1. Consider how specific a user query is. If they dont mention any geographical or spatial “filters” etc, dont filter by identified columns.
+1. Consider how specific a user query is. If they dont mention any geographical or spatial "filters" etc, dont filter by identified columns.
 1. If applicable, filter the dataframe to include only rows with relevant values in the identified columns
 2. If multiple columns have relevant values, combine the filters appropriately
 3. If no relevant columns or values were identified, return a suitable subset of the data that might be relevant
@@ -109,7 +110,7 @@ Object to return at end of the Python code:
 
 """
 
-    response = chat_completion(
+    response = chat_completion_claude(
         prompt,
         system_message="You are a data analysis expert specializing in pandas code generation.",
         temperature=0.1  # Low temperature for more deterministic responses
@@ -158,7 +159,7 @@ You are improving data extraction code based on feedback. Generate a better vers
 USER QUERY: "{query}"
 
 EXTRACTION STRATEGY:
-1. Consider how specific a user query is. If they dont mention any geographical or spatial “filters” etc, dont filter by identified columns.
+1. Consider how specific a user query is. If they dont mention any geographical or spatial "filters" etc, dont filter by identified columns.
 1. If applicable, filter the dataframe to include only rows with relevant values in the identified columns
 2. If multiple columns have relevant values, combine the filters appropriately
 3. If no relevant columns or values were identified, return a suitable subset of the data that might be relevant
@@ -196,7 +197,7 @@ Object to return at end of the Python code:
 
 """
 
-    response = chat_completion(
+    response = chat_completion_claude(
         prompt,
         system_message="You are a data analysis expert specializing in pandas code generation.",
         temperature=0.2
