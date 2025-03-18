@@ -49,6 +49,7 @@ def summarize_findings(
     Returns:
         Concise summary of findings
     """
+    # Debug print 
     if not extracted_data_list:
         return "No relevant data was found to answer your query."
     
@@ -90,10 +91,27 @@ def summarize_findings(
     if dataset_analyses:
         dataset_context = "DATASET CONTEXT:\n"
         for analysis in dataset_analyses:
+            # Include basic dataset information
             dataset_context += f"Dataset: {analysis.get('dataset_title', 'Unknown')}\n"
             dataset_context += f"Dataset ID: {analysis.get('dataset_id', 'Unknown ID')}\n"
-            dataset_context += f"Analysis: {analysis.get('analysis', 'No analysis available')}\n\n"
-    
+            
+            # Include row and column counts
+            if 'row_count' in analysis and 'column_count' in analysis:
+                dataset_context += f"Size: {analysis['row_count']} rows, {analysis['column_count']} columns\n"
+            
+            # Include categorical summaries
+            if 'categorical_summaries' in analysis and analysis['categorical_summaries']:
+                dataset_context += "Categories: " + "; ".join(analysis['categorical_summaries']) + "\n"
+            
+            # Include geographic scope
+            if 'geographic_scope' in analysis and analysis['geographic_scope']:
+                geo_info = [f"{k}: {v}" for k, v in analysis['geographic_scope'].items()]
+                dataset_context += "Geographic scope: " + "; ".join(geo_info) + "\n"
+            
+            # Include analysis if available
+            if 'analysis' in analysis:
+                dataset_context += f"Analysis: {analysis['analysis']}\n\n"
+
     # Create prompt for OpenAI
     prompt = f"""
 You are analyzing data to answer: "{query}"
@@ -113,9 +131,7 @@ INSTRUCTIONS:
 
 Finally, provide a "SEARCH SUMMARY" section with 2 paragraphs that:
 1. Summarizes the overall context of the datasets analyzed (their scope, limitations, quality)
-2. Synthesizes the findings in relation to the query in a highly factual way based on the given data.
-
-Your response should focus on answering the query using SPECIFIC VALUES and NUMBERS from the available data.
+2. Synthesizes the findings in relation to the query [mentioning date context where applicable]
 """
     
     response = chat_completion(
@@ -209,6 +225,12 @@ def summarize_findings_alternate(
                 "dataset_id": analysis.get("dataset_id", "Unknown ID"),
                 "title": analysis.get("dataset_title", "Unnamed Dataset"),
                 "overview": analysis.get("analysis", "No analysis available"),
+                "row_count": analysis.get("row_count", 0),
+                "column_count": analysis.get("column_count", 0),
+                "missing_values_summary": analysis.get("missing_values_summary", []),
+                "temporal_scope": analysis.get("temporal_scope", {}),
+                "geographic_scope": analysis.get("geographic_scope", {}),
+                "categorical_summaries": analysis.get("categorical_summaries", []),
                 "column_info": analysis.get("column_info", {}),
                 "numerical_stats": analysis.get("numerical_stats", {}),
                 "temporal_coverage": analysis.get("temporal_coverage", {}),
