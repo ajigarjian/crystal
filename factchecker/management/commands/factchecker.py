@@ -76,6 +76,18 @@ class Command(BaseCommand):
             action='store_true',
             help='Print debug information about data flow'
         )
+        parser.add_argument(
+            "--max-results", 
+            type=float, 
+            default=3, 
+            help="Threshold for max dataset search results to return."
+        )
+        parser.add_argument(
+            "--vector-backend",
+            choices=['faiss', 'pinecone'],
+            default='pinecone',
+            help="Vector search backend to use (faiss or pinecone)"
+        )
     
     def handle(self, *args, **options):
         # Start timing the execution
@@ -102,8 +114,11 @@ class Command(BaseCommand):
             self.stderr.write(self.style.ERROR(f"Error initializing API keys: {e}"))
             return
         
+        # Maximum Search Results to return
+        max_results = options.get('max_results', 5)
+
         # Base threshold for vector search (FAISS)
-        similarity_threshold = options.get('similarity_threshold', 0.4)  # Default to 0.4 for FAISS
+        similarity_threshold = options.get('similarity_threshold')
         
         # Higher threshold for keyword search
         keyword_threshold = 0.6  # Fixed at 0.6 for keyword search
@@ -130,7 +145,14 @@ class Command(BaseCommand):
             if search_method == 'vector':
                 # Vector search with specified threshold
                 self.stdout.write(f"Searching for datasets matching '{query}' using vector search with similarity threshold {similarity_threshold:.2f}...")
-                relevant_datasets = vector_search_datasets(query, similarity_threshold=similarity_threshold, verbose=True)
+                
+                # Use the selected vector backend
+                if options.get('vector_backend') == 'pinecone':
+                    from factchecker.search.pinecone_search import vector_search_datasets_pinecone
+                    relevant_datasets = vector_search_datasets_pinecone(query, similarity_threshold=similarity_threshold, verbose=True)
+                else:
+                    # Default to FAISS
+                    relevant_datasets = vector_search_datasets(query, similarity_threshold=similarity_threshold, verbose=True)
                 
                 # Display all results
                 if relevant_datasets:
@@ -157,25 +179,33 @@ class Command(BaseCommand):
             self.stdout.write(f"• FAISS vector search threshold: {similarity_threshold:.2f}")
             self.stdout.write(f"• Keyword search threshold: {keyword_threshold:.2f}")
 
-            # Get FAISS vector search results with threshold (primary method)
-            self.stdout.write(f"\n1. Performing FAISS vector search with query variations:")
+            # Get vector search results with threshold (primary method)
+            self.stdout.write(f"\n1. Performing vector search with query variations:")
             from factchecker.search.search_utils import parallel_search
+
+            # Select the vector search function based on the backend
+            if options.get('vector_backend') == 'pinecone':
+                from factchecker.search.pinecone_search import vector_search_datasets_pinecone as vector_search_func
+                self.stdout.write(f"Using Pinecone as vector search backend")
+            else:
+                vector_search_func = vector_search_datasets
+                self.stdout.write(f"Using FAISS as vector search backend")
 
             # Use parallel search with the original query and variations
             vector_datasets = parallel_search(
                 query=query,
-                search_function=vector_search_datasets,
+                search_function=vector_search_func,
                 similarity_threshold=similarity_threshold,
-                max_results=15,
+                max_results=max_results,
                 use_variations=True,
                 verbose=False  # Disable verbose output
             )
 
             if vector_datasets:
-                self.stdout.write(f"Found {len(vector_datasets)} datasets via FAISS search")
+                self.stdout.write(f"Found {len(vector_datasets)} datasets via vector search")
                 
                 # Show top 5 results only
-                self.stdout.write("\nTop FAISS search results:")
+                self.stdout.write("\nTop vector search results:")
                 for i, dataset in enumerate(vector_datasets[:5]):
                     self.stdout.write(f"  {i+1}. {dataset['title']} - Similarity: {dataset.get('similarity', 0):.4f}")
                 
@@ -208,7 +238,7 @@ class Command(BaseCommand):
             # Find overlap (datasets found by both methods)
             overlap_ids = vector_ids.intersection(keyword_ids)
             self.stdout.write(f"\n3. Combining results:")
-            self.stdout.write(f"• {len(vector_ids)} unique datasets from FAISS search")
+            self.stdout.write(f"• {len(vector_ids)} unique datasets from vector search")
             self.stdout.write(f"• {len(keyword_ids)} unique datasets from keyword search")
             self.stdout.write(f"• {len(overlap_ids)} datasets found by both methods")
             
@@ -238,6 +268,10 @@ class Command(BaseCommand):
             
             # Sort by similarity score (higher is better)
             all_datasets.sort(key=lambda x: x.get('similarity', 0), reverse=True)
+            
+            # Limit to max_results * 2 (assuming half aren't parseable)
+            all_datasets = all_datasets[:int(max_results * 2)]
+            self.stdout.write(f"Taking top {int(max_results * 2)} datasets based on similarity score (max_results={max_results} × 2).")
             
             relevant_datasets = all_datasets
         
