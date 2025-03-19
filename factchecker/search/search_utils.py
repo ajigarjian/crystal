@@ -113,7 +113,7 @@ def get_usable_resources(dataset_id: str, verbose: bool = False) -> List[Dict]:
             print(f"Error getting resources for dataset {dataset_id}: {e}")
         return []
 
-def generate_similar_queries(original_query: str, num_variations: int = 3) -> List[str]:
+def generate_similar_queries(original_query: str, num_variations: int = 5) -> List[str]:
     """
     Generate similar queries to the original query using LLM.
     
@@ -126,12 +126,25 @@ def generate_similar_queries(original_query: str, num_variations: int = 3) -> Li
     """
     try:
         # Prepare the prompt for the LLM
-        prompt = f"""You are looking for datasets on the web. Generate {num_variations} simple (max 2-3 words) similar search queries for locating related datasets. Format the response as a JSON array of strings.
+        prompt = f"""You are looking for datasets on the web. Generate {num_variations} simple similar search queries for locating related datasets. Format the response as a JSON array of strings.
 
 Original query: "{original_query}"
 
+EXAMPLES:
+User Query 1: Real estate prices in San Francisco since 2020
+
 Example response format:
-["alternative query 1", "alternative query 2"]
+["San Franscio housing prices", "real estate San Francisco", "California Pandemic Home Pricing", "SF real estate"]
+
+User Query 2: vaccination rates by demographic groups
+
+Example response format:
+["Immunizations", "vaccines", "immunized"]
+
+User Query 3: how has the high school graduation rate in Philadelphia changed over time?
+
+Example response format:
+["Philly schools", "Philadelphia schools", "School performance PA", "School performance Philadelphia", "High Schools PA"]
 
 Your response (JSON array only):"""
 
@@ -244,9 +257,9 @@ def parallel_search(query: str, search_function: Callable, similarity_threshold:
     # Sort by similarity score
     deduplicated_results.sort(key=lambda x: x.get('similarity', 0), reverse=True)
     
-    # Limit to max_results
-    final_results = deduplicated_results[:max_results]
-    
+    # Limit to max_results * 2
+    final_results = deduplicated_results[:int(max_results * 2)]
+
     # Print a simple summary
     print(f"Search results by variation:")
     for q, count in results_by_query.items():

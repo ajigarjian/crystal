@@ -40,25 +40,21 @@ def chat_completion_claude(
     """
     client, model = get_claude_client()
     
-    try:
-        # Create API call with or without response_format based on whether it's provided
-        kwargs = {
-            "model": model,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "system": system_message,
-            "messages": [
-                {"role": "user", "content": prompt}
-            ]
-        }
-        
-        # Add response_format if provided
-        if response_format is not None and response_format.get("type") == "json_object":
-            kwargs["response_format"] = {"type": "json_object"}
-        
-        response = client.messages.create(**kwargs)
-        return response.content[0].text
+    # Create API call with or without response_format based on whether it's provided
+    kwargs = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "system": system_message,
+        "messages": [
+            {"role": "user", "content": prompt}
+        ]
+    }
+    
+    # Add response_format if provided
+    if response_format is not None and response_format.get("type") == "json_object":
+        kwargs["response_format"] = {"type": "json_object"}
+    
+    response = client.messages.create(**kwargs)
+    return response.content[0].text
 
-    except Exception as e:
-        print(f"Error calling Claude API: {str(e)}")
-        return f"Error generating response: {str(e)}" 
