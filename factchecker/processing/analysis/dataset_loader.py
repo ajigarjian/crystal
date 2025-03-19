@@ -67,16 +67,27 @@ def load_datafile(file_path: str) -> Union[pd.DataFrame, Dict[str, Any]]:
         else:
             logger.info(f"Detected CSV file: {file_path}")
             loading_attempts = [
-                # Standard loading
-                lambda: pd.read_csv(file_path),
-                # Try with Latin-1 encoding
-                lambda: pd.read_csv(file_path, encoding='latin1'),
-                # Try with explicit quoting
-                lambda: pd.read_csv(file_path, quoting=pd.io.common.csv.QUOTE_NONNUMERIC),
-                # Try with different engine
-                lambda: pd.read_csv(file_path, engine='python'),
-                # Try with auto delimiter detection
-                lambda: pd.read_csv(file_path, sep=None, engine='python')
+                # Standard loading with comma
+                lambda: pd.read_csv(file_path, sep=','),
+                # Try with tab delimiter
+                lambda: pd.read_csv(file_path, sep='\t'),
+                # Try with semicolon (common in European files)
+                lambda: pd.read_csv(file_path, sep=';'),
+                # Try with pipe
+                lambda: pd.read_csv(file_path, sep='|'),
+                # Try with comma and different encoding
+                lambda: pd.read_csv(file_path, sep=',', encoding='latin1'),
+                # Try with comma and skip bad lines
+                lambda: pd.read_csv(file_path, sep=',', on_bad_lines='skip'),
+                # Try with comma, skip bad lines, and different encoding
+                lambda: pd.read_csv(file_path, sep=',', on_bad_lines='skip', encoding='latin1'),
+                # Try reading the file with explicit delimiter and maximum error tolerance
+                lambda: pd.read_csv(file_path, sep=',', on_bad_lines='skip', 
+                                  encoding='latin1', quoting=3, error_bad_lines=False),  # QUOTE_NONE
+                # Try with skiprows for files with metadata headers (like EPA files)
+                lambda: pd.read_csv(file_path, sep=',', skiprows=10, on_bad_lines='skip'),
+                # Last resort - read as fixed width
+                lambda: pd.read_fwf(file_path, on_bad_lines='skip')
             ]
         
         df = None
@@ -101,14 +112,39 @@ def load_datafile(file_path: str) -> Union[pd.DataFrame, Dict[str, Any]]:
                 continue
         
         if df is None:
-            raise ValueError(f"All loading attempts failed: {errors}")
+            logger.warning("All parsing attempts failed, creating placeholder DataFrame")
+            try:
+                # Create a simple single-row DataFrame with file info
+                df = pd.DataFrame({
+                    'file_path': [file_path],
+                    'parsing_status': ['failed - could not parse file'],
+                    'file_name': [os.path.basename(file_path)]
+                })
+                logger.info("Created placeholder DataFrame for failed file")
+                
+                # Try to include a sample of the file content if possible
+                try:
+                    with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+                        sample_content = f.read(1000)  # First 1000 chars
+                        df['content_sample'] = [sample_content]
+                except Exception:
+                    pass  # Ignore errors reading content
+                
+                return df
+            except Exception as e:
+                logger.error(f"Failed to create placeholder DataFrame: {str(e)}")
+                raise ValueError(f"Error loading dataset - please try a different file")
             
         # Handle common issues
-        if len(df.columns) == 1 and file_extension not in ['.xlsx', '.xls']:
-            # Try different delimiter if only one column detected (for CSV only)
+        if len(df.columns) == 1 and file_extension not in ['.xlsx', '.xls'] and 'parsing_status' not in df.columns:
+            # Only try again if this isn't our placeholder DataFrame
             logger.warning("Only one column detected, trying different delimiter")
-            df = pd.read_csv(file_path, sep=None, engine='python')
-            
+            try:
+                df = pd.read_csv(file_path, sep=None, engine='python')
+            except Exception as e:
+                logger.warning(f"Final attempt with auto-delimiter failed: {str(e)}")
+                # Don't raise - return what we have
+        
         return df
     except Exception as e:
         logger.error(f"Error loading dataset: {str(e)}")

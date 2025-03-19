@@ -268,3 +268,39 @@ def parallel_search(query: str, search_function: Callable, similarity_threshold:
     print(f"Returning top {len(final_results)} results after deduplication")
     
     return final_results
+
+def single_search(query: str, search_function: Callable, similarity_threshold: float = 0.3, 
+                  max_results: int = 10, verbose: bool = False) -> List[Dict]:
+    """
+    Perform a search with only the original query (no variations).
+    
+    Args:
+        query: The search query
+        search_function: Function to use for searching (e.g., vector_search_datasets)
+        similarity_threshold: Minimum similarity score (0-1)
+        max_results: Maximum number of results to return
+        verbose: Whether to print detailed logging information
+        
+    Returns:
+        List of search results
+    """
+    try:
+        # Use the provided search function
+        results = search_function(
+            query, 
+            similarity_threshold=similarity_threshold,
+            max_results=max_results,
+            verbose=verbose
+        )
+        
+        # Add the query to each result for consistency with parallel_search
+        for result in results:
+            result['query_variation'] = query
+        
+        if verbose:
+            print(f"Found {len(results)} results for query: \"{query}\"")
+        
+        return results
+    except Exception as e:
+        print(f"Error searching with query '{query}': {e}")
+        return []
