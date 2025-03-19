@@ -137,7 +137,8 @@ Finally, provide a "SEARCH SUMMARY" section with 2 paragraphs that:
     response = chat_completion(
         prompt,
         system_message="You are a data analyst who provides thorough analysis of data, with special attention to recent data points.",
-        max_tokens=2048
+        max_tokens=2048,
+        model_name="gpt-4o" # Let's use the good model for this
         )
     # Return the summary
     return response
