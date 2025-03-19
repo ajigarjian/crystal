@@ -125,7 +125,8 @@ Object to return at end of the Python code:
             prompt,
             system_message="You are a data analysis expert specializing in pandas code generation.",
             temperature=0.1,
-            max_tokens=1500
+            max_tokens=1500,
+            model_name="gpt-4o" # Let's not use the mini model for this
         )
     
     # Parse response
