@@ -19,6 +19,8 @@ load_dotenv()
 
 # Then access the environment variables
 DATA_GOV_API_KEY = os.getenv('DATA_GOV_API_KEY')
+PINECONE_API_KEY= os.getenv('PINECONE_API_KEY')
+PINECONE_ENVIRONMENT= os.getenv('PINECONE_ENVIRONMENT')
 
 try:
     AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY")
