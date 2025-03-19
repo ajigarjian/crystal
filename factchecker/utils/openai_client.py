@@ -19,7 +19,6 @@ def get_openai_client():
         
     Returns:
         An OpenAI client
-        A Deployment Name
     """
     # If the Azure OpenAI key is set, let's default to using that as a preferred OpenAI provider
     if provider == "azure":
@@ -32,11 +31,11 @@ def get_openai_client():
             api_version="2025-02-01-preview",  # Update this to the version you're using
             azure_endpoint=AZURE_OPENAI_ENDPOINT
         )
-        return client, AZURE_OPENAI_DEPLOYMENT
+        return client
     else:
         # Configure for regular OpenAI
         client = openai.OpenAI(api_key=OPENAI_API_KEY)
-        return client, "gpt-4o"
+        return client
 
 def get_openai_embeddings_client():
     """
@@ -44,33 +43,66 @@ def get_openai_embeddings_client():
         
     Returns:
         An OpenAI client
-        A Deployment Name
     """
-    model = "text-embedding-3-small"
-
     # If the Azure OpenAI key is set, let's default to using that as a preferred OpenAI provider
     if provider == "azure":        
         # Configure for Azure OpenAI
         client = openai.AzureOpenAI(
             api_key=AZURE_OPENAI_KEY,
-            api_version="2023-05-15",  # Hardcoded for text-embedding-3-small model
+            api_version="2025-02-01-preview",  # Hardcoded for text-embedding-3-small model
             azure_endpoint=AZURE_OPENAI_ENDPOINT
         )
-        return client, model
+        return client
     else:
         # Configure for regular OpenAI
         client = openai.OpenAI(api_key=OPENAI_API_KEY)
-        return client, model
+        return client
+
+# Add a cache for the OpenAI client to avoid recreating it for each request
+_openai_client_cache = {}
+_openai_embeddings_client_cache = {}
+
+def get_cached_openai_client():
+    """
+    Create and return a cached OpenAI client configured for either OpenAI or Azure OpenAI.
+    The client is created only once per process and then reused.
+        
+    Returns:
+        An OpenAI client
+        A Deployment Name
+    """
+    global _openai_client_cache
+    
+    if provider not in _openai_client_cache:
+        _openai_client_cache[provider] = get_openai_client()
+    
+    return _openai_client_cache[provider]
+
+def get_cached_openai_embeddings_client():
+    """
+    Create and return a cached OpenAI embeddings client.
+    The client is created only once per process and then reused.
+        
+    Returns:
+        An OpenAI client
+        A Deployment Name
+    """
+    global _openai_embeddings_client_cache
+    
+    if provider not in _openai_embeddings_client_cache:
+        _openai_embeddings_client_cache[provider] = get_openai_embeddings_client()
+    
+    return _openai_embeddings_client_cache[provider]
 
 def create_embeddings(query):
     """
     Returns a new embeddings output from OpenAI.
     """
-    client, deployment = get_openai_embeddings_client()
+    client = get_cached_openai_embeddings_client()
 
     response = client.embeddings.create(
         input=query,
-        model=deployment
+        model="text-embedding-3-small"
     )
 
     return response.data[0].embedding
@@ -80,7 +112,8 @@ def chat_completion(
     system_message: str = "You are a helpful assistant.",
     temperature: float = 0.2,
     max_tokens: int = 800,
-    response_format: Optional[Dict[str, str]] = None
+    response_format: Optional[Dict[str, str]] = None,
+    model_name: Optional[str] = "gpt-4o-mini"
 ) -> str:
     """
     Get a chat completion from OpenAI or Azure OpenAI.
@@ -91,17 +124,18 @@ def chat_completion(
         temperature: The temperature to use for generation
         max_tokens: Maximum tokens
         response_format: Optional format specification for the response
+        model_name: Optional model name to use (e.g., "gpt-4o", "gpt-4o-mini")
         
     Returns:
         The generated text
     """
-    client, deployment = get_openai_client()
+    client = get_cached_openai_client()
     
     try:
         # Create API call with or without response_format based on whether it's provided
         if response_format is not None:
             response = client.chat.completions.create(
-                model=deployment,
+                model=model_name,
                 messages=[
                     {"role": "system", "content": system_message},
                     {"role": "user", "content": prompt}
@@ -112,7 +146,7 @@ def chat_completion(
             )
         else:
             response = client.chat.completions.create(
-                model=deployment,
+                model=model_name,
                 messages=[
                     {"role": "system", "content": system_message},
                     {"role": "user", "content": prompt}
@@ -120,7 +154,7 @@ def chat_completion(
                 temperature=temperature,
                 max_tokens=max_tokens
             )
-
+        print("Generated response with model:", model_name)
         return response.choices[0].message.content
 
     except Exception as e:
