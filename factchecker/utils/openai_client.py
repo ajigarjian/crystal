@@ -6,7 +6,6 @@ from typing import Dict, List, Any, Optional
 try:
     AZURE_OPENAI_KEY = os.environ["AZURE_OPENAI_API_KEY"]
     AZURE_OPENAI_ENDPOINT = os.environ["AZURE_OPENAI_ENDPOINT"]
-    AZURE_OPENAI_DEPLOYMENT = os.environ["AZURE_OPENAI_DEPLOYMENT"]
     provider = "azure"
 
 except KeyError:
@@ -22,8 +21,8 @@ def get_openai_client():
     """
     # If the Azure OpenAI key is set, let's default to using that as a preferred OpenAI provider
     if provider == "azure":
-        if not AZURE_OPENAI_ENDPOINT or not AZURE_OPENAI_DEPLOYMENT:
-            raise ValueError("Azure endpoint and deployment name are required when using Azure OpenAI")
+        if not AZURE_OPENAI_ENDPOINT:
+            raise ValueError("Azure endpoint is required when using Azure OpenAI")
         
         # Configure for Azure OpenAI
         client = openai.AzureOpenAI(
