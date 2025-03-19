@@ -110,10 +110,22 @@ Object to return at end of the Python code:
 
 """
 
-    response = chat_completion_claude(
-        prompt,
-        system_message="You are a data analysis expert specializing in pandas code generation.",
-        temperature=0.1  # Low temperature for more deterministic responses
+    try:
+        # First try with Claude
+        response = chat_completion_claude(
+            prompt,
+            system_message="You are a data analysis expert specializing in pandas code generation.",
+            temperature=0.1  # Low temperature for more deterministic responses
+        )
+    except Exception as e:
+        # Log the error
+        logging.warning(f"Claude API call failed, falling back to OpenAI: {str(e)}")
+        # Fall back to OpenAI
+        response = chat_completion(
+            prompt,
+            system_message="You are a data analysis expert specializing in pandas code generation.",
+            temperature=0.1,
+            max_tokens=1500
         )
     
     # Parse response
