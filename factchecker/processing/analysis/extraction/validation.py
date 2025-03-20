@@ -171,6 +171,7 @@ EVALUATION TASK:
 2. Determine if there are ways to improve the answer using the available data
 3. Consider if additional analysis, filtering, or aggregation would better address the query
 4. Consider if the user's query may benefit from a comparison against other values in the dataset.
+5. Consider if values of "0" are realistic given the data.
 
 Respond with a JSON object containing these fields:
 - answer_quality: float (0.0 to 1.0, where 1.0 is perfect)
