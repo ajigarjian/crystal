@@ -27,6 +27,9 @@ from corsheaders.defaults import default_headers
 from django.db import models
 import pandas as pd
 
+# Census vector search
+from factchecker.search.census_search import vector_search, process_query
+
 # Create a logger for the API
 logger = logging.getLogger("factchecker_api")
 
