@@ -10,20 +10,19 @@ from factchecker.models import (
 
 
 class Command(BaseCommand):
-    help = 'Import Census API metadata for 2020 ACS 5-year estimates'
+    help = 'Import Census API metadata for all available datasets'
+    base_url = "https://api.census.gov/data"
 
     def add_arguments(self, parser):
         parser.add_argument(
             '--vintage',
             type=int,
-            default=2020,
-            help='Census data vintage year (default: 2020)'
+            help='Specific vintage year to import (optional)'
         )
         parser.add_argument(
             '--dataset',
             type=str,
-            default='acs/acs5',
-            help='Dataset path (default: acs/acs5)'
+            help='Specific dataset path to import (optional)'
         )
         parser.add_argument(
             '--clear',
@@ -32,10 +31,68 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        vintage = options['vintage']
-        dataset_path = options['dataset']
+        vintage = options.get('vintage')
+        dataset_path = options.get('dataset')
         clear_data = options.get('clear', False)
+
+        if vintage and dataset_path:
+            # Import specific dataset
+            self.stdout.write(f'Importing specific dataset: {vintage} {dataset_path}')
+            self._import_single_dataset(vintage, dataset_path, clear_data)
+        else:
+            # Import all datasets
+            self.stdout.write('Starting import of all Census API datasets')
+            self._import_all_datasets(clear_data)
+
+    def _import_all_datasets(self, clear_data):
+        """Import all available datasets directly from root endpoint"""
+        try:
+            # Get list of all datasets
+            response = requests.get(f"{self.base_url}.json")
+            response.raise_for_status()
+            data = response.json()
+            
+            total_datasets = 0
+            datasets = data.get('dataset', [])
+            total = len(datasets)
+            
+            self.stdout.write(f'Found {total} datasets to process')
+            
+            # Process each dataset
+            for i, dataset_info in enumerate(datasets, 1):
+                try:
+                    # Get vintage and dataset path
+                    vintage = dataset_info.get('c_vintage')
+                    dataset_path = '/'.join(dataset_info.get('c_dataset', []))
+                    
+                    if not vintage or not dataset_path:
+                        continue
+                    
+                    self.stdout.write(
+                        self.style.SUCCESS(f'\nProcessing dataset {i}/{total}: {vintage}/{dataset_path}')
+                    )
+                    
+                    # Import the dataset
+                    self._import_single_dataset(vintage, dataset_path, False)
+                    total_datasets += 1
+                    
+                except Exception as e:
+                    self.stdout.write(
+                        self.style.WARNING(f'Error processing dataset: {str(e)}')
+                    )
+                    continue
+            
+            self.stdout.write(
+                self.style.SUCCESS(f'\nCompleted import of {total_datasets} datasets')
+            )
         
+        except Exception as e:
+            self.stdout.write(
+                self.style.ERROR(f'Error fetching datasets: {str(e)}')
+            )
+
+    def _import_single_dataset(self, vintage, dataset_path, clear_data):
+        """Import a single dataset (existing implementation)"""
         self.stdout.write(self.style.SUCCESS(f'Starting import of Census API metadata for {vintage} {dataset_path}'))
         
         # Clear existing data if requested
@@ -272,11 +329,9 @@ class Command(BaseCommand):
         self.stdout.write('4. Importing groups metadata...')
         
         try:
-            # Define base_url if it's not already defined in the class
-            base_url = "https://api.census.gov/data/"
-            
             # Get groups data
-            url = f"{base_url}{dataset.vintage}/{dataset.dataset_path}/groups.json"
+            url = f"{self.base_url}/{dataset.vintage}/{dataset.dataset_path}/groups.json"
+
             response = requests.get(url)
             response.raise_for_status()
             data = response.json()
