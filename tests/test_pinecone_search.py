@@ -11,6 +11,9 @@ import os
 import sys
 import datetime
 
+# Add the parent directory to sys.path so Python can find your Django project
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 # Configure Django settings
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'crystalproject.settings')
 
@@ -26,7 +29,24 @@ from factchecker.search.search_utils import generate_similar_queries, parallel_s
 QUERIES = [
     "air quality in greenwich village",
     "electric vehicle adoption rates by state",
-    "gun murder rates in the southwest since 2015"
+    "gun murder rates in the southwest since 2015",
+    "climate change impact on coastal communities",
+    "public school funding disparities",
+    "healthcare access in rural areas",
+    "renewable energy production by state",
+    "income inequality trends 2010-2020",
+    "opioid crisis statistics by county",
+    "water quality in the great lakes",
+    "affordable housing availability in major cities",
+    "broadband internet access in underserved communities",
+    "vaccination rates by demographic groups",
+    "food deserts in urban areas",
+    "public transportation usage trends",
+    "small business growth after covid-19",
+    "forest fire frequency and severity",
+    "student loan debt distribution by age",
+    "maternal mortality rates by state",
+    "solar panel adoption in residential areas"
 ]
 
 def run_pinecone_test(output_file="pinecone_search_results.txt"):
@@ -56,7 +76,7 @@ def run_pinecone_test(output_file="pinecone_search_results.txt"):
                 results_without = single_search(
                     query=query,
                     search_function=vector_search_datasets_pinecone,
-                    similarity_threshold=0.5,
+                    similarity_threshold=0.35,
                     max_results=10,
                     verbose=True
                 )
