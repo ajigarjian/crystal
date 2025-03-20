@@ -143,7 +143,7 @@ class PineconeSearcher:
                     formatted_results.append({
                         "id": result['dataset_id'],
                         "title": dataset.title,
-                        "description": dataset.notes[:200] if dataset.notes else "",
+                        "description": dataset.notes if dataset.notes else "",
                         "organization": dataset.organization_title,
                         "similarity": result['score'],
                         "resources": resources,
@@ -282,7 +282,7 @@ def vector_search_datasets_pinecone(
                 formatted_results.append({
                     "id": dataset_id,
                     "title": dataset.title,
-                    "description": dataset.notes[:200] if dataset.notes else "",
+                    "description": dataset.notes if dataset.notes else "",
                     "organization": dataset.organization_title,
                     "similarity": similarity,
                     "resources": resources,
@@ -322,7 +322,7 @@ def vector_search_datasets_pinecone(
                     formatted_result = {
                         "id": dataset_id,
                         "title": dataset.title,
-                        "description": dataset.notes[:200] if dataset.notes else "",
+                        "description": dataset.notes if dataset.notes else "",
                         "organization": dataset.organization_title,
                         "similarity": match.score,
                         "resources": resources,

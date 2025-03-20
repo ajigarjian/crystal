@@ -10,6 +10,27 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import Link from "next/link";
 import { ChevronDown, ChevronUp } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Progress } from "@/components/ui/progress";
+import { AlertCircle, CheckCircle2, FileText, Database, ArrowRight, Download, FileCheck, Loader2 } from "lucide-react";
 
 interface Resource {
   id: string;
@@ -42,6 +63,37 @@ interface Dataset {
   tags?: (Tag | string)[];
   image_url?: string;
   search_source?: string;
+  status?: 'starting' | 'downloading' | 'downloaded' | 'analyzing_files' | 'loading' | 'assessing' | 'relevant' | 'not_relevant' | 'skipped' | 'error';
+  processing_complete?: boolean;
+  pre_assessment?: {
+    is_relevant: boolean;
+    relevance_score: number;
+    reasoning: string;
+  };
+  relevance?: {
+    is_relevant: boolean;
+    relevance_score: number;
+    reasoning: string;
+  };
+  error?: string;
+  file_count?: number;
+  files?: string[];
+  primary_file?: string;
+  preview?: DatasetPreview;
+  isRemoving?: boolean;
+}
+
+interface DatasetPreview {
+  type: 'pdf' | 'tabular';
+  file_name: string;
+  num_pages?: number;
+  text_sample?: string;
+  enhanced_summary?: string;
+  key_points?: string[];
+  row_count?: number;
+  column_count?: number;
+  columns?: string[];
+  sample_data?: any[];
 }
 
 // Define interface for status messages
@@ -67,6 +119,7 @@ export default function DatasetsPage() {
   const [datasetCount, setDatasetCount] = useState<number>(0);
   const [searchComplete, setSearchComplete] = useState(false);
   const [showProcessDetails, setShowProcessDetails] = useState(false);
+  const [showAllMessages, setShowAllMessages] = useState(false);
   const [queryVariations, setQueryVariations] = useState<string[]>([]);
   const [searchStages, setSearchStages] = useState<{
     stage: string;
@@ -74,6 +127,8 @@ export default function DatasetsPage() {
     startTime?: number;
     endTime?: number;
   }[]>([]);
+  const [selectedPreview, setSelectedPreview] = useState<Dataset | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
   
   // Scroll to the latest discovered dataset
   const discoveryEndRef = useRef<HTMLDivElement>(null);
@@ -127,6 +182,14 @@ export default function DatasetsPage() {
     }
   }, [discoveryMessages]);
   */
+
+  // Auto-scroll to bottom of status messages when they update
+  useEffect(() => {
+    const statusMessageContainers = document.querySelectorAll('.status-message-container');
+    statusMessageContainers.forEach(container => {
+      container.scrollTop = container.scrollHeight;
+    });
+  }, [statusMessages]);
 
   // Function to process a query with streaming
   const processStreamingQuery = async (queryText: string) => {
@@ -327,10 +390,39 @@ export default function DatasetsPage() {
                 break;
                 
               case 'dataset_update':
-                // Update an existing dataset (used for search_source updates)
-                setDatasets(prev => 
-                  prev.map(d => d.id === data.data.id ? data.data : d)
-                );
+                setDatasets(prev => {
+                  const datasetIndex = prev.findIndex(d => d.id === data.data.id);
+                  
+                  // If dataset exists and is marked as not relevant in the pre-assessment
+                  if (datasetIndex !== -1 && 
+                      data.data.status === 'not_relevant') {
+                    
+                    // First mark it for removal (this will trigger the animation)
+                    const updatedDatasets = [...prev];
+                    updatedDatasets[datasetIndex] = {
+                      ...updatedDatasets[datasetIndex],
+                      ...data.data,
+                      isRemoving: true  // Add flag to trigger removal animation
+                    };
+                    
+                    // Set a timeout to actually remove it after animation completes
+                    setTimeout(() => {
+                      setDatasets(prev => 
+                        prev.filter(d => d.id !== data.data.id)
+                      );
+                    }, 500); // Match this duration to your CSS transition
+                    
+                    return updatedDatasets;
+                  }
+                  
+                  // Normal update for relevant datasets
+                  return prev.map(dataset => {
+                    if (dataset.id === data.data.id) {
+                      return { ...dataset, ...data.data };
+                    }
+                    return dataset;
+                  });
+                });
                 break;
                 
               case 'complete':
@@ -366,11 +458,146 @@ export default function DatasetsPage() {
                 setStatusMessages(prev => [...prev, errorMessage]);
                 break;
                 
+              case 'phase_complete':
+                // A major phase like search is complete
+                if (data.phase === 'search') {
+                  // Mark all search-related stages as complete
+                  setSearchStages(prev => {
+                    const updated = [...prev];
+                    // Ensure all search stages are complete
+                    for (let i = 0; i < updated.length; i++) {
+                      if (!updated[i].complete) {
+                        updated[i] = { ...updated[i], complete: true, endTime: Date.now() };
+                      }
+                    }
+                    // Add processing stage
+                    updated.push({ 
+                      stage: "Processing datasets", 
+                      complete: false, 
+                      startTime: Date.now() 
+                    });
+                    return updated;
+                  });
+                  
+                  const searchCompleteMessage: StatusMessage = {
+                    id: Math.random().toString(36).substring(2, 9),
+                    message: data.message,
+                    timestamp: data.data.execution_time,
+                    type: 'status'
+                  };
+                  setStatusMessages(prev => [...prev, searchCompleteMessage]);
+                }
+                break;
+              
+              case 'processing_start':
+                // Starting to process a specific dataset
+                setDatasets(prev => {
+                  return prev.map(d => {
+                    if (d.id === data.dataset_id) {
+                      return {
+                        ...d,
+                        status: 'starting'
+                      };
+                    }
+                    return d;
+                  });
+                });
+                
+                const processingStartMessage: StatusMessage = {
+                  id: Math.random().toString(36).substring(2, 9),
+                  message: data.message,
+                  timestamp: data.timestamp,
+                  type: 'status'
+                };
+                setStatusMessages(prev => [...prev, processingStartMessage]);
+                break;
+              
+              case 'pre_assessment':
+                // Pre-download relevance assessment result
+                setDatasets(prev => {
+                  return prev.map(d => {
+                    if (d.id === data.dataset_id) {
+                      return {
+                        ...d,
+                        pre_assessment: {
+                          is_relevant: data.is_relevant,
+                          relevance_score: data.relevance_score,
+                          reasoning: data.reasoning
+                        }
+                      };
+                    }
+                    return d;
+                  });
+                });
+                break;
+              
+              case 'download_complete':
+                // Dataset files have been downloaded
+                const downloadMessage: StatusMessage = {
+                  id: Math.random().toString(36).substring(2, 9),
+                  message: `Downloaded ${data.file_count} files for dataset`,
+                  timestamp: data.timestamp,
+                  type: 'status'
+                };
+                setStatusMessages(prev => [...prev, downloadMessage]);
+                break;
+              
+              case 'file_analysis':
+                // Analysis of multiple files in a dataset
+                console.log("File analysis:", data);
+                break;
+              
+              case 'dataset_preview':
+                // Dataset preview information
+                setDatasets(prev => {
+                  return prev.map(d => {
+                    if (d.id === data.dataset_id) {
+                      return {
+                        ...d,
+                        preview: data.preview
+                      };
+                    }
+                    return d;
+                  });
+                });
+                break;
+              
+              case 'relevance_assessment':
+                // Final relevance assessment after analyzing the actual data
+                setDatasets(prev => {
+                  return prev.map(d => {
+                    if (d.id === data.dataset_id) {
+                      return {
+                        ...d,
+                        relevance: {
+                          is_relevant: data.is_relevant,
+                          relevance_score: data.relevance_score,
+                          reasoning: data.reasoning
+                        }
+                      };
+                    }
+                    return d;
+                  });
+                });
+                
+                const assessmentMessage: StatusMessage = {
+                  id: Math.random().toString(36).substring(2, 9),
+                  message: `Dataset assessed with relevance score: ${data.relevance_score.toFixed(2)}`,
+                  timestamp: data.timestamp,
+                  type: 'status'
+                };
+                setStatusMessages(prev => [...prev, assessmentMessage]);
+                break;
+                
               default:
                 console.log(`Unknown message type: ${data.type}`, data);
             }
           } catch (err) {
-            console.error("Error parsing JSON from stream:", err, line);
+            console.error("Error parsing JSON from stream:", err);
+            console.error("Problematic line:", line);
+            
+            // Continue processing other lines instead of breaking
+            continue;
           }
         }
       }
@@ -451,6 +678,107 @@ export default function DatasetsPage() {
     if (!startTime || !endTime) return "—";
     const duration = endTime - startTime;
     return `${(duration / 1000).toFixed(2)}s`;
+  };
+
+  // New function to check if we should show the "Show All" button
+  const shouldShowAllButton = (messages: StatusMessage[]) => {
+    return messages.length > 3;
+  };
+
+  // New function to handle dataset preview
+  const handlePreviewClick = (e: React.MouseEvent, dataset: Dataset) => {
+    e.stopPropagation(); // Prevent card click event from firing
+    setSelectedPreview(dataset);
+    setPreviewOpen(true);
+  };
+
+  // New function to render dataset status
+  const getDatasetStatusInfo = (dataset: Dataset) => {
+    // Status info with icon and text
+    switch(dataset.status) {
+      case 'starting':
+        return { 
+          icon: <Loader2 className="h-4 w-4 animate-spin text-yellow-500" />, 
+          text: "Starting analysis...",
+          color: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300"
+        };
+      case 'downloading':
+        return { 
+          icon: <Download className="h-4 w-4 animate-pulse text-blue-500" />, 
+          text: "Downloading files...",
+          color: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300"
+        };
+      case 'downloaded':
+        return { 
+          icon: <FileCheck className="h-4 w-4 text-blue-500" />, 
+          text: `Downloaded ${dataset.file_count || 0} files`,
+          color: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300"
+        };
+      case 'analyzing_files':
+        return { 
+          icon: <Loader2 className="h-4 w-4 animate-spin text-indigo-500" />, 
+          text: "Analyzing files...",
+          color: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300"
+        };
+      case 'loading':
+        return { 
+          icon: <Loader2 className="h-4 w-4 animate-spin text-indigo-500" />, 
+          text: "Loading data...",
+          color: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300"
+        };
+      case 'assessing':
+        return { 
+          icon: <Loader2 className="h-4 w-4 animate-spin text-purple-500" />, 
+          text: "Assessing relevance...",
+          color: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300" 
+        };
+      case 'relevant':
+        return { 
+          icon: <CheckCircle2 className="h-4 w-4 text-green-500" />, 
+          text: `Relevant (${dataset.relevance?.relevance_score.toFixed(2)})`,
+          color: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300"
+        };
+      case 'not_relevant':
+        return { 
+          icon: <AlertCircle className="h-4 w-4 text-orange-500" />, 
+          text: `Not relevant (${dataset.relevance?.relevance_score.toFixed(2)})`,
+          color: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300"
+        };
+      case 'skipped':
+        return { 
+          icon: <ArrowRight className="h-4 w-4 text-gray-500" />, 
+          text: "Skipped",
+          color: "bg-gray-100 text-gray-800 dark:bg-gray-800/30 dark:text-gray-300"
+        };
+      case 'error':
+        return { 
+          icon: <AlertCircle className="h-4 w-4 text-red-500" />, 
+          text: "Error",
+          color: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300"
+        };
+      default:
+        return null;
+    }
+  };
+
+  // Add this CSS to your component (you can also put it in a separate CSS file)
+
+  const cardStyles = {
+    '.dataset-card': {
+      transition: 'all 0.5s ease-out',
+      opacity: 1,
+      transform: 'scale(1)',
+      maxHeight: '500px', // Adjust to your card's actual max height
+      marginBottom: '16px',
+      overflow: 'hidden',
+    },
+    '.dataset-card.removing': {
+      opacity: 0,
+      transform: 'scale(0.8)',
+      maxHeight: 0,
+      marginBottom: 0,
+      padding: 0,
+    }
   };
 
   return (
@@ -623,41 +951,76 @@ export default function DatasetsPage() {
             <div className="space-y-4">
               {/* Status messages */}
               <div className="p-3 bg-neutral-50 dark:bg-neutral-900 rounded-md border border-neutral-200 dark:border-neutral-800">
-                <div className="flex items-center mb-2">
-                  <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse mr-2"></div>
-                  <h3 className="font-medium">Search Progress</h3>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center">
+                    <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse mr-2"></div>
+                    <h3 className="font-medium">Search Progress</h3>
+                  </div>
+                  {shouldShowAllButton(statusMessages) && (
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className="h-6 text-xs"
+                      onClick={() => setShowAllMessages(prev => !prev)}
+                    >
+                      {showAllMessages ? "Show Less" : "Show All"}
+                    </Button>
+                  )}
                 </div>
                 
-                <div className="space-y-1">
-                  {statusMessages.slice(-3).map((msg) => (
+                <div className="space-y-1 max-h-[200px] overflow-y-auto pr-1 status-message-container">
+                  {(showAllMessages ? statusMessages : statusMessages.slice(-3)).map((msg) => (
                     <div 
                       key={msg.id}
-                      className={`text-sm ${msg.type === 'error' ? 'text-red-500' : 'text-neutral-600 dark:text-neutral-400'}`}
+                      className={`text-sm ${msg.type === 'error' ? 'text-red-500' : 'text-neutral-600 dark:text-neutral-400'} mb-2`}
                     >
-                      {msg.message}
+                      {msg.message && typeof msg.message === 'string' && msg.message.includes("Assessing dataset") ? (
+                        // Format assessment messages in a more conversational style
+                        <div dangerouslySetInnerHTML={{ 
+                          __html: msg.message.replace(/Assessing dataset \d+\/\d+: (.+)/, (match, datasetName) => {
+                            // Extract organization name from the message if available
+                            const orgMatch = msg.message.match(/organization_name":\s*"([^"]+)"/);
+                            const orgName = orgMatch ? orgMatch[1] : "";
+                            
+                            if (orgName) {
+                              return `I'm assessing the dataset <strong>${datasetName}</strong> from <strong>${orgName}</strong>`;
+                            } else {
+                              return `I'm assessing the dataset <strong>${datasetName}</strong>`;
+                            }
+                          })
+                        }} />
+                      ) : msg.message && typeof msg.message === 'string' && msg.message.includes("Pre-assessment:") ? (
+                        // Format pre-assessment messages
+                        <div dangerouslySetInnerHTML={{ 
+                          __html: msg.message.replace(
+                            /Pre-assessment: Dataset is (relevant|not relevant) \(Score: (.+)\)(\s*)Reasoning: (.+)/,
+                            function(match, relevance, score, space, reasoning) {
+                              // Convert first letter of reasoning to lowercase
+                              const lowerCaseReasoning = reasoning.charAt(0).toLowerCase() + reasoning.slice(1);
+                              return `It appears to be <strong>${relevance}</strong> because ${lowerCaseReasoning} I'll download the files for additional insight.`;
+                            }
+                          )
+                        }} />
+                      ) : msg.message && typeof msg.message === 'string' && msg.message.includes("Final assessment:") ? (
+                        // Format final assessment messages
+                        <div dangerouslySetInnerHTML={{ 
+                          __html: msg.message.replace(
+                            /Final assessment: Dataset is (relevant|not relevant) \(Score: (.+)\)(\s*)Reasoning: (.+)/,
+                            function(match, relevance, score, space, reasoning) {
+                              // Convert first letter of reasoning to lowercase
+                              const lowerCaseReasoning = reasoning.charAt(0).toLowerCase() + reasoning.slice(1);
+                              return `Based on the actual files, this dataset is <strong>${relevance}</strong> because ${lowerCaseReasoning}`;
+                            }
+                          )
+                        }} />
+                      ) : (
+                        // Keep other messages as is or handle undefined
+                        msg.message || ""
+                      )}
                     </div>
                   ))}
                 </div>
               </div>
-              
-              {/* Dataset discovery feed */}
-              {discoveryMessages.length > 0 && (
-                <div className="border rounded-md p-3 max-h-60 overflow-y-auto border-green-100 dark:border-green-900/50">
-                  <h3 className="font-medium mb-2">Discovering Datasets ({datasetCount})</h3>
-                  <div className="space-y-2">
-                    {discoveryMessages.map((msg) => (
-                      <div 
-                        key={msg.id}
-                        className="text-sm bg-neutral-50 dark:bg-neutral-900 p-2 rounded animate-fadeIn"
-                      >
-                        {msg.message}
-                        <span className="text-xs text-green-600 ml-2">#{msg.count}</span>
-                      </div>
-                    ))}
-                    <div ref={discoveryEndRef} /> {/* Scroll anchor */}
-                  </div>
-                </div>
-              )}
               
               <p className="text-sm text-neutral-600 dark:text-neutral-400 animate-pulse">
                 {datasets.length > 0 
@@ -668,97 +1031,130 @@ export default function DatasetsPage() {
               {/* Show found datasets while still loading */}
               {datasets.length > 0 && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                  {datasets.map((dataset) => (
-                    <Card 
-                      key={dataset.id}
-                      className="overflow-hidden hover:shadow-md transition-shadow cursor-pointer hover:border-green-200 flex flex-col border-neutral-200 animate-fadeIn"
-                      onClick={() => handleDatasetSelect(dataset)}
-                    >
-                      <CardHeader className="p-3 pb-2">
-                        <div className="flex items-start">
-                          <div className="h-6 w-6 rounded overflow-hidden bg-neutral-200 mr-2 flex-shrink-0">
-                            <img 
-                              src={getImageUrl(dataset)} 
-                              alt={`Dataset logo`}
-                              className="w-full h-full object-cover"
-                              onError={(e) => {
-                                const target = e.target as HTMLImageElement;
-                                target.src = `https://placehold.co/32x32/4F46E5/ffffff?text=D`;
-                              }}
-                            />
+                  {datasets.map((dataset) => {
+                    const statusInfo = getDatasetStatusInfo(dataset);
+                    return (
+                      <Card 
+                        key={dataset.id}
+                        className={`overflow-hidden hover:shadow-md transition-shadow cursor-pointer hover:border-green-200 flex flex-col border-neutral-200 animate-fadeIn relative ${dataset.isRemoving ? 'removing' : ''}`}
+                        onClick={() => handleDatasetSelect(dataset)}
+                      >
+                        {/* Status indicator - if processing */}
+                        {statusInfo && (
+                          <div className={`absolute top-2 right-2 rounded-full px-2 py-0.5 flex items-center text-xs ${statusInfo.color}`}>
+                            {statusInfo.icon}
+                            <span className="ml-1">{statusInfo.text}</span>
                           </div>
-                          <div className="flex-1 min-w-0">
-                            <h3 className="text-sm font-medium leading-tight line-clamp-2 mb-0.5">{dataset.title}</h3>
-                            <p className="text-xs text-neutral-500 truncate">
-                              {dataset.organization?.title || 
-                               dataset.organization_title || 
-                               dataset.organization?.name || 
-                               dataset.organization_name || 
-                               'Unknown source'}
-                            </p>
-                            <div className="mt-1 flex flex-wrap gap-1.5">
-                              <Badge variant="outline" className="text-xs">
-                                Relevance: {Math.round((dataset.relevance_score || dataset.similarity || 0) * 100)}%
-                              </Badge>
+                        )}
+                        
+                        <CardHeader className="p-3 pb-2">
+                          <div className="flex items-start">
+                            <div className="h-6 w-6 rounded overflow-hidden bg-neutral-200 mr-2 flex-shrink-0">
+                              <img 
+                                src={getImageUrl(dataset)} 
+                                alt={`Dataset logo`}
+                                className="w-full h-full object-cover"
+                                onError={(e) => {
+                                  const target = e.target as HTMLImageElement;
+                                  target.src = `https://placehold.co/32x32/4F46E5/ffffff?text=D`;
+                                }}
+                              />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <h3 className="text-sm font-medium leading-tight line-clamp-2 mb-0.5">{dataset.title}</h3>
+                              <p className="text-xs text-neutral-500 truncate">
+                                {dataset.organization?.title || 
+                                 dataset.organization_title || 
+                                 dataset.organization?.name || 
+                                 dataset.organization_name || 
+                                 'Unknown source'}
+                              </p>
+                              <div className="mt-1 flex flex-wrap gap-1.5">
+                                <Badge variant="outline" className="text-xs">
+                                  Relevance: {Math.round((dataset.relevance?.relevance_score || dataset.similarity || 0) * 100)}%
+                                </Badge>
+                                
+                                {/* Add file count badge if available */}
+                                {dataset.file_count && dataset.file_count > 0 && (
+                                  <Badge variant="secondary" className="text-xs">
+                                    {dataset.file_count} {dataset.file_count === 1 ? 'file' : 'files'}
+                                  </Badge>
+                                )}
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      </CardHeader>
-                      
-                      {/* Add a description section */}
-                      <div className="px-3 py-2">
-                        <p className="text-xs text-neutral-600 line-clamp-3">
-                          {dataset.description ? 
-                            (typeof dataset.description === 'string' ? 
-                              dataset.description.replace(/<[^>]*>/g, '') : 
-                              'No description') : 
-                            'No description'}
-                        </p>
-                      </div>
-                      
-                      {/* Add a resources section */}
-                      {dataset.resources && dataset.resources.length > 0 && (
+                        </CardHeader>
+                        
+                        {/* Add a description section */}
                         <div className="px-3 py-2">
-                          <p className="text-xs font-medium">Available formats:</p>
-                          <div className="flex flex-wrap gap-1 mt-1">
-                            {Array.from(new Set(dataset.resources.map(r => r.format?.toUpperCase() || 'UNKNOWN'))).map((format, i) => (
-                              <Badge key={i} variant="secondary" className="text-xs">
-                                {format}
-                              </Badge>
-                            ))}
-                          </div>
+                          <p className="text-xs text-neutral-600 line-clamp-3">
+                            {dataset.description ? 
+                              (typeof dataset.description === 'string' ? 
+                                dataset.description.replace(/<[^>]*>/g, '') : 
+                                'No description') : 
+                              'No description'}
+                          </p>
                         </div>
-                      )}
-                      
-                      <CardFooter className="px-3 py-2 border-t border-neutral-100 mt-auto">
-                        <div className="w-full flex flex-wrap gap-1.5">
-                          {dataset.tags && dataset.tags.length > 0 ? (
-                            <>
-                              {dataset.tags.slice(0, 3).map((tag, index) => (
-                                <Badge 
-                                  key={index} 
-                                  variant="secondary" 
-                                  className="text-xs px-2 py-0.5 h-5 whitespace-nowrap overflow-hidden text-ellipsis max-w-[120px]"
-                                >
-                                  {typeof tag === 'object' && tag.name ? tag.name : String(tag)}
+                        
+                        {/* Add a resources section */}
+                        {dataset.resources && dataset.resources.length > 0 && (
+                          <div className="px-3 py-2">
+                            <p className="text-xs font-medium">Available formats:</p>
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {Array.from(new Set(dataset.resources.map(r => r.format?.toUpperCase() || 'UNKNOWN'))).map((format, i) => (
+                                <Badge key={i} variant="secondary" className="text-xs">
+                                  {format}
                                 </Badge>
                               ))}
-                              {dataset.tags.length > 3 && (
-                                <Badge variant="outline" className="text-xs px-2 py-0.5 h-5">
-                                  +{dataset.tags.length - 3}
-                                </Badge>
-                              )}
-                            </>
-                          ) : (
-                            <span className="text-xs text-neutral-400">No tags</span>
-                          )}
-                        </div>
-                      </CardFooter>
-                    </Card>
-                  ))}
+                            </div>
+                          </div>
+                        )}
+                        
+                        {/* Preview button - if dataset has been downloaded/processed */}
+                        {dataset.preview && (
+                          <div className="px-3 py-2">
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              className="w-full text-xs"
+                              onClick={(e) => handlePreviewClick(e, dataset)}
+                            >
+                              <FileText className="h-3 w-3 mr-1" />
+                              Preview Data
+                            </Button>
+                          </div>
+                        )}
+                        
+                        <CardFooter className="px-3 py-2 border-t border-neutral-100 mt-auto">
+                          <div className="w-full flex flex-wrap gap-1.5">
+                            {dataset.tags && dataset.tags.length > 0 ? (
+                              <>
+                                {dataset.tags.slice(0, 3).map((tag, index) => (
+                                  <Badge 
+                                    key={index} 
+                                    variant="secondary" 
+                                    className="text-xs px-2 py-0.5 h-5 whitespace-nowrap overflow-hidden text-ellipsis max-w-[120px]"
+                                  >
+                                    {typeof tag === 'object' && tag.name ? tag.name : String(tag)}
+                                  </Badge>
+                                ))}
+                                {dataset.tags.length > 3 && (
+                                  <Badge variant="outline" className="text-xs px-2 py-0.5 h-5">
+                                    +{dataset.tags.length - 3}
+                                  </Badge>
+                                )}
+                              </>
+                            ) : (
+                              <span className="text-xs text-neutral-400">No tags</span>
+                            )}
+                          </div>
+                        </CardFooter>
+                      </Card>
+                    );
+                  })}
                   
                   {/* Show skeletons for more datasets coming */}
-                  {loading && datasets.length > 0 && (
+                  {loading && datasets.length > 0 && !datasets.some(d => d.status) && (
                     <Card className="overflow-hidden border-neutral-200 animate-pulse">
                       <CardHeader className="p-3 pb-2">
                         <div className="flex items-start">
@@ -867,35 +1263,73 @@ export default function DatasetsPage() {
                             ))}
                           </div>
                           
-                          {/* Query variations */}
-                          {queryVariations.length > 0 && (
-                            <div className="mt-3">
-                              <h4 className="text-xs font-medium mb-1 text-green-900 dark:text-green-400">Query Variations</h4>
-                              <div className="flex flex-wrap gap-1">
-                                {queryVariations.map((variation, index) => (
-                                  <Badge 
-                                    key={index} 
-                                    variant={index === 0 ? "default" : "outline"} 
-                                    className={`text-xs ${index === 0 ? 'bg-green-600' : 'text-green-700 border-green-300 dark:border-green-700'}`}
-                                  >
-                                    {variation}
-                                  </Badge>
-                                ))}
-                              </div>
-                            </div>
-                          )}
+                
                         </div>
                         
                         {/* Status messages */}
                         <div className="p-3 bg-white dark:bg-neutral-800">
-                          <h3 className="font-medium text-sm mb-2">Search Progress</h3>
-                          <div className="space-y-1">
-                            {statusMessages.map((msg) => (
+                          <div className="flex items-center justify-between mb-2">
+                            <h3 className="font-medium text-sm">Search Progress</h3>
+                            {shouldShowAllButton(statusMessages) && (
+                              <Button 
+                                variant="ghost" 
+                                size="sm" 
+                                className="h-6 text-xs"
+                                onClick={() => setShowAllMessages(prev => !prev)}
+                              >
+                                {showAllMessages ? "Show Less" : "Show All"}
+                              </Button>
+                            )}
+                          </div>
+                          <div className="space-y-1 max-h-[300px] overflow-y-auto pr-1 status-message-container">
+                            {(showAllMessages ? statusMessages : statusMessages.slice(-3)).map((msg) => (
                               <div 
                                 key={msg.id}
-                                className={`text-sm ${msg.type === 'error' ? 'text-red-500' : 'text-neutral-600 dark:text-neutral-400'}`}
+                                className={`text-sm ${msg.type === 'error' ? 'text-red-500' : 'text-neutral-600 dark:text-neutral-400'} mb-2`}
                               >
-                                {msg.message}
+                                {msg.message && typeof msg.message === 'string' && msg.message.includes("Assessing dataset") ? (
+                                  // Format assessment messages in a more conversational style
+                                  <div dangerouslySetInnerHTML={{ 
+                                    __html: msg.message.replace(/Assessing dataset \d+\/\d+: (.+)/, (match, datasetName) => {
+                                      // Extract organization name from the message if available
+                                      const orgMatch = msg.message.match(/organization_name":\s*"([^"]+)"/);
+                                      const orgName = orgMatch ? orgMatch[1] : "";
+                                      
+                                      if (orgName) {
+                                        return `I'm assessing the dataset <strong>${datasetName}</strong> from <strong>${orgName}</strong>`;
+                                      } else {
+                                        return `I'm assessing the dataset <strong>${datasetName}</strong>`;
+                                      }
+                                    })
+                                  }} />
+                                ) : msg.message && typeof msg.message === 'string' && msg.message.includes("Pre-assessment:") ? (
+                                  // Format pre-assessment messages
+                                  <div dangerouslySetInnerHTML={{ 
+                                    __html: msg.message.replace(
+                                      /Pre-assessment: Dataset is (relevant|not relevant) \(Score: (.+)\)(\s*)Reasoning: (.+)/,
+                                      function(match, relevance, score, space, reasoning) {
+                                        // Convert first letter of reasoning to lowercase
+                                        const lowerCaseReasoning = reasoning.charAt(0).toLowerCase() + reasoning.slice(1);
+                                        return `It appears to be <strong>${relevance}</strong> because ${lowerCaseReasoning} I'll download the files for additional insight.`;
+                                      }
+                                    )
+                                  }} />
+                                ) : msg.message && typeof msg.message === 'string' && msg.message.includes("Final assessment:") ? (
+                                  // Format final assessment messages
+                                  <div dangerouslySetInnerHTML={{ 
+                                    __html: msg.message.replace(
+                                      /Final assessment: Dataset is (relevant|not relevant) \(Score: (.+)\)(\s*)Reasoning: (.+)/,
+                                      function(match, relevance, score, space, reasoning) {
+                                        // Convert first letter of reasoning to lowercase
+                                        const lowerCaseReasoning = reasoning.charAt(0).toLowerCase() + reasoning.slice(1);
+                                        return `Based on the actual files, this dataset is <strong>${relevance}</strong> because ${lowerCaseReasoning}`;
+                                      }
+                                    )
+                                  }} />
+                                ) : (
+                                  // Keep other messages as is or handle undefined
+                                  msg.message || ""
+                                )}
                               </div>
                             ))}
                           </div>
@@ -908,7 +1342,7 @@ export default function DatasetsPage() {
                     {datasets.map((dataset) => (
                       <Card 
                         key={dataset.id}
-                        className="overflow-hidden hover:shadow-md transition-shadow cursor-pointer hover:border-green-200 flex flex-col border-neutral-200"
+                        className={`overflow-hidden hover:shadow-md transition-shadow cursor-pointer hover:border-green-200 flex flex-col border-neutral-200 ${dataset.isRemoving ? 'removing' : ''}`}
                         onClick={() => handleDatasetSelect(dataset)}
                       >
                         <CardHeader className="p-3 pb-2">
@@ -935,7 +1369,7 @@ export default function DatasetsPage() {
                               </p>
                               <div className="mt-1 flex flex-wrap gap-1.5">
                                 <Badge variant="outline" className="text-xs">
-                                  Relevance: {Math.round((dataset.relevance_score || dataset.similarity || 0) * 100)}%
+                                  Relevance: {Math.round((dataset.relevance?.relevance_score || dataset.similarity || 0) * 100)}%
                                 </Badge>
                               </div>
                             </div>
@@ -1023,7 +1457,154 @@ export default function DatasetsPage() {
         .animate-fadeIn {
           animation: fadeIn 0.3s ease-in-out forwards;
         }
+        
+        /* Custom scrollbar styles */
+        .space-y-1.max-h-[200px], .space-y-1.max-h-[300px] {
+          scrollbar-width: thin;
+          scrollbar-color: rgba(156, 163, 175, 0.3) transparent;
+        }
+        
+        .space-y-1.max-h-[200px]::-webkit-scrollbar, .space-y-1.max-h-[300px]::-webkit-scrollbar {
+          width: 6px;
+        }
+        
+        .space-y-1.max-h-[200px]::-webkit-scrollbar-track, .space-y-1.max-h-[300px]::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        
+        .space-y-1.max-h-[200px]::-webkit-scrollbar-thumb, .space-y-1.max-h-[300px]::-webkit-scrollbar-thumb {
+          background-color: rgba(156, 163, 175, 0.3);
+          border-radius: 20px;
+        }
       `}</style>
+
+      {/* Dataset Preview Dialog */}
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle>{selectedPreview?.title}</DialogTitle>
+            <DialogDescription>
+              {selectedPreview?.preview?.file_name || "Dataset Preview"}
+            </DialogDescription>
+          </DialogHeader>
+          
+          <ScrollArea className="flex-1 overflow-auto p-4">
+            {selectedPreview?.preview?.type === 'pdf' ? (
+              <div className="space-y-4">
+                <div className="flex items-center space-x-2 text-sm text-muted-foreground">
+                  <FileText className="h-4 w-4" />
+                  <span>PDF Document • {selectedPreview?.preview?.num_pages} pages</span>
+                </div>
+                
+                {selectedPreview?.preview?.enhanced_summary && (
+                  <div className="space-y-2">
+                    <h3 className="text-sm font-medium">Document Summary</h3>
+                    <p className="text-sm">{selectedPreview?.preview?.enhanced_summary}</p>
+                  </div>
+                )}
+                
+                {selectedPreview?.preview?.key_points && selectedPreview?.preview?.key_points.length > 0 && (
+                  <div className="space-y-2">
+                    <h3 className="text-sm font-medium">Key Points</h3>
+                    <ul className="list-disc pl-5 space-y-1">
+                      {selectedPreview?.preview?.key_points.map((point, i) => (
+                        <li key={i} className="text-sm">{point}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                
+                <div className="space-y-2">
+                  <h3 className="text-sm font-medium">Text Sample</h3>
+                  <div className="bg-muted p-3 rounded-md text-sm font-mono whitespace-pre-wrap">
+                    {selectedPreview?.preview?.text_sample || "No text sample available"}
+                  </div>
+                </div>
+              </div>
+            ) : selectedPreview?.preview?.type === 'tabular' ? (
+              <div className="space-y-4">
+                <div className="flex items-center space-x-2 text-sm text-muted-foreground">
+                  <Database className="h-4 w-4" />
+                  <span>
+                    Tabular Data • {selectedPreview?.preview?.row_count} rows • {selectedPreview?.preview?.column_count} columns
+                  </span>
+                </div>
+                
+                <div className="space-y-2">
+                  <h3 className="text-sm font-medium">Data Sample</h3>
+                  {selectedPreview?.preview?.sample_data ? (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          {selectedPreview?.preview?.columns?.map((col, i) => (
+                            <TableHead key={i} className="text-xs">{col}</TableHead>
+                          ))}
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {selectedPreview?.preview?.sample_data.map((row, i) => (
+                          <TableRow key={i}>
+                            {selectedPreview?.preview?.columns?.map((col, j) => (
+                              <TableCell key={j} className="text-xs p-2">{row[col]?.toString() || ""}</TableCell>
+                            ))}
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">No sample data available</p>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="text-center p-8 text-muted-foreground">
+                <p>No preview available for this dataset</p>
+              </div>
+            )}
+            
+            {/* Assessment information */}
+            {selectedPreview?.relevance && (
+              <div className="mt-6 border-t pt-4 space-y-2">
+                <h3 className="text-sm font-medium">Relevance Assessment</h3>
+                <div className={`p-3 rounded-md ${
+                  selectedPreview.relevance.is_relevant 
+                    ? "bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-900/50" 
+                    : "bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-900/50"
+                }`}>
+                  <div className="flex items-center mb-2">
+                    {selectedPreview.relevance.is_relevant ? (
+                      <CheckCircle2 className="h-4 w-4 text-green-500 mr-2" />
+                    ) : (
+                      <AlertCircle className="h-4 w-4 text-orange-500 mr-2" />
+                    )}
+                    <p className="text-sm font-medium">
+                      {selectedPreview.relevance.is_relevant ? "Relevant" : "Not Relevant"} 
+                      <span className="ml-1 font-normal">
+                        (Score: {selectedPreview.relevance.relevance_score.toFixed(2)})
+                      </span>
+                    </p>
+                  </div>
+                  <p className="text-sm">{selectedPreview.relevance.reasoning}</p>
+                </div>
+              </div>
+            )}
+          </ScrollArea>
+          
+          <DialogFooter>
+            <Button 
+              variant="secondary" 
+              onClick={() => setPreviewOpen(false)}
+            >
+              Close
+            </Button>
+            <Button
+              onClick={() => handleDatasetSelect(selectedPreview!)}
+            >
+              Use Dataset
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

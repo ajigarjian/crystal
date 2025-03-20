@@ -4,7 +4,7 @@ from rest_framework.decorators import api_view, action
 from rest_framework.response import Response
 from factchecker.models import DatasetCatalog, WaitlistEntry, DatasetResource
 from factchecker.serializers import DatasetCatalogSerializer
-from factchecker.search.faiss_search import vector_search_datasets_faiss as vector_search_datasets
+from factchecker.search.pinecone_search import vector_search_datasets_pinecone as vector_search_datasets
 from factchecker.search import search_datasets
 from factchecker.processing.analysis import load_datafile, assess_datafile_relevance, extract_relevant_data, analyze_dataset_overview
 from factchecker.presentation.cli_tool_functions import summarize_findings, summarize_findings_alternate
@@ -25,6 +25,7 @@ from django.http import JsonResponse, StreamingHttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from corsheaders.defaults import default_headers
 from django.db import models
+import pandas as pd
 
 # Create a logger for the API
 logger = logging.getLogger("factchecker_api")
@@ -455,6 +456,7 @@ def stream_search_datasets(request):
     """
     Streaming API endpoint that searches for datasets matching a query.
     Returns datasets incrementally as they are found.
+    Also downloads, loads, and analyzes datasets for relevance after search.
     """
     print("Streaming search API endpoint called")
     
@@ -469,6 +471,7 @@ def stream_search_datasets(request):
     similarity_threshold = float(request.data.get('similarity_threshold', 0.3))
     search_method = request.data.get('search_method', None)  # 'vector', 'keyword', or None for hybrid
     max_results = int(request.data.get('max_results', 15))
+    relevance_threshold = float(request.data.get('relevance_threshold', 0.4))
     
     print(f"Parameters: method={search_method}, threshold={similarity_threshold}, max_results={max_results}")
     logger.info(f"[API] Received streaming search request: '{query}' (method: {search_method}, threshold: {similarity_threshold})")
@@ -481,9 +484,9 @@ def stream_search_datasets(request):
             # Send initial message
             yield json.dumps({
                 'type': 'status',
-                'message': f'Starting search for relevant datasets about "{query}"...',
+                'message': f'I\'m starting my search for relevant datasets about "{query}"...',
                 'timestamp': time.time() - start_time
-            }) + '\n'
+            }, cls=NumpyEncoder) + '\n'
             
             # Initialize API key for Data.gov
             from django.conf import settings
@@ -492,9 +495,9 @@ def stream_search_datasets(request):
             if not gov_api_key:
                 yield json.dumps({
                     'type': 'error',
-                    'message': 'API key configuration issue. Please try again later.',
+                    'message': 'I\'m having trouble with the API key configuration. Please try again later.',
                     'timestamp': time.time() - start_time
-                }) + '\n'
+                }, cls=NumpyEncoder) + '\n'
                 return
             
             # Higher threshold for keyword search
@@ -551,88 +554,63 @@ def stream_search_datasets(request):
                 # Yield status update about finding this dataset
                 yield json.dumps({
                     'type': 'discovery',
-                    'message': f'Found dataset: {dataset_title}',
+                    'message': f'I\'ve found a dataset: {dataset_title}',
                     'count': all_datasets_count,
                     'timestamp': time.time() - start_time
-                }) + '\n'
+                }, cls=NumpyEncoder) + '\n'
                 
                 # Then yield the enriched dataset
                 yield json.dumps({
                     'type': 'dataset',
                     'data': dataset,
                     'timestamp': time.time() - start_time
-                }) + '\n'
+                }, cls=NumpyEncoder) + '\n'
             
             # Vector search with streaming results
             if search_method in ['vector', None]:  # Vector or hybrid
                 yield json.dumps({
                     'type': 'status',
-                    'message': 'Searching government databases...',
+                    'message': 'I\'m searching through government databases...',
                     'timestamp': time.time() - start_time
-                }) + '\n'
+                }, cls=NumpyEncoder) + '\n'
                 
-                # Import the parallel search utility
-                from factchecker.search.search_utils import generate_similar_queries
-                from concurrent.futures import ThreadPoolExecutor, as_completed
-                
-                # Generate query variations
-                queries = generate_similar_queries(query)
+                # Import and use single_search instead of parallel_search
+                from factchecker.search.search_utils import single_search
                 
                 # Keep track of seen dataset IDs
                 seen_vector_ids = set()
                 
-                # Function to search with a single query variation
-                def search_with_variation(variation):
-                    try:
-                        results = vector_search_datasets(
-                            variation,
-                            similarity_threshold=similarity_threshold,
-                            max_results=max_results,
-                            verbose=False
-                        )
-                        
-                        # Add the query variation to each result
-                        for result in results:
-                            result['query_variation'] = variation
-                            
-                        return results
-                    except Exception as e:
-                        print(f"Error searching with query '{variation}': {e}")
-                        return []
+                # Perform single search
+                results = single_search(
+                    query,
+                    search_function=vector_search_datasets,
+                    similarity_threshold=similarity_threshold,
+                    max_results=max_results,
+                    verbose=False
+                )
                 
-                # Run searches in parallel but yield results as they come in
-                with ThreadPoolExecutor(max_workers=min(len(queries), 5)) as executor:
-                    future_to_query = {executor.submit(search_with_variation, q): q for q in queries}
-                    
-                    for future in as_completed(future_to_query):
-                        query_variation = future_to_query[future]
-                        try:
-                            results = future.result()
-                            
-                            # Process and yield each result if not seen before
-                            for result in results:
-                                if result['id'] not in seen_vector_ids:
-                                    seen_vector_ids.add(result['id'])
-                                    vector_datasets.append(result)
-                                    yield from process_and_yield_dataset(result, 'vector')
-                        except Exception as e:
-                            print(f"Error processing results for query '{query_variation}': {e}")
+                # Process and yield each result
+                for result in results:
+                    if result['id'] not in seen_vector_ids:
+                        seen_vector_ids.add(result['id'])
+                        vector_datasets.append(result)
+                        yield from process_and_yield_dataset(result, 'vector')
                 
                 # Status update after vector search
                 if vector_datasets:
                     yield json.dumps({
                         'type': 'status',
-                        'message': f'Found {len(vector_datasets)} datasets that might be relevant',
+                        'message': f'I\'ve found {len(vector_datasets)} datasets that might be relevant to your query.',
                         'timestamp': time.time() - start_time
-                    }) + '\n'
+                    }, cls=NumpyEncoder) + '\n'
             
             # Keyword search with streaming results
             if search_method in ['keyword', None]:  # Keyword or hybrid
                 yield json.dumps({
                     'type': 'status',
-                    'message': 'Checking additional government data sources...',
+                    'message': 'I\'m checking additional government data sources...',
                     'timestamp': time.time() - start_time
-                }) + '\n'
+                }, cls=NumpyEncoder) + '\n'
                 
                 try:
                     # Get keyword search results
@@ -657,7 +635,7 @@ def stream_search_datasets(request):
                                             'type': 'dataset_update',
                                             'data': vd,
                                             'timestamp': time.time() - start_time
-                                        }) + '\n'
+                                        }, cls=NumpyEncoder) + '\n'
                                         break
                         
                         # Don't share technical details about vector/keyword distinction
@@ -665,9 +643,9 @@ def stream_search_datasets(request):
                         if keyword_datasets:
                             yield json.dumps({
                                 'type': 'status',
-                                'message': 'Discovering additional datasets...',
+                                'message': 'I\'m discovering additional datasets that might help answer your question...',
                                 'timestamp': time.time() - start_time
-                            }) + '\n'
+                            }, cls=NumpyEncoder) + '\n'
                         
                         # Process and yield only new keyword datasets
                         for dataset in keyword_datasets:
@@ -680,12 +658,12 @@ def stream_search_datasets(request):
                 except Exception as e:
                     yield json.dumps({
                         'type': 'error',
-                        'message': f'Error finding additional datasets: {str(e)}',
+                        'message': f'I ran into a problem finding additional datasets: {str(e)}',
                         'timestamp': time.time() - start_time
-                    }) + '\n'
+                    }, cls=NumpyEncoder) + '\n'
             
-            # Calculate execution time and send completion message
-            execution_time = time.time() - start_time
+            # Calculate execution time and send search completion message
+            search_execution_time = time.time() - start_time
             
             # Determine total unique datasets
             if search_method is None:  # hybrid search
@@ -703,19 +681,326 @@ def stream_search_datasets(request):
                 total_count = len(all_datasets)
             else:
                 # Either vector or keyword only
-                total_count = len(vector_datasets if search_method == 'vector' else keyword_datasets)
+                all_datasets = vector_datasets if search_method == 'vector' else keyword_datasets
+                total_count = len(all_datasets)
+            
+            # Send search phase completion message
+            yield json.dumps({
+                'type': 'phase_complete',
+                'phase': 'search',
+                'data': {
+                    'query': query,
+                    'execution_time': search_execution_time,
+                    'total_count': total_count
+                },
+                'message': f'I\'ve completed my search! I found {total_count} datasets in {search_execution_time:.1f} seconds.',
+                'timestamp': search_execution_time
+            }, cls=NumpyEncoder) + '\n'
+            
+            # Now begin downloading and analyzing the datasets
+            yield json.dumps({
+                'type': 'status',
+                'message': 'I\'m now beginning my analysis of the discovered datasets...',
+                'timestamp': time.time() - start_time
+            }, cls=NumpyEncoder) + '\n'
+            
+            # Set up output directory
+            output_dir = "downloads"
+            if not os.path.exists(output_dir):
+                os.makedirs(output_dir)
+            
+            # For each dataset, perform downloading and relevance assessment
+            for dataset_index, dataset in enumerate(all_datasets):
+                dataset_id = dataset.get('id', 'unknown')
+                dataset_title = dataset.get('title', 'Unknown Dataset')
+                current_dataset_number = dataset_index + 1
+                
+                # Simpler status update about starting to process this dataset
+                yield json.dumps({
+                    'type': 'status',
+                    'message': f'I\'m assessing dataset {current_dataset_number}/{len(all_datasets)}: {dataset_title}',
+                    'timestamp': time.time() - start_time
+                }, cls=NumpyEncoder) + '\n'
+                
+                # Update UI that we're starting to process this dataset (for the frontend dataset card)
+                yield json.dumps({
+                    'type': 'processing_start',
+                    'dataset_id': dataset_id,
+                    'progress': {
+                        'current': current_dataset_number,
+                        'total': len(all_datasets),
+                        'status': 'starting'
+                    },
+                    'timestamp': time.time() - start_time
+                }, cls=NumpyEncoder) + '\n'
+                
+                # 1. Pre-download relevance assessment
+                from factchecker.processing.analysis.search_result_analyzer import assess_datafile_relevance_predownload
+                try:
+                    is_relevant_predownload, relevance_score_predownload, reasoning_predownload = assess_datafile_relevance_predownload(
+                        query, 
+                        dataset,
+                        relevance_threshold=0.4
+                    )
+                    
+                    # Update dataset with pre-assessment results
+                    dataset['pre_assessment'] = {
+                        'is_relevant': is_relevant_predownload,
+                        'relevance_score': relevance_score_predownload,
+                        'reasoning': reasoning_predownload
+                    }
+                    
+                    # Simple status update about relevance with reasoning
+                    relevance_message = "relevant" if is_relevant_predownload else "not relevant"
+                    yield json.dumps({
+                        'type': 'status',
+                        'message': f'I\'ve completed my initial assessment: This dataset appears to be {relevance_message}.\nReasoning: {reasoning_predownload}',
+                        'timestamp': time.time() - start_time
+                    }, cls=NumpyEncoder) + '\n'
+                    
+                    # Store relevance assessment and continue with regular updates
+                    dataset['relevance'] = {
+                        'is_relevant': is_relevant_predownload,
+                        'relevance_score': relevance_score_predownload,
+                        'reasoning': reasoning_predownload
+                    }
+                    
+                    # Update dataset with assessment and mark as complete
+                    yield json.dumps({
+                        'type': 'dataset_update',
+                        'data': {
+                            'id': dataset_id,
+                            'status': 'relevant' if is_relevant_predownload else 'not_relevant',
+                            'relevance': {
+                                'is_relevant': is_relevant_predownload,
+                                'relevance_score': relevance_score_predownload,
+                                'reasoning': reasoning_predownload
+                            },
+                            'processing_complete': True
+                        },
+                        'timestamp': time.time() - start_time
+                    }, cls=NumpyEncoder) + '\n'
+                    
+                except Exception as e:
+                    print(f"Error assessing relevance: {e}")
+                    yield json.dumps({
+                        'type': 'dataset_update',
+                        'data': {
+                            'id': dataset_id,
+                            'status': 'error',
+                            'error': f'Assessment error: {str(e)}',
+                            'processing_complete': True
+                        },
+                        'timestamp': time.time() - start_time
+                    }, cls=NumpyEncoder) + '\n'
+                    continue
+                
+                # If dataset is not relevant, skip downloading
+                if not is_relevant_predownload:
+                    continue
+                
+                # 2. Download dataset resources
+                yield json.dumps({
+                    'type': 'status',
+                    'dataset_id': dataset_id,
+                    'message': f'I\'m downloading the dataset resources now...',
+                    'timestamp': time.time() - start_time
+                }, cls=NumpyEncoder) + '\n'
+
+                # Update dataset status
+                yield json.dumps({
+                    'type': 'dataset_update',
+                    'data': {
+                        'id': dataset_id,
+                        'status': 'downloading'
+                    },
+                    'timestamp': time.time() - start_time
+                }, cls=NumpyEncoder) + '\n'
+
+                # Download all resources
+                from factchecker.download import download_all_resources
+                output_paths = download_all_resources(gov_api_key, dataset_id, output_dir=output_dir)
+
+                if not output_paths:
+                    yield json.dumps({
+                        'type': 'dataset_update',
+                        'data': {
+                            'id': dataset_id,
+                            'status': 'error',
+                            'error': 'Download failed',
+                            'processing_complete': True
+                        },
+                        'message': f'I couldn\'t download {dataset_title}. I\'ll skip this dataset and continue with others.',
+                        'timestamp': time.time() - start_time
+                    }, cls=NumpyEncoder) + '\n'
+                    continue
+
+                # Add file paths to dataset
+                dataset['file_paths'] = output_paths
+                dataset['file_count'] = len(output_paths)
+
+                # Update UI with download results
+                yield json.dumps({
+                    'type': 'download_complete',
+                    'dataset_id': dataset_id,
+                    'file_count': len(output_paths),
+                    'files': [os.path.basename(path) for path in output_paths],
+                    'timestamp': time.time() - start_time
+                }, cls=NumpyEncoder) + '\n'
+
+                # 3. Load primary dataset file
+                primary_file_path = output_paths[0]  # Use the first file by default
+                file_analysis = None
+
+                # Analyze files for multi-file datasets
+                if len(output_paths) > 1:
+                    yield json.dumps({
+                        'type': 'status',
+                        'dataset_id': dataset_id,
+                        'message': f'I\'m analyzing multiple files within this dataset...',
+                        'timestamp': time.time() - start_time
+                    }, cls=NumpyEncoder) + '\n'
+                    
+                    # Update dataset status
+                    yield json.dumps({
+                        'type': 'dataset_update',
+                        'data': {
+                            'id': dataset_id,
+                            'status': 'analyzing_files'
+                        },
+                        'timestamp': time.time() - start_time
+                    }, cls=NumpyEncoder) + '\n'
+                    
+                    # Analyze dataset files
+                    from factchecker.processing.analysis.dataset_analyzer import analyze_dataset_files
+                    file_analysis = analyze_dataset_files(output_paths, query, dataset)
+                    
+                    # Check for suggested files
+                    if "suggested_files" in file_analysis and file_analysis["suggested_files"]:
+                        suggested_files = file_analysis["suggested_files"]
+                        
+                        # Find the paths for the suggested files
+                        suggested_file_paths = []
+                        for suggested_file in suggested_files:
+                            matching_paths = [path for path in output_paths if os.path.basename(path) == suggested_file]
+                            if matching_paths:
+                                suggested_file_paths.append(matching_paths[0])
+                        
+                        if suggested_file_paths:
+                            primary_file_path = suggested_file_paths[0]
+
+                # Update dataset status to loading
+                yield json.dumps({
+                    'type': 'status',
+                    'dataset_id': dataset_id,
+                    'message': f'I\'m loading the dataset contents for analysis...',
+                    'timestamp': time.time() - start_time
+                }, cls=NumpyEncoder) + '\n'
+
+                # Update dataset status
+                yield json.dumps({
+                    'type': 'dataset_update',
+                    'data': {
+                        'id': dataset_id,
+                        'status': 'loading',
+                        'primary_file': os.path.basename(primary_file_path)
+                    },
+                    'timestamp': time.time() - start_time
+                }, cls=NumpyEncoder) + '\n'
+
+                # Load the primary dataset file
+                from factchecker.processing.analysis import load_datafile
+                datafile_content = load_datafile(primary_file_path)
+
+                # Determine if it's a PDF or DataFrame
+                is_pdf = isinstance(datafile_content, dict) and datafile_content.get('type') == 'pdf'
+
+                if is_pdf:
+                    # Handle PDF document
+                    dataset_info = {
+                        "id": dataset["id"],
+                        "title": dataset["title"],
+                        "description": dataset.get("description", ""),
+                        "similarity": dataset.get("similarity", 0),
+                        "file_path": primary_file_path,
+                        "all_file_paths": output_paths,
+                        "file_analysis": file_analysis,
+                        "document_type": "pdf",
+                        "num_pages": datafile_content.get("num_pages", 0),
+                        "text_sample": datafile_content.get("text_sample", "")[:200] + "..."
+                    }
+                else:
+                    # Handle DataFrame (tabular data)
+                    dataset_info = {
+                        "id": dataset["id"],
+                        "title": dataset["title"],
+                        "description": dataset.get("description", ""),
+                        "similarity": dataset.get("similarity", 0),
+                        "file_path": primary_file_path,
+                        "all_file_paths": output_paths,
+                        "file_analysis": file_analysis,
+                        "row_count": len(datafile_content),
+                        "column_count": len(datafile_content.columns),
+                        "columns": list(datafile_content.columns)
+                    }
+
+                # Now continue with the assessment since datafile_content is defined
+                
+                # 4. Assess dataset relevance
+                from factchecker.processing.analysis import assess_datafile_relevance
+                is_relevant, relevance_score, reasoning = assess_datafile_relevance(
+                    datafile_content, 
+                    query, 
+                    dataset_info,
+                    relevance_threshold
+                )
+                
+                # Simple status update about final relevance with reasoning
+                relevance_message = "relevant" if is_relevant else "not relevant"
+                yield json.dumps({
+                    'type': 'status',
+                    'message': f'I\'ve completed my final assessment: This dataset is {relevance_message}.\nReasoning: {reasoning}',
+                    'timestamp': time.time() - start_time
+                }, cls=NumpyEncoder) + '\n'
+                
+                # Store relevance assessment and continue with regular updates
+                dataset['relevance'] = {
+                    'is_relevant': is_relevant,
+                    'relevance_score': relevance_score,
+                    'reasoning': reasoning
+                }
+                
+                # Update dataset with assessment and mark as complete
+                yield json.dumps({
+                    'type': 'dataset_update',
+                    'data': {
+                        'id': dataset_id,
+                        'status': 'relevant' if is_relevant else 'not_relevant',
+                        'relevance': {
+                            'is_relevant': is_relevant,
+                            'relevance_score': relevance_score,
+                            'reasoning': reasoning
+                        },
+                        'processing_complete': True
+                    },
+                    'timestamp': time.time() - start_time
+                }, cls=NumpyEncoder) + '\n'
+            
+            # Final execution time (this is properly indented now, outside the for loop)
+            final_execution_time = time.time() - start_time
             
             # Send completion message
             yield json.dumps({
                 'type': 'complete',
                 'data': {
                     'query': query,
-                    'execution_time': execution_time,
-                    'total_count': total_count
+                    'execution_time': final_execution_time,
+                    'total_count': total_count,
+                    'processed_count': len(all_datasets)
                 },
-                'message': f'Search complete. Found {total_count} datasets in {execution_time:.1f} seconds.',
-                'timestamp': execution_time
-            }) + '\n'
+                'message': f'I\'ve completed my analysis! I processed {len(all_datasets)} datasets in {final_execution_time:.1f} seconds.',
+                'timestamp': final_execution_time
+            }, cls=NumpyEncoder) + '\n'
             
         except Exception as e:
             # Send error message
@@ -726,10 +1011,10 @@ def stream_search_datasets(request):
             
             yield json.dumps({
                 'type': 'error',
-                'message': "Sorry, we encountered an error while searching. Please try again.",
+                'message': "I'm sorry, I encountered an error while processing your request. Please try again.",
                 'details': error_message,
                 'timestamp': time.time() - start_time
-            }) + '\n'
+            }, cls=NumpyEncoder) + '\n'
     
     # Create and return the streaming response
     response = StreamingHttpResponse(
