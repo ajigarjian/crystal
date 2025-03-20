@@ -268,37 +268,46 @@ class Command(BaseCommand):
             self.stdout.write(self.style.ERROR(f'Error fetching variables metadata: {str(e)}'))
     
     def _import_groups_metadata(self, dataset):
-        """Import groups metadata for the dataset"""
-        if not dataset:
-            return
-        
-        url = f"https://api.census.gov/data/{dataset.vintage}/{dataset.dataset_path}/groups.json"
+        """Import group metadata from the Census API"""
+        self.stdout.write('4. Importing groups metadata...')
         
         try:
+            # Define base_url if it's not already defined in the class
+            base_url = "https://api.census.gov/data/"
+            
+            # Get groups data
+            url = f"{base_url}{dataset.vintage}/{dataset.dataset_path}/groups.json"
             response = requests.get(url)
             response.raise_for_status()
             data = response.json()
             
-            # Process each group
-            for group_name, group_info in data.get('groups', {}).items():
-                # Create or update group
-                group, created = CensusGroup.objects.update_or_create(
-                    dataset=dataset,
-                    group_name=group_name,
-                    defaults={
-                        'title': group_info.get('name', ''),
-                        'description': group_info.get('description', ''),
-                        'universe': group_info.get('universe', '')
-                    }
-                )
-                
-                action = 'Created' if created else 'Updated'
-                self.stdout.write(f'  {action} group: {group_name}')
+            # Process groups (which is a list of dictionaries)
+            groups_to_create = []
             
-            self.stdout.write(self.style.SUCCESS(f'Imported {data.get("groups", {}).__len__()} groups'))
-        
-        except requests.exceptions.RequestException as e:
-            self.stdout.write(self.style.ERROR(f'Error fetching groups metadata: {str(e)}'))
+            for group_info in data.get('groups', []):
+                name = group_info.get('name', '')
+                description = group_info.get('description', '')
+                variables_url = group_info.get('variables', '')
+                
+                groups_to_create.append(
+                    CensusGroup(
+                        dataset=dataset,
+                        name=name,
+                        description=description,
+                        variables_url=variables_url
+                    )
+                )
+            
+            # Bulk create groups
+            CensusGroup.objects.bulk_create(
+                groups_to_create,
+                ignore_conflicts=True
+            )
+            
+            self.stdout.write(self.style.SUCCESS(f'Imported {len(groups_to_create)} groups'))
+            
+        except Exception as e:
+            self.stdout.write(self.style.ERROR(f'Error importing groups: {str(e)}'))
     
     def _import_tags_metadata(self, dataset):
         """Import tags metadata for the dataset"""

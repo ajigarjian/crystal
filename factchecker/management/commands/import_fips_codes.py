@@ -1,5 +1,6 @@
 import csv
 import requests
+import os
 from io import StringIO
 from django.core.management.base import BaseCommand
 from factchecker.models import CensusFIPSCode
@@ -14,9 +15,15 @@ class Command(BaseCommand):
             action='store_true',
             help='Clear existing FIPS codes before importing'
         )
+        parser.add_argument(
+            '--local-file',
+            type=str,
+            help='Path to local Excel file with FIPS codes'
+        )
 
     def handle(self, *args, **options):
         clear_data = options.get('clear', False)
+        local_file = options.get('local_file')
         
         self.stdout.write(self.style.SUCCESS('Starting import of FIPS codes'))
         
@@ -31,7 +38,13 @@ class Command(BaseCommand):
         
         # Import county FIPS codes
         self.stdout.write('2. Importing county FIPS codes...')
-        self._import_county_fips()
+        if local_file and os.path.exists(local_file):
+            self.stdout.write(f'Using local file: {local_file}')
+            self._import_county_fips_from_excel(local_file)
+        else:
+            if local_file:
+                self.stdout.write(self.style.WARNING(f'Local file not found: {local_file}'))
+            self._import_county_fips()
         
         # Print stats
         state_count = CensusFIPSCode.objects.filter(geo_type='state').count()
@@ -122,6 +135,73 @@ class Command(BaseCommand):
         )
         
         self.stdout.write(self.style.SUCCESS(f'Imported {len(states_to_create)} state FIPS codes'))
+    
+    def _import_county_fips_from_excel(self, excel_file_path):
+        """Import county FIPS codes from a local Excel file"""
+        try:
+            import pandas as pd
+            
+            # Read Excel file with header on row 5 (0-indexed would be 4)
+            df = pd.read_excel(excel_file_path, header=4)
+            
+            # Filter to county level (050)
+            counties = df[df['Summary Level'] == 50]
+            
+            # If no counties found with integer 50, try with string '050'
+            if len(counties) == 0:
+                counties = df[df['Summary Level'] == '050']
+            
+            # If still no counties, examine DataFrame structure for debugging
+            if len(counties) == 0:
+                self.stdout.write(self.style.WARNING(f"No county records found. DataFrame columns: {df.columns.tolist()}"))
+                self.stdout.write(self.style.WARNING(f"First few rows: {df.head().to_string()}"))
+                self.stdout.write(self.style.WARNING(f"Summary Level unique values: {df['Summary Level'].unique()}"))
+                return
+            
+            counties_to_create = []
+            for _, row in counties.iterrows():
+                # Get values, handling various column name variations
+                state_code_col = 'State Code (FIPS)' if 'State Code (FIPS)' in df.columns else 'State Code'
+                county_code_col = 'County Code (FIPS)' if 'County Code (FIPS)' in df.columns else 'County Code'
+                area_name_col = 'Area Name (including legal/statistical area description)' if 'Area Name (including legal/statistical area description)' in df.columns else 'Area Name'
+                
+                # Handle potential missing columns
+                if state_code_col not in df.columns or county_code_col not in df.columns:
+                    self.stdout.write(self.style.ERROR(f"Required columns missing. Available columns: {df.columns.tolist()}"))
+                    return
+                
+                # Extract values and handle formatting
+                state_code = str(row[state_code_col]).zfill(2)
+                county_code = str(row[county_code_col]).zfill(3)
+                county_name = str(row[area_name_col]).replace(' County', '').strip()
+                
+                # Full county FIPS is state + county code
+                county_fips = f"{state_code}{county_code}"
+                
+                counties_to_create.append(
+                    CensusFIPSCode(
+                        geo_type='county',
+                        fips_code=county_fips,
+                        name=county_name,
+                        parent_geo_type='state',
+                        parent_fips_code=state_code
+                    )
+                )
+            
+            # Bulk create counties
+            CensusFIPSCode.objects.bulk_create(
+                counties_to_create,
+                ignore_conflicts=True
+            )
+            
+            self.stdout.write(self.style.SUCCESS(f'Imported {len(counties_to_create)} county FIPS codes from local Excel file'))
+            
+        except ImportError:
+            self.stdout.write(self.style.ERROR('pandas and openpyxl are required for Excel import. Install with: pip install pandas openpyxl'))
+        except Exception as e:
+            self.stdout.write(self.style.ERROR(f'Error importing county FIPS from Excel: {str(e)}'))
+            # Try alternative method
+            self._import_county_fips_alternative()
     
     def _import_county_fips(self):
         """Import county FIPS codes by downloading data from Census"""

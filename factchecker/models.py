@@ -227,22 +227,21 @@ class CensusGroup(models.Model):
     dataset = models.ForeignKey(CensusDataset, on_delete=models.CASCADE, related_name='groups')
     
     # Group details
-    group_name = models.CharField(max_length=100)  # e.g., "B01001"
-    title = models.CharField(max_length=500)  # e.g., "SEX BY AGE"
+    name = models.CharField(max_length=100)  # e.g., "B01001"
     description = models.TextField(blank=True, null=True)
-    universe = models.CharField(max_length=500, blank=True, null=True)  # e.g., "Total Population"
+    variables_url = models.URLField(max_length=500, blank=True, null=True)  # Link to variables data
     
     # Fields for search optimization
     embedding = models.BinaryField(blank=True, null=True)  # For semantic search
     
     class Meta:
-        unique_together = ('dataset', 'group_name')
+        unique_together = ('dataset', 'name')
         indexes = [
-            models.Index(fields=['group_name']),
+            models.Index(fields=['name']),
         ]
     
     def __str__(self):
-        return f"{self.group_name} - {self.title}"
+        return f"{self.name} - {self.description}"
 
 class CensusGeography(models.Model):
     """Model to store Census geographic levels available for datasets"""
