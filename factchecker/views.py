@@ -700,19 +700,14 @@ def stream_search_datasets(request):
                 'timestamp': search_execution_time
             }, cls=NumpyEncoder) + '\n'
             
-            # Now begin downloading and analyzing the datasets
+            # Now begin pre-download assessment of the datasets
             yield json.dumps({
                 'type': 'status',
-                'message': 'I\'m now beginning my analysis of the discovered datasets...',
+                'message': 'I\'m now assessing the relevance of the discovered datasets...',
                 'timestamp': time.time() - start_time
             }, cls=NumpyEncoder) + '\n'
             
-            # Set up output directory
-            output_dir = "downloads"
-            if not os.path.exists(output_dir):
-                os.makedirs(output_dir)
-            
-            # For each dataset, perform downloading and relevance assessment
+            # For each dataset, perform pre-download relevance assessment only
             for dataset_index, dataset in enumerate(all_datasets):
                 dataset_id = dataset.get('id', 'unknown')
                 dataset_title = dataset.get('title', 'Unknown Dataset')
@@ -757,17 +752,17 @@ def stream_search_datasets(request):
                     relevance_message = "relevant" if is_relevant_predownload else "not relevant"
                     yield json.dumps({
                         'type': 'status',
-                        'message': f'I\'ve completed my initial assessment: This dataset appears to be {relevance_message}.\nReasoning: {reasoning_predownload}',
+                        'message': f'I\'ve completed my assessment: This dataset appears to be {relevance_message}.\nReasoning: {reasoning_predownload}',
                         'timestamp': time.time() - start_time
                     }, cls=NumpyEncoder) + '\n'
                     
-                    # Store relevance assessment and continue with regular updates
+                    # Store relevance assessment and update status
                     dataset['relevance'] = {
                         'is_relevant': is_relevant_predownload,
                         'relevance_score': relevance_score_predownload,
                         'reasoning': reasoning_predownload
                     }
-                    
+
                     # Update dataset with assessment and mark as complete
                     yield json.dumps({
                         'type': 'dataset_update',
@@ -784,6 +779,10 @@ def stream_search_datasets(request):
                         'timestamp': time.time() - start_time
                     }, cls=NumpyEncoder) + '\n'
                     
+                    # Skip if not relevant - but we've already sent the dataset_update message
+                    if not is_relevant_predownload:
+                        continue
+
                 except Exception as e:
                     print(f"Error assessing relevance: {e}")
                     yield json.dumps({
@@ -798,198 +797,10 @@ def stream_search_datasets(request):
                     }, cls=NumpyEncoder) + '\n'
                     continue
                 
-                # If dataset is not relevant, skip downloading
-                if not is_relevant_predownload:
-                    continue
-                
-                # 2. Download dataset resources
-                yield json.dumps({
-                    'type': 'status',
-                    'dataset_id': dataset_id,
-                    'message': f'I\'m downloading the dataset resources now...',
-                    'timestamp': time.time() - start_time
-                }, cls=NumpyEncoder) + '\n'
-
-                # Update dataset status
-                yield json.dumps({
-                    'type': 'dataset_update',
-                    'data': {
-                        'id': dataset_id,
-                        'status': 'downloading'
-                    },
-                    'timestamp': time.time() - start_time
-                }, cls=NumpyEncoder) + '\n'
-
-                # Download all resources
-                from factchecker.download import download_all_resources
-                output_paths = download_all_resources(gov_api_key, dataset_id, output_dir=output_dir)
-
-                if not output_paths:
-                    yield json.dumps({
-                        'type': 'dataset_update',
-                        'data': {
-                            'id': dataset_id,
-                            'status': 'error',
-                            'error': 'Download failed',
-                            'processing_complete': True
-                        },
-                        'message': f'I couldn\'t download {dataset_title}. I\'ll skip this dataset and continue with others.',
-                        'timestamp': time.time() - start_time
-                    }, cls=NumpyEncoder) + '\n'
-                    continue
-
-                # Add file paths to dataset
-                dataset['file_paths'] = output_paths
-                dataset['file_count'] = len(output_paths)
-
-                # Update UI with download results
-                yield json.dumps({
-                    'type': 'download_complete',
-                    'dataset_id': dataset_id,
-                    'file_count': len(output_paths),
-                    'files': [os.path.basename(path) for path in output_paths],
-                    'timestamp': time.time() - start_time
-                }, cls=NumpyEncoder) + '\n'
-
-                # 3. Load primary dataset file
-                primary_file_path = output_paths[0]  # Use the first file by default
-                file_analysis = None
-
-                # Analyze files for multi-file datasets
-                if len(output_paths) > 1:
-                    yield json.dumps({
-                        'type': 'status',
-                        'dataset_id': dataset_id,
-                        'message': f'I\'m analyzing multiple files within this dataset...',
-                        'timestamp': time.time() - start_time
-                    }, cls=NumpyEncoder) + '\n'
-                    
-                    # Update dataset status
-                    yield json.dumps({
-                        'type': 'dataset_update',
-                        'data': {
-                            'id': dataset_id,
-                            'status': 'analyzing_files'
-                        },
-                        'timestamp': time.time() - start_time
-                    }, cls=NumpyEncoder) + '\n'
-                    
-                    # Analyze dataset files
-                    from factchecker.processing.analysis.dataset_analyzer import analyze_dataset_files
-                    file_analysis = analyze_dataset_files(output_paths, query, dataset)
-                    
-                    # Check for suggested files
-                    if "suggested_files" in file_analysis and file_analysis["suggested_files"]:
-                        suggested_files = file_analysis["suggested_files"]
-                        
-                        # Find the paths for the suggested files
-                        suggested_file_paths = []
-                        for suggested_file in suggested_files:
-                            matching_paths = [path for path in output_paths if os.path.basename(path) == suggested_file]
-                            if matching_paths:
-                                suggested_file_paths.append(matching_paths[0])
-                        
-                        if suggested_file_paths:
-                            primary_file_path = suggested_file_paths[0]
-
-                # Update dataset status to loading
-                yield json.dumps({
-                    'type': 'status',
-                    'dataset_id': dataset_id,
-                    'message': f'I\'m loading the dataset contents for analysis...',
-                    'timestamp': time.time() - start_time
-                }, cls=NumpyEncoder) + '\n'
-
-                # Update dataset status
-                yield json.dumps({
-                    'type': 'dataset_update',
-                    'data': {
-                        'id': dataset_id,
-                        'status': 'loading',
-                        'primary_file': os.path.basename(primary_file_path)
-                    },
-                    'timestamp': time.time() - start_time
-                }, cls=NumpyEncoder) + '\n'
-
-                # Load the primary dataset file
-                from factchecker.processing.analysis import load_datafile
-                datafile_content = load_datafile(primary_file_path)
-
-                # Determine if it's a PDF or DataFrame
-                is_pdf = isinstance(datafile_content, dict) and datafile_content.get('type') == 'pdf'
-
-                if is_pdf:
-                    # Handle PDF document
-                    dataset_info = {
-                        "id": dataset["id"],
-                        "title": dataset["title"],
-                        "description": dataset.get("description", ""),
-                        "similarity": dataset.get("similarity", 0),
-                        "file_path": primary_file_path,
-                        "all_file_paths": output_paths,
-                        "file_analysis": file_analysis,
-                        "document_type": "pdf",
-                        "num_pages": datafile_content.get("num_pages", 0),
-                        "text_sample": datafile_content.get("text_sample", "")[:200] + "..."
-                    }
-                else:
-                    # Handle DataFrame (tabular data)
-                    dataset_info = {
-                        "id": dataset["id"],
-                        "title": dataset["title"],
-                        "description": dataset.get("description", ""),
-                        "similarity": dataset.get("similarity", 0),
-                        "file_path": primary_file_path,
-                        "all_file_paths": output_paths,
-                        "file_analysis": file_analysis,
-                        "row_count": len(datafile_content),
-                        "column_count": len(datafile_content.columns),
-                        "columns": list(datafile_content.columns)
-                    }
-
-                # Now continue with the assessment since datafile_content is defined
-                
-                # 4. Assess dataset relevance
-                from factchecker.processing.analysis import assess_datafile_relevance
-                is_relevant, relevance_score, reasoning = assess_datafile_relevance(
-                    datafile_content, 
-                    query, 
-                    dataset_info,
-                    relevance_threshold
-                )
-                
-                # Simple status update about final relevance with reasoning
-                relevance_message = "relevant" if is_relevant else "not relevant"
-                yield json.dumps({
-                    'type': 'status',
-                    'message': f'I\'ve completed my final assessment: This dataset is {relevance_message}.\nReasoning: {reasoning}',
-                    'timestamp': time.time() - start_time
-                }, cls=NumpyEncoder) + '\n'
-                
-                # Store relevance assessment and continue with regular updates
-                dataset['relevance'] = {
-                    'is_relevant': is_relevant,
-                    'relevance_score': relevance_score,
-                    'reasoning': reasoning
-                }
-                
-                # Update dataset with assessment and mark as complete
-                yield json.dumps({
-                    'type': 'dataset_update',
-                    'data': {
-                        'id': dataset_id,
-                        'status': 'relevant' if is_relevant else 'not_relevant',
-                        'relevance': {
-                            'is_relevant': is_relevant,
-                            'relevance_score': relevance_score,
-                            'reasoning': reasoning
-                        },
-                        'processing_complete': True
-                    },
-                    'timestamp': time.time() - start_time
-                }, cls=NumpyEncoder) + '\n'
+                # SKIP ALL THE DOWNLOADING AND POST-DOWNLOAD ASSESSMENT CODE
+                # (Download resources, multi-file analysis, loading data, and final assessment)
             
-            # Final execution time (this is properly indented now, outside the for loop)
+            # Final execution time
             final_execution_time = time.time() - start_time
             
             # Send completion message
@@ -1001,7 +812,7 @@ def stream_search_datasets(request):
                     'total_count': total_count,
                     'processed_count': len(all_datasets)
                 },
-                'message': f'I\'ve completed my analysis! I processed {len(all_datasets)} datasets in {final_execution_time:.1f} seconds.',
+                'message': f'I\'ve completed my analysis! I assessed {len(all_datasets)} datasets in {final_execution_time:.1f} seconds.',
                 'timestamp': final_execution_time
             }, cls=NumpyEncoder) + '\n'
             
