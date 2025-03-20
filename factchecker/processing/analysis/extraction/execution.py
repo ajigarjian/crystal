@@ -161,7 +161,8 @@ def execute_relevant_data(relevant_data) -> Dict[str, Any]:
                             column_values_analysis, 
                             query, 
                             evaluation.improvement_suggestions, 
-                            code
+                            code,
+                            printed_output
                         )
                         
                         print(f"Generated improved code:\n{improved_code}")
@@ -179,7 +180,8 @@ def execute_relevant_data(relevant_data) -> Dict[str, Any]:
                             column_values_analysis, 
                             query, 
                             evaluation.improvement_suggestions or "Improve the extraction code to better answer the query", 
-                            code
+                            code,
+                            printed_output
                         )
 
                         print(f"Generated improved code:\n{improved_code}")
@@ -192,8 +194,14 @@ def execute_relevant_data(relevant_data) -> Dict[str, Any]:
                     print(f"Validation failed: {validation_result.reason}")
                     
                     # Generate improved code
-                    improved_code = generate_extraction_code(dataset_content, column_values_analysis, query, validation_result.reason, code)
-
+                    improved_code = generate_extraction_code(
+                        dataset_content, 
+                        column_values_analysis, 
+                        query, 
+                        validation_result.reason, 
+                        code,
+                        printed_output
+                    )
 
                     print(f"Generated improved code:\n{improved_code}")
                     
@@ -203,7 +211,14 @@ def execute_relevant_data(relevant_data) -> Dict[str, Any]:
             else:
                 print(f"Initial check failed: {response_check}")
                 # Generate improved code
-                improved_code = generate_extraction_code(dataset_content, column_values_analysis, query, response_check, code)
+                improved_code = generate_extraction_code(
+                    dataset_content, 
+                    column_values_analysis, 
+                    query, 
+                    response_check, 
+                    code,
+                    printed_output
+                )
                 
                 print(f"Generated improved code:\n{improved_code}")
                 
@@ -215,7 +230,14 @@ def execute_relevant_data(relevant_data) -> Dict[str, Any]:
             
             if attempts < max_attempts:
                 # Try to generate improved code that fixes the error
-                improved_code = generate_extraction_code(dataset_content, column_values_analysis, query, error_msg, code)
+                improved_code = generate_extraction_code(
+                    dataset_content, 
+                    column_values_analysis, 
+                    query, 
+                    error_msg, 
+                    code,
+                    printed_output if 'printed_output' in locals() else ""
+                )
 
                 print(f"Generated improved code after error:\n{improved_code}")
                 
