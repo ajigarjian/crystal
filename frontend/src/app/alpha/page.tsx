@@ -31,6 +31,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Progress } from "@/components/ui/progress";
 import { AlertCircle, CheckCircle2, FileText, Database, ArrowRight, Download, FileCheck, Loader2 } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
 
 interface Resource {
   id: string;
@@ -381,8 +382,14 @@ export default function DatasetsPage() {
                   const exists = prev.some(d => d.id === data.data.id);
                   if (exists) return prev;
                   
+                  // Add file count based on resources if available
+                  const datasetWithFileCount = {
+                    ...data.data,
+                    file_count: data.data.resources?.length || 0
+                  };
+                  
                   // Sort datasets by similarity
-                  const newDatasets = [...prev, data.data].sort(
+                  const newDatasets = [...prev, datasetWithFileCount].sort(
                     (a, b) => (b.similarity || 0) - (a.similarity || 0)
                   );
                   return newDatasets;
@@ -418,7 +425,12 @@ export default function DatasetsPage() {
                   // Normal update for relevant datasets
                   return prev.map(dataset => {
                     if (dataset.id === data.data.id) {
-                      return { ...dataset, ...data.data };
+                      const updatedData = { ...dataset, ...data.data };
+                      // Update file_count if not already set but resources are available
+                      if (!updatedData.file_count && updatedData.resources?.length) {
+                        updatedData.file_count = updatedData.resources.length;
+                      }
+                      return updatedData;
                     }
                     return dataset;
                   });
@@ -430,6 +442,15 @@ export default function DatasetsPage() {
                 setSearchComplete(true);
                 setLoading(false);
                 setExecutionTime(data.data.execution_time);
+                
+                // Sort datasets by relevance score when search is complete
+                setDatasets(prev => {
+                  return [...prev].sort((a, b) => {
+                    const scoreA = a.relevance?.relevance_score || a.similarity || 0;
+                    const scoreB = b.relevance?.relevance_score || b.similarity || 0;
+                    return scoreB - scoreA; // Sort in descending order
+                  });
+                });
                 
                 // Add the completion message to status messages
                 if (data.message) {
@@ -933,8 +954,21 @@ export default function DatasetsPage() {
                 className="flex-1"
                 disabled={loading}
               />
-              <Button type="submit" disabled={loading} className="bg-green-600 hover:bg-green-700 text-white">
-                {loading ? "Searching..." : "Search"}
+              <Button 
+                type="submit" 
+                disabled={loading} 
+                className={`${
+                  !loading && searchComplete && datasets.length > 0
+                    ? "bg-black hover:bg-black/90 text-white animate-pulse" 
+                    : "bg-green-600 hover:bg-green-700 text-white"
+                }`}
+              >
+                {loading 
+                  ? "Searching..." 
+                  : (searchComplete && datasets.length > 0) 
+                    ? "Analyze" 
+                    : "Search"
+                }
               </Button>
             </div>
           </form>
@@ -1031,17 +1065,22 @@ export default function DatasetsPage() {
               {/* Show found datasets while still loading */}
               {datasets.length > 0 && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                  {datasets.map((dataset) => {
+                  {datasets.map((dataset, index) => {
                     const statusInfo = getDatasetStatusInfo(dataset);
+                    const style = { '--animation-delay': `${index * 50}ms` } as React.CSSProperties;
+                    
                     return (
                       <Card 
                         key={dataset.id}
-                        className={`overflow-hidden hover:shadow-md transition-shadow cursor-pointer hover:border-green-200 flex flex-col border-neutral-200 animate-fadeIn relative ${dataset.isRemoving ? 'removing' : ''}`}
+                        className={`overflow-hidden hover:shadow-md transition-shadow cursor-pointer 
+                                   hover:border-green-200 flex flex-col border-neutral-200 
+                                   ${dataset.isRemoving ? 'removing' : 'animate-fadeIn'}`}
                         onClick={() => handleDatasetSelect(dataset)}
+                        style={style}
                       >
                         {/* Status indicator - if processing */}
                         {statusInfo && (
-                          <div className={`absolute top-2 right-2 rounded-full px-2 py-0.5 flex items-center text-xs ${statusInfo.color}`}>
+                          <div className={`absolute top-2 right-2 z-10 rounded-full px-2 py-0.5 flex items-center text-xs ${statusInfo.color}`}>
                             {statusInfo.icon}
                             <span className="ml-1">{statusInfo.text}</span>
                           </div>
@@ -1211,7 +1250,8 @@ export default function DatasetsPage() {
                   <div className="flex flex-col">
                     <div className="flex items-center justify-between">
                       <p className="text-sm text-neutral-600 dark:text-neutral-400">
-                        Found {datasets.length} relevant datasets for your query.
+                        Found {datasets.length} relevant datasets for your query
+                        {executionTime !== null && ` in ${executionTime.toFixed(2)} seconds`}.
                       </p>
                       <Button 
                         variant="ghost" 
@@ -1338,95 +1378,107 @@ export default function DatasetsPage() {
                     )}
                   </div>
                   
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                    {datasets.map((dataset) => (
-                      <Card 
-                        key={dataset.id}
-                        className={`overflow-hidden hover:shadow-md transition-shadow cursor-pointer hover:border-green-200 flex flex-col border-neutral-200 ${dataset.isRemoving ? 'removing' : ''}`}
-                        onClick={() => handleDatasetSelect(dataset)}
-                      >
-                        <CardHeader className="p-3 pb-2">
-                          <div className="flex items-start">
-                            <div className="h-6 w-6 rounded overflow-hidden bg-neutral-200 mr-2 flex-shrink-0">
-                              <img 
-                                src={getImageUrl(dataset)} 
-                                alt={`Dataset logo`}
-                                className="w-full h-full object-cover"
-                                onError={(e) => {
-                                  const target = e.target as HTMLImageElement;
-                                  target.src = `https://placehold.co/32x32/4F46E5/ffffff?text=D`;
-                                }}
-                              />
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <h3 className="text-sm font-medium leading-tight line-clamp-2 mb-0.5">{dataset.title}</h3>
-                              <p className="text-xs text-neutral-500 truncate">
-                                {dataset.organization?.title || 
-                                 dataset.organization_title || 
-                                 dataset.organization?.name || 
-                                 dataset.organization_name || 
-                                 'Unknown source'}
-                              </p>
-                              <div className="mt-1 flex flex-wrap gap-1.5">
-                                <Badge variant="outline" className="text-xs">
-                                  Relevance: {Math.round((dataset.relevance?.relevance_score || dataset.similarity || 0) * 100)}%
-                                </Badge>
-                              </div>
-                            </div>
-                          </div>
-                        </CardHeader>
-                        
-                        {/* Add a description section */}
-                        <div className="px-3 py-2">
-                          <p className="text-xs text-neutral-600 line-clamp-3">
-                            {dataset.description ? 
-                              (typeof dataset.description === 'string' ? 
-                                dataset.description.replace(/<[^>]*>/g, '') : 
-                                'No description') : 
-                              'No description'}
-                          </p>
-                        </div>
-                        
-                        {/* Add a resources section */}
-                        {dataset.resources && dataset.resources.length > 0 && (
-                          <div className="px-3 py-2">
-                            <p className="text-xs font-medium">Available formats:</p>
-                            <div className="flex flex-wrap gap-1 mt-1">
-                              {Array.from(new Set(dataset.resources.map(r => r.format?.toUpperCase() || 'UNKNOWN'))).map((format, i) => (
-                                <Badge key={i} variant="secondary" className="text-xs">
-                                  {format}
-                                </Badge>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                        
-                        <CardFooter className="px-3 py-2 border-t border-neutral-100 mt-auto">
-                          <div className="w-full flex flex-wrap gap-1.5">
-                            {dataset.tags && dataset.tags.length > 0 ? (
-                              <>
-                                {dataset.tags.slice(0, 3).map((tag, index) => (
-                                  <Badge 
-                                    key={index} 
-                                    variant="secondary" 
-                                    className="text-xs px-2 py-0.5 h-5 whitespace-nowrap overflow-hidden text-ellipsis max-w-[120px]"
-                                  >
-                                    {typeof tag === 'object' && tag.name ? tag.name : String(tag)}
-                                  </Badge>
-                                ))}
-                                {dataset.tags.length > 3 && (
-                                  <Badge variant="outline" className="text-xs px-2 py-0.5 h-5">
-                                    +{dataset.tags.length - 3}
-                                  </Badge>
+                  {/* New Table View for Datasets */}
+                  <div className="rounded-md border shadow-sm overflow-hidden">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-[40px]"></TableHead>
+                          <TableHead>Dataset</TableHead>
+                          <TableHead className="w-[80px] text-center">Files</TableHead>
+                          <TableHead className="w-[100px] text-center">Relevance</TableHead>
+                          <TableHead className="w-[60px] text-center">Download</TableHead>
+                          <TableHead className="w-[100px] text-center">Include in Analysis</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {datasets.map((dataset) => {
+                          const statusInfo = getDatasetStatusInfo(dataset);
+                          const relevanceScore = dataset.relevance?.relevance_score || dataset.similarity || 0;
+                          
+                          return (
+                            <TableRow 
+                              key={dataset.id}
+                              className="cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
+                            >
+                              <TableCell className="p-2">
+                                <div className="h-8 w-8 rounded overflow-hidden bg-neutral-200 flex-shrink-0">
+                                  <img 
+                                    src={getImageUrl(dataset)} 
+                                    alt={`${dataset.organization?.title || 'Dataset'} logo`}
+                                    className="w-full h-full object-cover"
+                                    onError={(e) => {
+                                      const target = e.target as HTMLImageElement;
+                                      target.src = `https://placehold.co/32x32/4F46E5/ffffff?text=D`;
+                                    }}
+                                  />
+                                </div>
+                              </TableCell>
+                              <TableCell className="py-2" onClick={() => handleDatasetSelect(dataset)}>
+                                <div>
+                                  <p className="font-medium text-sm">{dataset.title}</p>
+                                  <p className="text-xs text-neutral-500 truncate">
+                                    {dataset.organization?.title || 
+                                     dataset.organization_title || 
+                                     dataset.organization?.name || 
+                                     dataset.organization_name || 
+                                     'Unknown source'}
+                                  </p>
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-center">
+                                {dataset.file_count ? (
+                                  <span className="text-xs">{dataset.file_count}</span>
+                                ) : (
+                                  <span className="text-xs text-neutral-400">—</span>
                                 )}
-                              </>
-                            ) : (
-                              <span className="text-xs text-neutral-400">No tags</span>
-                            )}
-                          </div>
-                        </CardFooter>
-                      </Card>
-                    ))}
+                              </TableCell>
+                              <TableCell className="text-center">
+                                <div className="flex items-center justify-center">
+                                  {relevanceScore > 0.7 ? (
+                                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300">
+                                      <CheckCircle2 className="h-3 w-3 mr-1" />
+                                      {Math.round(relevanceScore * 100)}%
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300">
+                                      {Math.round(relevanceScore * 100)}%
+                                    </span>
+                                  )}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-center">
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm" 
+                                  className="h-7 w-7 p-0 rounded-full"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    // Implementation for download functionality would go here
+                                    console.log(`Download dataset ${dataset.id}`);
+                                  }}
+                                  title="Download Dataset"
+                                >
+                                  <Download className="h-3.5 w-3.5" />
+                                </Button>
+                              </TableCell>
+                              <TableCell className="text-center">
+                                <Checkbox
+                                  defaultChecked={true}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    // Implementation for checkbox state change would go here
+                                    console.log(`Include dataset ${dataset.id} in analysis: ${(e.target as HTMLInputElement).checked}`);
+                                  }}
+                                  aria-label="Include in analysis"
+                                  className="mx-auto"
+                                />
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
                   </div>
                 </>
               ) : (
@@ -1434,15 +1486,6 @@ export default function DatasetsPage() {
                   <p className="text-neutral-500">No relevant datasets found for your query. Try a different question.</p>
                 </div>
               )}
-            </div>
-          )}
-
-          {/* Execution time */}
-          {executionTime !== null && (
-            <div className="bg-green-50 dark:bg-green-900/20 border border-green-100 dark:border-green-900 p-3 rounded-md text-sm mt-2">
-              <p className="text-green-700 dark:text-green-400">
-                Search completed in {executionTime.toFixed(2)} seconds.
-              </p>
             </div>
           )}
         </div>
@@ -1454,8 +1497,11 @@ export default function DatasetsPage() {
           from { opacity: 0; transform: translateY(10px); }
           to { opacity: 1; transform: translateY(0); }
         }
+        
         .animate-fadeIn {
-          animation: fadeIn 0.3s ease-in-out forwards;
+          opacity: 0;
+          animation: fadeIn 1s ease-in-out forwards;
+          animation-delay: var(--animation-delay, 0ms);
         }
         
         /* Custom scrollbar styles */
