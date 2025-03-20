@@ -228,24 +228,6 @@ export default function Home() {
       >
         {/* Navigation links */}
         <div className="absolute top-6 right-6 z-30 flex gap-4">
-          <Link href="/datasets">
-            <Button 
-              variant="link" 
-              className="text-white flex items-center gap-1 hover:text-white/80 transition-colors"
-              style={{ fontFamily: 'var(--font-geist-sans)' }}
-            >
-              Datasets
-            </Button>
-          </Link>
-          <Link href="/waitlist">
-            <Button 
-              variant="link" 
-              className="text-white flex items-center gap-1 hover:text-white/80 transition-colors"
-              style={{ fontFamily: 'var(--font-geist-sans)' }}
-            >
-              Join Waitlist
-            </Button>
-          </Link>
           <Button 
             variant="link" 
             className="text-white flex items-center gap-1 hover:text-white/80 transition-colors"
@@ -305,11 +287,11 @@ export default function Home() {
         
         {/* Call to action buttons */}
         <div className="z-20 relative w-full max-w-md mx-auto px-4 mt-8 flex flex-col gap-4">
-          <Link href="/beta" className="w-full">
+          <Link href="/alpha" className="w-full">
             <Button 
               className="w-full bg-green-500/80 hover:bg-green-500/90 text-white font-medium transition-all"
             >
-              Try the Beta
+              Try the Alpha
             </Button>
           </Link>
           
@@ -318,7 +300,7 @@ export default function Home() {
               variant="outline"
               className="w-full bg-white/10 hover:bg-white/20 text-white border-white/30 font-medium transition-all"
             >
-              Join Waitlist
+              Join Waitlist For Beta Access
             </Button>
           </Link>
         </div>
