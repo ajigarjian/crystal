@@ -6,7 +6,7 @@ from django.core.management.base import BaseCommand
 from factchecker.processing.analysis.extraction.execution import execute_relevant_data
 from factchecker.search.faiss_search import vector_search_datasets_faiss as vector_search_datasets
 from factchecker.search import preprocess_query, search_datasets, filter_relevant_datasets
-from factchecker.search.search_utils import parallel_search
+from factchecker.search.search_utils import parallel_search, single_search
 from factchecker.download.download_gov_data import download_all_resources
 
 # For downloading the resources in the datasets, we use the download_resource function for now
@@ -203,8 +203,8 @@ class Command(BaseCommand):
             self.stdout.write(f"• Keyword search threshold: {keyword_threshold:.2f}")
 
             # Get vector search results with threshold (primary method)
+            self.start_timer("vector_search")
             self.stdout.write(f"\n1. Performing vector search with query variations:")
-            from factchecker.search.search_utils import parallel_search
 
             # Select the vector search function based on the backend
             if options.get('vector_backend') == 'pinecone':
@@ -213,6 +213,8 @@ class Command(BaseCommand):
             else:
                 vector_search_func = vector_search_datasets
                 self.stdout.write(f"Using FAISS as vector search backend")
+
+            # To use single search just comment out use_variations and swap parallel search to single search
 
             # Use parallel search with the original query and variations
             vector_datasets = parallel_search(
@@ -239,6 +241,7 @@ class Command(BaseCommand):
             self.stop_timer("vector_search")
 
             # Get keyword search results with higher threshold (supplementary method)
+            self.start_timer("keyword_search")
             self.stdout.write(f"\n2. Performing keyword search:")
             keyword_datasets = search_datasets(query, gov_api_key, similarity_threshold=keyword_threshold)
 
@@ -319,8 +322,7 @@ class Command(BaseCommand):
             # Create a unique timer ID for this dataset
             dataset_timer_id = f"dataset_{dataset_index}"
             if self.timing_enabled:
-                with self.stdout_lock:
-                    self.start_timer(dataset_timer_id)
+                self.start_timer(dataset_timer_id)
             
             dataset_num = dataset_index + 1
             dataset_id = dataset['id']
@@ -335,8 +337,7 @@ class Command(BaseCommand):
             try:
                 # Pre-download relevance assessment
                 if self.timing_enabled:
-                    with self.stdout_lock:
-                        self.start_timer(f"{dataset_timer_id}_predownload_assessment")
+                    self.start_timer(f"{dataset_timer_id}_predownload_assessment")
                 
                 # Debug print metadata
                 if debug_file_paths:
@@ -350,8 +351,7 @@ class Command(BaseCommand):
                 )
                 
                 if self.timing_enabled:
-                    with self.stdout_lock:
-                        self.stop_timer(f"{dataset_timer_id}_predownload_assessment")
+                    self.stop_timer(f"{dataset_timer_id}_predownload_assessment")
                 
                 with self.stdout_lock:
                     if is_relevant_predownload:
@@ -366,8 +366,8 @@ class Command(BaseCommand):
                         
                         # Return early with minimal information for irrelevant datasets
                         if self.timing_enabled:
-                            with self.stdout_lock:
-                                self.stop_timer(dataset_timer_id)
+                            # Make sure to stop the main dataset timer before returning
+                            self.stop_timer(dataset_timer_id)
                         return {
                             "id": dataset.get("id", "unknown"),
                             "title": dataset.get("title", "Unnamed Dataset"),
@@ -387,21 +387,18 @@ class Command(BaseCommand):
                 else:
                     # Download all CSV/XLSX resources in the dataset
                     if self.timing_enabled:
-                        with self.stdout_lock:
-                            self.start_timer(f"{dataset_timer_id}_download")
+                        self.start_timer(f"{dataset_timer_id}_download")
                     
                     output_paths = download_all_resources(gov_api_key, dataset["id"], output_dir=output_dir)
                     
                     if self.timing_enabled:
-                        with self.stdout_lock:
-                            self.stop_timer(f"{dataset_timer_id}_download")
+                        self.stop_timer(f"{dataset_timer_id}_download")
                     
                     if not output_paths:
                         with self.stdout_lock:
                             self.stdout.write(self.style.WARNING(f"{dataset_short_id} Download failed. Skipping dataset."))
                         if self.timing_enabled:
-                            with self.stdout_lock:
-                                self.stop_timer(dataset_timer_id)
+                            self.stop_timer(dataset_timer_id)
                         return {
                             "id": dataset["id"],
                             "title": dataset["title"],
@@ -428,8 +425,7 @@ class Command(BaseCommand):
                         self.stdout.write(f"{dataset_short_id} Analyzing multiple dataset files...")
 
                     if self.timing_enabled:
-                        with self.stdout_lock:
-                            self.start_timer(f"{dataset_timer_id}_multi_file_analysis")
+                        self.start_timer(f"{dataset_timer_id}_multi_file_analysis")
                     
                     from factchecker.processing.analysis.dataset_analyzer import analyze_dataset_files
                     
@@ -441,8 +437,7 @@ class Command(BaseCommand):
                     )
                     
                     if self.timing_enabled:
-                        with self.stdout_lock:
-                            self.stop_timer(f"{dataset_timer_id}_multi_file_analysis")
+                        self.stop_timer(f"{dataset_timer_id}_multi_file_analysis")
                     
                     # Display file summaries
                     with self.stdout_lock:
@@ -497,14 +492,12 @@ class Command(BaseCommand):
                 
                 # Load the primary dataset file
                 if self.timing_enabled:
-                    with self.stdout_lock:
-                        self.start_timer(f"{dataset_timer_id}_load_datafile")
+                    self.start_timer(f"{dataset_timer_id}_load_datafile")
                 
                 datafile_content = load_datafile(primary_file_path)
                 
                 if self.timing_enabled:
-                    with self.stdout_lock:
-                        self.stop_timer(f"{dataset_timer_id}_load_datafile")
+                    self.stop_timer(f"{dataset_timer_id}_load_datafile")
                 
                 # Record basic dataset info
                 is_pdf = isinstance(datafile_content, dict) and datafile_content.get('type') == 'pdf'
@@ -567,8 +560,7 @@ class Command(BaseCommand):
                 
                 # Assess dataset relevance
                 if self.timing_enabled:
-                    with self.stdout_lock:
-                        self.start_timer(f"{dataset_timer_id}_assess_relevance")
+                    self.start_timer(f"{dataset_timer_id}_assess_relevance")
                 
                 with self.stdout_lock:
                     self.stdout.write(f"\n{dataset_short_id} Assessing datafile relevance...")
@@ -580,8 +572,7 @@ class Command(BaseCommand):
                 )
                 
                 if self.timing_enabled:
-                    with self.stdout_lock:
-                        self.stop_timer(f"{dataset_timer_id}_assess_relevance")
+                    self.stop_timer(f"{dataset_timer_id}_assess_relevance")
                 
                 dataset_info["relevance_score"] = relevance_score
                 dataset_info["relevance_reasoning"] = reasoning
@@ -599,8 +590,7 @@ class Command(BaseCommand):
                     
                     # Extract relevant data
                     if self.timing_enabled:
-                        with self.stdout_lock:
-                            self.start_timer(f"{dataset_timer_id}_extract_data")
+                        self.start_timer(f"{dataset_timer_id}_extract_data")
                     
                     with self.stdout_lock:
                         self.stdout.write(f"{dataset_short_id} Extracting relevant data...")
@@ -620,16 +610,14 @@ class Command(BaseCommand):
                     )
                     
                     if self.timing_enabled:
-                        with self.stdout_lock:
-                            self.stop_timer(f"{dataset_timer_id}_extract_data")
-                            self.start_timer(f"{dataset_timer_id}_execute_data")
+                        self.stop_timer(f"{dataset_timer_id}_extract_data")
+                        self.start_timer(f"{dataset_timer_id}_execute_data")
 
                     # Now extract data from the relevant data
                     extracted_data = execute_relevant_data(relevant_data)
                     
                     if self.timing_enabled:
-                        with self.stdout_lock:
-                            self.stop_timer(f"{dataset_timer_id}_execute_data")
+                        self.stop_timer(f"{dataset_timer_id}_execute_data")
 
                     # Add dataset source information to the extracted data
                     if extracted_data:
@@ -641,8 +629,7 @@ class Command(BaseCommand):
                     
                     # Generate dataset overview analysis with Azure options
                     if self.timing_enabled:
-                        with self.stdout_lock:
-                            self.start_timer(f"{dataset_timer_id}_analyze_overview")
+                        self.start_timer(f"{dataset_timer_id}_analyze_overview")
                     
                     with self.stdout_lock:
                         self.stdout.write(f"\n{dataset_short_id} Analyzing dataset overview...")
@@ -654,8 +641,7 @@ class Command(BaseCommand):
                     )
                     
                     if self.timing_enabled:
-                        with self.stdout_lock:
-                            self.stop_timer(f"{dataset_timer_id}_analyze_overview")
+                        self.stop_timer(f"{dataset_timer_id}_analyze_overview")
                     
                     with self.stdout_lock:
                         self.display_dataset_analysis(dataset_analysis)
@@ -670,17 +656,15 @@ class Command(BaseCommand):
                     
                     dataset_info["dataset_analysis"] = "Not relevant enough."
                 
-                # Stop timing for this dataset at the end
+                # Make sure to stop all timers before returning
                 if self.timing_enabled:
-                    with self.stdout_lock:
-                        self.stop_timer(dataset_timer_id)
+                    self.stop_timer(dataset_timer_id)
                 
                 return dataset_info, dataset_analysis, extracted_data
                 
             except Exception as e:
                 if self.timing_enabled:
-                    with self.stdout_lock:
-                        self.stop_timer(dataset_timer_id)
+                    self.stop_timer(dataset_timer_id)
                 
                 with self.stdout_lock:
                     self.stderr.write(self.style.ERROR(f"{dataset_short_id} Error analyzing dataset: {e}"))
@@ -926,7 +910,7 @@ class Command(BaseCommand):
         if not self.timing_enabled:
             return
         
-        # Store the start time for this step
+        # Simply store the start time without using locks
         self.timing_data[f"{step_name}_start"] = time.time()
 
     def stop_timer(self, step_name):
@@ -934,14 +918,15 @@ class Command(BaseCommand):
         if not self.timing_enabled:
             return
         
-        # Calculate the duration and store it
-        start_time = self.timing_data.get(f"{step_name}_start", 0)
-        if start_time:
-            duration = time.time() - start_time
-            # Add to existing duration for this step (allows for cumulative timing)
+        # Calculate the duration without using locks
+        start_key = f"{step_name}_start"
+        if start_key in self.timing_data:
+            duration = time.time() - self.timing_data[start_key]
+            # Add to existing duration for this step
             self.timing_data[step_name] = self.timing_data.get(step_name, 0) + duration
             # Clean up the start time
-            del self.timing_data[f"{step_name}_start"]
+            del self.timing_data[start_key]
+        # Silently ignore if timer wasn't started (no warning)
 
     def print_timing_data(self):
         """Print all timing data in a formatted table."""
