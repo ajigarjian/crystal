@@ -37,7 +37,8 @@ def generate_extraction_code(
     column_values_analysis: Dict[str, Dict[str, List[Any]]],
     query: str,
     reason=None,
-    code=None
+    code=None,
+    previous_code_printed_output=None
 ) -> str:
     """
     Generate pandas code to extract relevant data based on column analysis.
@@ -85,18 +86,19 @@ POTENTIAL COLUMN ANALYSIS:
 SAMPLE DATA (first 5 rows):
 {dataset_content.head(5).to_string()}
 
-A PREVIOUS VALIDATION FAILURE REASON:
+PREVIOUS VALIDATION FAILURE REASONS:
 {reason if reason else "N/A"}
+{previous_code_printed_output if previous_code_printed_output else "N/A"}
 
 PREVIOUSLY GENERATED CODE TO IMPROVE UPON:
-{code}
+{code if code else "N/A"}
 
 Based on the user query and column analysis, generate pandas code to extract the relevant data. The code should:
 1. Consider how specific a user query is. If they dont mention any geographical or spatial "filters" etc, dont filter by identified columns.
 2. If applicable, filter the dataframe to include only rows with relevant values in the identified columns
 3. If multiple columns have relevant values, combine the filters appropriately
 4. If no relevant columns or values were identified, return a suitable subset of the data that might be relevant
-5. Include aggregate and comparison values to improve the response.
+5. Do not use matplotlib.
 6. Code should be simple, no more than 25 lines.
 
 Return ONLY the Python code, with no additional text or explanation. Use 'df' as the variable name for the input DataFrame.
