@@ -144,3 +144,229 @@ class WaitlistEntry(models.Model):
     
     def __str__(self):
         return f"{self.email}"
+
+# CENSUS API MODELS
+
+class CensusDataset(models.Model):
+    """Model to store Census API dataset metadata"""
+    
+    # Unique identifier - combination of vintage and dataset path
+    id = models.AutoField(primary_key=True)
+    vintage = models.IntegerField()  # Year (e.g., 2020)
+    dataset_path = models.CharField(max_length=255)  # e.g., "acs/acs5"
+    
+    # Basic metadata
+    title = models.CharField(max_length=500)
+    description = models.TextField(blank=True, null=True)
+    
+    # Type of dataset
+    is_aggregate = models.BooleanField(default=False)
+    is_microdata = models.BooleanField(default=False)
+    
+    # Temporal coverage
+    reference_period = models.CharField(max_length=50, blank=True, null=True)  # e.g., "2016-2020"
+    modified_date = models.DateTimeField(blank=True, null=True)
+    
+    # API endpoint
+    api_endpoint = models.URLField(max_length=500)
+    
+    # Fields for search optimization
+    embedding = models.BinaryField(blank=True, null=True)  # For vector search
+    
+    # Metadata fields
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        unique_together = ('vintage', 'dataset_path')
+        indexes = [
+            models.Index(fields=['vintage']),
+            models.Index(fields=['dataset_path']),
+        ]
+    
+    def __str__(self):
+        return f"{self.vintage} {self.title}"
+
+class CensusVariable(models.Model):
+    """Model to store Census variables within datasets"""
+    
+    # Unique identifier
+    id = models.AutoField(primary_key=True)
+    
+    # Foreign key to the dataset
+    dataset = models.ForeignKey(CensusDataset, on_delete=models.CASCADE, related_name='variables')
+    
+    # Variable details
+    variable_name = models.CharField(max_length=100)  # e.g., "B01001_001E"
+    label = models.TextField()  # e.g., "Estimate!!Total:"
+    concept = models.CharField(max_length=500, blank=True, null=True)  # e.g., "SEX BY AGE"
+    group_name = models.CharField(max_length=100, blank=True, null=True)  # e.g., "B01001"
+    predicate_type = models.CharField(max_length=50, blank=True, null=True)  # e.g., "int"
+    
+    # Fields for search optimization
+    embedding = models.BinaryField(blank=True, null=True)  # For semantic search
+    
+    class Meta:
+        unique_together = ('dataset', 'variable_name')
+        indexes = [
+            models.Index(fields=['variable_name']),
+            models.Index(fields=['group_name']),
+            models.Index(fields=['concept']),
+        ]
+    
+    def __str__(self):
+        return f"{self.variable_name} - {self.label}"
+
+class CensusGroup(models.Model):
+    """Model to store Census groups (tables) within datasets"""
+    
+    # Unique identifier
+    id = models.AutoField(primary_key=True)
+    
+    # Foreign key to the dataset
+    dataset = models.ForeignKey(CensusDataset, on_delete=models.CASCADE, related_name='groups')
+    
+    # Group details
+    group_name = models.CharField(max_length=100)  # e.g., "B01001"
+    title = models.CharField(max_length=500)  # e.g., "SEX BY AGE"
+    description = models.TextField(blank=True, null=True)
+    universe = models.CharField(max_length=500, blank=True, null=True)  # e.g., "Total Population"
+    
+    # Fields for search optimization
+    embedding = models.BinaryField(blank=True, null=True)  # For semantic search
+    
+    class Meta:
+        unique_together = ('dataset', 'group_name')
+        indexes = [
+            models.Index(fields=['group_name']),
+        ]
+    
+    def __str__(self):
+        return f"{self.group_name} - {self.title}"
+
+class CensusGeography(models.Model):
+    """Model to store Census geographic levels available for datasets"""
+    
+    # Unique identifier
+    id = models.AutoField(primary_key=True)
+    
+    # Foreign key to the dataset
+    dataset = models.ForeignKey(CensusDataset, on_delete=models.CASCADE, related_name='geographies')
+    
+    # Geography details
+    name = models.CharField(max_length=100)  # e.g., "state", "county"
+    geo_level_display = models.CharField(max_length=10, blank=True, null=True)  # e.g., "040"
+    reference_date = models.DateField(blank=True, null=True)
+    
+    # Required and wildcard geographies (stored as JSON)
+    requires_json = models.TextField(blank=True, null=True)  # e.g., ["state"]
+    wildcard_json = models.TextField(blank=True, null=True)  # e.g., ["state"]
+    
+    class Meta:
+        unique_together = ('dataset', 'name')
+        indexes = [
+            models.Index(fields=['name']),
+        ]
+    
+    @property
+    def requires(self):
+        """Get requires as a list"""
+        if not self.requires_json:
+            return []
+        try:
+            return json.loads(self.requires_json)
+        except:
+            return []
+    
+    @requires.setter
+    def requires(self, value):
+        """Set requires from a list"""
+        if value is None:
+            self.requires_json = None
+        else:
+            self.requires_json = json.dumps(value)
+    
+    @property
+    def wildcard(self):
+        """Get wildcard as a list"""
+        if not self.wildcard_json:
+            return []
+        try:
+            return json.loads(self.wildcard_json)
+        except:
+            return []
+    
+    @wildcard.setter
+    def wildcard(self, value):
+        """Set wildcard from a list"""
+        if value is None:
+            self.wildcard_json = None
+        else:
+            self.wildcard_json = json.dumps(value)
+    
+    def __str__(self):
+        return f"{self.name} for {self.dataset}"
+
+class CensusTag(models.Model):
+    """Model to store Census dataset tags"""
+    
+    name = models.CharField(max_length=100, primary_key=True)
+    
+    # Many-to-many relationship with datasets
+    datasets = models.ManyToManyField(CensusDataset, related_name='tags')
+    
+    def __str__(self):
+        return self.name
+
+class CensusFIPSCode(models.Model):
+    """Model to store FIPS codes for geographic entities"""
+    
+    # Unique identifier
+    id = models.AutoField(primary_key=True)
+    
+    # FIPS details
+    geo_type = models.CharField(max_length=100)  # e.g., "state", "county"
+    fips_code = models.CharField(max_length=50)  # e.g., "06" for California
+    name = models.CharField(max_length=255)  # e.g., "California"
+    
+    # For counties and other sub-entities
+    parent_geo_type = models.CharField(max_length=100, blank=True, null=True)  # e.g., "state"
+    parent_fips_code = models.CharField(max_length=50, blank=True, null=True)  # e.g., "06"
+    
+    class Meta:
+        unique_together = ('geo_type', 'fips_code')
+        indexes = [
+            models.Index(fields=['geo_type', 'fips_code']),
+            models.Index(fields=['name']),
+        ]
+    
+    def __str__(self):
+        return f"{self.name} ({self.geo_type}:{self.fips_code})"
+
+class CensusQueryMapping(models.Model):
+    """Model to store semantic mappings between natural language queries and Census variables"""
+    
+    # Unique identifier
+    id = models.AutoField(primary_key=True)
+    
+    # Query pattern and mapping
+    query_pattern = models.CharField(max_length=500)  # e.g., "hispanic population"
+    dataset = models.ForeignKey(CensusDataset, on_delete=models.CASCADE, related_name='query_mappings')
+    variable = models.ForeignKey(CensusVariable, on_delete=models.CASCADE, related_name='query_mappings')
+    relevance_score = models.FloatField(default=0.0)  # 0-1 score of relevance
+    
+    # For tracking effectiveness
+    usage_count = models.IntegerField(default=0)
+    success_count = models.IntegerField(default=0)
+    
+    # Fields for search optimization
+    query_embedding = models.BinaryField(blank=True, null=True)  # For vector search
+    
+    class Meta:
+        indexes = [
+            models.Index(fields=['query_pattern']),
+            models.Index(fields=['relevance_score']),
+        ]
+    
+    def __str__(self):
+        return f"{self.query_pattern} → {self.variable.variable_name}"
