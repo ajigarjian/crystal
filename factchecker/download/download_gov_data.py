@@ -64,28 +64,29 @@ def clean_filename(text: str, max_length: int = 100) -> str:
     # Remove multiple consecutive underscores and limit length
     return "_".join(filter(None, clean_text.split("_")))[:max_length]
 
-def create_download_attempts(url: str) -> List[Callable]:
+def create_download_attempts(url: str, max_download_time) -> List[Callable]:
     """
     Create a list of download attempt functions for a given URL.
     
     Args:
         url: URL to download from
+        max_download_time: max_download_time
         
     Returns:
         List of download attempt functions
     """
     return [
         # 1. Standard secure download
-        lambda: requests.get(url, stream=True, timeout=15),
+        lambda: requests.get(url, stream=True, timeout=max_download_time),
         
         # 2. With browser headers
-        lambda: requests.get(url, stream=True, timeout=15, headers=BROWSER_HEADERS),
+        lambda: requests.get(url, stream=True, timeout=max_download_time, headers=BROWSER_HEADERS),
         
         # 3. Insecure download (verify=False)
-        lambda: requests.get(url, stream=True, timeout=15, verify=False),
+        lambda: requests.get(url, stream=True, timeout=max_download_time, verify=False),
         
         # 4. Insecure with browser headers
-        lambda: requests.get(url, stream=True, timeout=15, verify=False, headers=BROWSER_HEADERS),
+        lambda: requests.get(url, stream=True, timeout=max_download_time, verify=False, headers=BROWSER_HEADERS),
         
         # 5. Try with http:// if https:// fails
         lambda: requests.get(url.replace('https://', 'http://'), stream=True, timeout=15, headers=BROWSER_HEADERS) 
@@ -99,7 +100,7 @@ def create_download_attempts(url: str) -> List[Callable]:
         lambda: requests.get(
             url, 
             stream=True, 
-            timeout=15, 
+            timeout=max_download_time, 
             headers={
                 **BROWSER_HEADERS,
                 "Referer": "https://www.nycgovparks.org/",
@@ -108,7 +109,7 @@ def create_download_attempts(url: str) -> List[Callable]:
         ) if "nycgovparks.org" in url else None,
     ]
 
-def download_file(url: str, output_path: str, max_download_time: int = 15) -> bool:
+def download_file(url: str, output_path: str, max_download_time) -> bool:
     """
     Download a file using multiple fallback methods.
     
@@ -124,7 +125,7 @@ def download_file(url: str, output_path: str, max_download_time: int = 15) -> bo
         return False
         
     # Try different download approaches
-    download_attempts = create_download_attempts(url)
+    download_attempts = create_download_attempts(url, max_download_time)
     
     for attempt_num, download_attempt in enumerate(download_attempts, 1):
         try:
@@ -278,7 +279,8 @@ def find_and_download_resources(
 def download_resource(
     resource_url: str, 
     output_dir: str = "downloads", 
-    filename: Optional[str] = None
+    filename: Optional[str] = None,
+    max_download_time=15
 ) -> Optional[str]:
     """
     Download a resource directly from a provided URL.
@@ -287,6 +289,7 @@ def download_resource(
         resource_url: Direct URL to the resource to download
         output_dir: Directory to save downloaded file
         filename: Optional filename to use (if None, will extract from URL)
+        max_download_time: max_download_time
         
     Returns:
         Path to downloaded file or None if download failed
@@ -301,7 +304,7 @@ def download_resource(
     output_path = os.path.join(output_dir, filename)
     
     # Download the file
-    if download_file(resource_url, output_path):
+    if download_file(resource_url, output_path, max_download_time):
         print(f"Successfully downloaded resource to {output_path}")
         return output_path
     

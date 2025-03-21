@@ -87,6 +87,12 @@ class Command(BaseCommand):
             help="Threshold for max dataset search results to return."
         )
         parser.add_argument(
+            "--max-download-time", 
+            type=float, 
+            default=15, 
+            help="Threshold for max timeout for downloading data files with requests."
+        )
+        parser.add_argument(
             "--vector-backend",
             choices=['faiss', 'pinecone'],
             default='pinecone',
@@ -395,7 +401,10 @@ class Command(BaseCommand):
                     
                     # Instead of downloading all resources, we're gonna just download one.
                     resource_url = assessment_result["resource_url"]
-                    output_path = download_resource(resource_url, output_dir, filename=dataset["id"])
+
+                    # Get the max download time
+                    max_download_time = options.get('max_download_time')
+                    output_path = download_resource(resource_url, output_dir, filename=dataset["id"], max_download_time=max_download_time)
                     
                     # Fix: Ensure output_paths is always a list
                     if output_path:
