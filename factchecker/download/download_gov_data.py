@@ -76,30 +76,30 @@ def create_download_attempts(url: str) -> List[Callable]:
     """
     return [
         # 1. Standard secure download
-        lambda: requests.get(url, stream=True, timeout=10),
+        lambda: requests.get(url, stream=True, timeout=15),
         
         # 2. With browser headers
-        lambda: requests.get(url, stream=True, timeout=10, headers=BROWSER_HEADERS),
+        lambda: requests.get(url, stream=True, timeout=15, headers=BROWSER_HEADERS),
         
         # 3. Insecure download (verify=False)
-        lambda: requests.get(url, stream=True, timeout=10, verify=False),
+        lambda: requests.get(url, stream=True, timeout=15, verify=False),
         
         # 4. Insecure with browser headers
-        lambda: requests.get(url, stream=True, timeout=10, verify=False, headers=BROWSER_HEADERS),
+        lambda: requests.get(url, stream=True, timeout=15, verify=False, headers=BROWSER_HEADERS),
         
         # 5. Try with http:// if https:// fails
-        lambda: requests.get(url.replace('https://', 'http://'), stream=True, timeout=10, headers=BROWSER_HEADERS) 
+        lambda: requests.get(url.replace('https://', 'http://'), stream=True, timeout=15, headers=BROWSER_HEADERS) 
         if url.startswith('https://') else None,
         
         # 6. Try with https:// if http:// fails
-        lambda: requests.get(url.replace('http://', 'https://'), stream=True, timeout=10, headers=BROWSER_HEADERS) 
+        lambda: requests.get(url.replace('http://', 'https://'), stream=True, timeout=15, headers=BROWSER_HEADERS) 
         if url.startswith('http://') else None,
         
         # 7. Special case for nycgovparks.org
         lambda: requests.get(
             url, 
             stream=True, 
-            timeout=10, 
+            timeout=15, 
             headers={
                 **BROWSER_HEADERS,
                 "Referer": "https://www.nycgovparks.org/",
@@ -108,7 +108,7 @@ def create_download_attempts(url: str) -> List[Callable]:
         ) if "nycgovparks.org" in url else None,
     ]
 
-def download_file(url: str, output_path: str, max_download_time: int = 10) -> bool:
+def download_file(url: str, output_path: str, max_download_time: int = 15) -> bool:
     """
     Download a file using multiple fallback methods.
     
@@ -174,7 +174,7 @@ def download_file(url: str, output_path: str, max_download_time: int = 10) -> bo
             "-o", output_path,  # Output file
             "-A", BROWSER_HEADERS["User-Agent"],  # User agent
             "-e", BROWSER_HEADERS["Referer"],  # Referer
-            "--retry", "3",  # Retry 3 times
+            "--retry", "1",  # Retry 1 time
             "--max-time", str(max_download_time),  # Set timeout
             url
         ]
