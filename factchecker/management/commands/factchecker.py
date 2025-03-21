@@ -344,11 +344,15 @@ class Command(BaseCommand):
                     with self.stdout_lock:
                         self.stdout.write(f"METADATA DEBUG {dataset}")
                 
-                is_relevant_predownload, relevance_score_predownload, reasoning_predownload = assess_datafile_relevance_predownload(
+                assessment_result = assess_datafile_relevance_predownload(
                     query, 
                     dataset,
                     relevance_threshold=0.4  # Use a fixed threshold for pre-download assessment
                 )
+
+                is_relevant_predownload = assessment_result["is_relevant"]
+                relevance_score_predownload = assessment_result["relevance_score"]
+                reasoning_predownload = assessment_result["reasoning"]
                 
                 if self.timing_enabled:
                     self.stop_timer(f"{dataset_timer_id}_predownload_assessment")
@@ -389,7 +393,15 @@ class Command(BaseCommand):
                     if self.timing_enabled:
                         self.start_timer(f"{dataset_timer_id}_download")
                     
-                    output_paths = download_all_resources(gov_api_key, dataset["id"], output_dir=output_dir)
+                    # Instead of downloading all resources, we're gonna just download one.
+                    resource_url = assessment_result["resource_url"]
+                    output_path = download_resource(resource_url, output_dir, filename=dataset["id"])
+                    
+                    # Fix: Ensure output_paths is always a list
+                    if output_path:
+                        output_paths = [output_path]  # Wrap the single path in a list
+                    else:
+                        output_paths = []  # Empty list if download failed
                     
                     if self.timing_enabled:
                         self.stop_timer(f"{dataset_timer_id}_download")
