@@ -1384,7 +1384,7 @@ export default function DatasetsPage() {
                       <TableHeader>
                         <TableRow>
                           <TableHead className="w-[40px]"></TableHead>
-                          <TableHead>Dataset</TableHead>
+                          <TableHead className="max-w-[250px] w-[250px]">Dataset</TableHead>
                           <TableHead className="w-[80px] text-center">Files</TableHead>
                           <TableHead className="w-[100px] text-center">Relevance</TableHead>
                           <TableHead className="w-[60px] text-center">Download</TableHead>
@@ -1414,10 +1414,14 @@ export default function DatasetsPage() {
                                   />
                                 </div>
                               </TableCell>
-                              <TableCell className="py-2" onClick={() => handleDatasetSelect(dataset)}>
-                                <div>
-                                  <p className="font-medium text-sm">{dataset.title}</p>
-                                  <p className="text-xs text-neutral-500 truncate">
+                              <TableCell className="py-2 max-w-[250px] w-[250px]" onClick={() => handleDatasetSelect(dataset)}>
+                                <div className="overflow-hidden">
+                                  <p className="font-medium text-sm truncate" title={dataset.title}>{dataset.title}</p>
+                                  <p className="text-xs text-neutral-500 truncate" title={dataset.organization?.title || 
+                                     dataset.organization_title || 
+                                     dataset.organization?.name || 
+                                     dataset.organization_name || 
+                                     'Unknown source'}>
                                     {dataset.organization?.title || 
                                      dataset.organization_title || 
                                      dataset.organization?.name || 

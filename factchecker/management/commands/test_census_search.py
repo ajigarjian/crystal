@@ -66,23 +66,35 @@ class Command(BaseCommand):
             location = None
             self.stdout.write(self.style.SUCCESS("Filters disabled, searching without filters"))
         
-        results = vector_search(
-            query=core_query,
-            similarity_threshold=similarity_threshold,
-            year=year,
-            tags=tags,
-            geo_level=geo_level,
-            location=location,
-            max_results=max_results,
-            verbose=verbose,
-            skip_empty_filters=True
-        )
+        # Try different similarity thresholds until we get results
+        thresholds_to_try = [0.3, 0.25, 0.2, 0.15, 0.1]
+        if similarity_threshold not in thresholds_to_try:
+            thresholds_to_try.insert(0, similarity_threshold)
+        
+        results = []
+        for threshold in thresholds_to_try:
+            self.stdout.write(self.style.SUCCESS(f"Trying similarity threshold: {threshold}"))
+            results = vector_search(
+                query=core_query,
+                similarity_threshold=threshold,
+                year=year,
+                tags=tags,
+                geo_level=geo_level,
+                location=location,
+                max_results=max_results,
+                verbose=verbose,
+                skip_empty_filters=True
+            )
+            
+            if results:
+                self.stdout.write(self.style.SUCCESS(f"Found {len(results)} results with threshold {threshold}"))
+                break
         
         # Print results
         self.stdout.write(self.style.SUCCESS(f"\nFound {len(results)} matching datasets"))
         
         if not results:
-            self.stdout.write(self.style.WARNING("No results found matching your query."))
+            self.stdout.write(self.style.WARNING("No results found matching your query with any threshold."))
             return
             
         for i, result in enumerate(results):

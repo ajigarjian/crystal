@@ -474,9 +474,10 @@ def stream_search_datasets(request):
     similarity_threshold = float(request.data.get('similarity_threshold', 0.3))
     search_method = request.data.get('search_method', None)  # 'vector', 'keyword', or None for hybrid
     max_results = int(request.data.get('max_results', 15))
+    census_max_results = int(request.data.get('census_max_results', 5))  # New parameter with default of 5
     relevance_threshold = float(request.data.get('relevance_threshold', 0.4))
     
-    print(f"Parameters: method={search_method}, threshold={similarity_threshold}, max_results={max_results}")
+    print(f"Parameters: method={search_method}, threshold={similarity_threshold}, max_results={max_results}, census_max_results={census_max_results}")
     logger.info(f"[API] Received streaming search request: '{query}' (method: {search_method}, threshold: {similarity_threshold})")
     
     # Create a generator function that yields dataset results as they come in
@@ -508,6 +509,7 @@ def stream_search_datasets(request):
             
             vector_datasets = []
             keyword_datasets = []
+            census_datasets = []  # New list for census datasets
             all_datasets_count = 0
             
             # Helper function to enrich and yield a dataset
@@ -569,122 +571,205 @@ def stream_search_datasets(request):
                     'timestamp': time.time() - start_time
                 }, cls=NumpyEncoder) + '\n'
             
-            # Vector search with streaming results
-            if search_method in ['vector', None]:  # Vector or hybrid
-                yield json.dumps({
-                    'type': 'status',
-                    'message': 'I\'m searching through government databases...',
-                    'timestamp': time.time() - start_time
-                }, cls=NumpyEncoder) + '\n'
-                
-                # Import and use single_search instead of parallel_search
-                from factchecker.search.search_utils import single_search
-                
-                # Keep track of seen dataset IDs
-                seen_vector_ids = set()
-                
-                # Perform single search
-                results = single_search(
-                    query,
-                    search_function=vector_search_datasets,
+            # Start Census search first
+            from factchecker.search.census_search import vector_search as census_vector_search
+            
+            # Process the query to extract structured parameters
+            from factchecker.search.census_search import process_query as process_census_query
+            
+            # Extract structured info from query for Census search
+            query_info = process_census_query(query)
+            
+            # Start Census search
+            yield json.dumps({
+                'type': 'status',
+                'message': 'I\'m searching through Census databases...',
+                'timestamp': time.time() - start_time
+            }, cls=NumpyEncoder) + '\n'
+            
+            try:
+                # Perform Census search
+                census_results = census_vector_search(
+                    query=query,
                     similarity_threshold=similarity_threshold,
-                    max_results=max_results,
+                    year=query_info.get('year'),
+                    tags=query_info.get('tags'),
+                    geo_level=query_info.get('geo_level'),
+                    location=query_info.get('location'),
+                    max_results=census_max_results,  # Use census-specific max results
                     verbose=False
                 )
                 
-                # Process and yield each result
-                for result in results:
-                    if result['id'] not in seen_vector_ids:
-                        seen_vector_ids.add(result['id'])
-                        vector_datasets.append(result)
-                        yield from process_and_yield_dataset(result, 'vector')
-                
-                # Status update after vector search
-                if vector_datasets:
+                # Send status update for Census results
+                if census_results:
                     yield json.dumps({
                         'type': 'status',
-                        'message': f'I\'ve found {len(vector_datasets)} datasets that might be relevant to your query.',
+                        'message': f'I\'ve found {len(census_results)} datasets from Census sources.',
                         'timestamp': time.time() - start_time
                     }, cls=NumpyEncoder) + '\n'
+                
+                # Convert Census results to the expected format and add to datasets
+                for result in census_results:
+                    # Format the Census dataset to match our frontend structure
+                    census_dataset = {
+                        'id': f"census-{result['id']}",  # Prefix with 'census-' to avoid ID collisions
+                        'title': result['title'],
+                        'description': result['description'],
+                        'similarity': result['score'],
+                        'relevance_score': result['score'],
+                        'organization_name': 'U.S. Census Bureau',
+                        'organization_title': 'United States Census Bureau',
+                        'resources': [],  # Will be populated with API endpoints
+                        'search_source': 'census',
+                        'vintage': result['vintage'],
+                        'geographic_levels': result.get('geographic_levels', []),
+                        'image_url': '/images/census_logo.png',  # Add Census logo path
+                    }
+                    
+                    # Get and add tags from the dataset
+                    if 'dataset' in result and hasattr(result['dataset'], 'tags'):
+                        # Get tag names from the CensusTag objects
+                        tag_names = list(result['dataset'].tags.all().values_list('name', flat=True))
+                        census_dataset['tags'] = tag_names
+                    
+                    # Add a resource for the Census API endpoint
+                    if hasattr(result.get('dataset', {}), 'api_endpoint'):
+                        census_dataset['resources'] = [{
+                            'id': f"census-api-{result['id']}",
+                            'name': f"{result['title']} API",
+                            'url': result['dataset'].api_endpoint,
+                            'description': "Census API endpoint for this dataset",
+                            'format': 'API'
+                        }]
+                    
+                    # Add to our collection and yield the dataset
+                    census_datasets.append(census_dataset)
+                    yield from process_and_yield_dataset(census_dataset, 'census')
             
-            # Keyword search with streaming results
-            if search_method in ['keyword', None]:  # Keyword or hybrid
+            except Exception as e:
+                print(f"Error processing Census results: {e}")
                 yield json.dumps({
                     'type': 'status',
-                    'message': 'I\'m checking additional government data sources...',
+                    'message': 'I encountered an issue with Census data sources but will continue with other sources.',
                     'timestamp': time.time() - start_time
                 }, cls=NumpyEncoder) + '\n'
-                
-                try:
-                    # Get keyword search results
-                    keyword_results = search_datasets(query, gov_api_key, similarity_threshold=keyword_threshold)
-                    keyword_datasets = keyword_results
-                    
-                    # In hybrid mode, only yield keyword results that weren't found by vector search
-                    if search_method is None:  # hybrid mode
-                        vector_ids = {dataset['id'] for dataset in vector_datasets}
-                        
-                        # Find datasets that appear in both searches
-                        overlap_ids = set()
-                        for dataset in keyword_datasets:
-                            if dataset['id'] in vector_ids:
-                                overlap_ids.add(dataset['id'])
-                                # Update the search source for overlapping datasets
-                                for vd in vector_datasets:
-                                    if vd['id'] == dataset['id']:
-                                        vd['search_source'] = 'both'
-                                        # Re-yield the updated dataset
-                                        yield json.dumps({
-                                            'type': 'dataset_update',
-                                            'data': vd,
-                                            'timestamp': time.time() - start_time
-                                        }, cls=NumpyEncoder) + '\n'
-                                        break
-                        
-                        # Don't share technical details about vector/keyword distinction
-                        # Just provide a simple update on progress
-                        if keyword_datasets:
-                            yield json.dumps({
-                                'type': 'status',
-                                'message': 'I\'m discovering additional datasets that might help answer your question...',
-                                'timestamp': time.time() - start_time
-                            }, cls=NumpyEncoder) + '\n'
-                        
-                        # Process and yield only new keyword datasets
-                        for dataset in keyword_datasets:
-                            if dataset['id'] not in vector_ids:
-                                yield from process_and_yield_dataset(dataset, 'keyword')
-                    else:
-                        # In keyword-only mode, yield all results
-                        for dataset in keyword_datasets:
-                            yield from process_and_yield_dataset(dataset, 'keyword')
-                except Exception as e:
+            
+            # Now launch Data.gov searches
+            # Continue with regular Data.gov search as before
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                if search_method in ['vector', None]:  # Vector or hybrid
                     yield json.dumps({
-                        'type': 'error',
-                        'message': f'I ran into a problem finding additional datasets: {str(e)}',
+                        'type': 'status',
+                        'message': 'I\'m searching through data.gov datasets...',
                         'timestamp': time.time() - start_time
                     }, cls=NumpyEncoder) + '\n'
+                    
+                    # Keep track of seen dataset IDs
+                    seen_vector_ids = set()
+                    
+                    # Import the single_search function
+                    from factchecker.search.search_utils import single_search
+                    
+                    # Perform single search
+                    results = single_search(
+                        query,
+                        search_function=vector_search_datasets,
+                        similarity_threshold=similarity_threshold,
+                        max_results=max_results,
+                        verbose=False
+                    )
+                    
+                    # Process and yield each result
+                    for result in results:
+                        if result['id'] not in seen_vector_ids:
+                            seen_vector_ids.add(result['id'])
+                            vector_datasets.append(result)
+                            yield from process_and_yield_dataset(result, 'vector')
+                
+                # Keyword search with streaming results
+                if search_method in ['keyword', None]:  # Keyword or hybrid
+                    yield json.dumps({
+                        'type': 'status',
+                        'message': 'I\'m checking additional data.gov datasets...',
+                        'timestamp': time.time() - start_time
+                    }, cls=NumpyEncoder) + '\n'
+                    
+                    try:
+                        # Get keyword search results
+                        keyword_results = search_datasets(query, gov_api_key, similarity_threshold=keyword_threshold)
+                        keyword_datasets = keyword_results
+                        
+                        # In hybrid mode, only yield keyword results that weren't found by vector search
+                        if search_method is None:  # hybrid mode
+                            vector_ids = {dataset['id'] for dataset in vector_datasets}
+                            
+                            # Find datasets that appear in both searches
+                            overlap_ids = set()
+                            for dataset in keyword_results:
+                                if dataset['id'] in vector_ids:
+                                    overlap_ids.add(dataset['id'])
+                                    # Update the search source for overlapping datasets
+                                    for vd in vector_datasets:
+                                        if vd['id'] == dataset['id']:
+                                            vd['search_source'] = 'both'
+                                            # Re-yield the updated dataset
+                                            yield json.dumps({
+                                                'type': 'dataset_update',
+                                                'data': vd,
+                                                'timestamp': time.time() - start_time
+                                            }, cls=NumpyEncoder) + '\n'
+                                            break
+                        
+                            # Don't share technical details about vector/keyword distinction
+                            # Just provide a simple update on progress
+                            if keyword_results:
+                                yield json.dumps({
+                                    'type': 'status',
+                                    'message': 'I\'m discovering additional datasets that might help answer your question...',
+                                    'timestamp': time.time() - start_time
+                                }, cls=NumpyEncoder) + '\n'
+                            
+                            # Process and yield only new keyword datasets
+                            for dataset in keyword_results:
+                                if dataset['id'] not in vector_ids:
+                                    yield from process_and_yield_dataset(dataset, 'keyword')
+                        else:
+                            # In keyword-only mode, yield all results
+                            for dataset in keyword_results:
+                                yield from process_and_yield_dataset(dataset, 'keyword')
+                    except Exception as e:
+                        yield json.dumps({
+                            'type': 'error',
+                            'message': f'I ran into a problem finding additional datasets: {str(e)}',
+                            'timestamp': time.time() - start_time
+                        }, cls=NumpyEncoder) + '\n'
             
             # Calculate execution time and send search completion message
             search_execution_time = time.time() - start_time
             
-            # Determine total unique datasets
+            # Determine total unique datasets (combining all sources)
             if search_method is None:  # hybrid search
+                # Start with vector datasets
                 all_datasets = vector_datasets.copy()
-                vector_ids = {dataset['id'] for dataset in vector_datasets}
+                all_dataset_ids = {dataset['id'] for dataset in all_datasets}
                 
                 # Add keyword datasets that weren't in vector results
                 for dataset in keyword_datasets:
-                    if dataset['id'] not in vector_ids:
+                    if dataset['id'] not in all_dataset_ids:
                         all_datasets.append(dataset)
+                        all_dataset_ids.add(dataset['id'])
+                
+                # Add census datasets (they have unique IDs with 'census-' prefix)
+                all_datasets.extend(census_datasets)
                 
                 # Sort by similarity score (higher is better)
                 all_datasets.sort(key=lambda x: x.get('similarity', 0), reverse=True)
                 
                 total_count = len(all_datasets)
             else:
-                # Either vector or keyword only
+                # Either vector or keyword only (plus census)
                 all_datasets = vector_datasets if search_method == 'vector' else keyword_datasets
+                all_datasets.extend(census_datasets)  # Add census datasets
                 total_count = len(all_datasets)
             
             # Send search phase completion message
@@ -732,73 +817,93 @@ def stream_search_datasets(request):
                     'timestamp': time.time() - start_time
                 }, cls=NumpyEncoder) + '\n'
                 
-                # 1. Pre-download relevance assessment
-                from factchecker.processing.analysis.search_result_analyzer import assess_datafile_relevance_predownload
-                try:
-                    is_relevant_predownload, relevance_score_predownload, reasoning_predownload = assess_datafile_relevance_predownload(
-                        query, 
-                        dataset,
-                        relevance_threshold=0.4
-                    )
+                # Check if this is a Census dataset (ID starts with "census-")
+                if dataset_id.startswith('census-'):
+                    # Auto-mark Census datasets as relevant
+                    is_relevant = True
+                    relevance_score = dataset.get('similarity', 0.8)  # Use the similarity score as relevance score
+                    reasoning = "This dataset from the U.S. Census Bureau contains official government statistics that are likely relevant to your query."
                     
-                    # Update dataset with pre-assessment results
+                    # Log that we're skipping LLM check for Census data
+                    print(f"Auto-marking Census dataset as relevant: {dataset_id}")
+                    
+                    # Update dataset with relevance info
                     dataset['pre_assessment'] = {
-                        'is_relevant': is_relevant_predownload,
-                        'relevance_score': relevance_score_predownload,
-                        'reasoning': reasoning_predownload
+                        'is_relevant': is_relevant,
+                        'relevance_score': relevance_score,
+                        'reasoning': reasoning
                     }
                     
-                    # Simple status update about relevance with reasoning
-                    relevance_message = "relevant" if is_relevant_predownload else "not relevant"
+                    # Status update
                     yield json.dumps({
                         'type': 'status',
-                        'message': f'I\'ve completed my assessment: This dataset appears to be {relevance_message}.\nReasoning: {reasoning_predownload}',
+                        'message': f'I\'ve determined this Census dataset is relevant to your query.',
                         'timestamp': time.time() - start_time
                     }, cls=NumpyEncoder) + '\n'
-                    
-                    # Store relevance assessment and update status
-                    dataset['relevance'] = {
-                        'is_relevant': is_relevant_predownload,
-                        'relevance_score': relevance_score_predownload,
-                        'reasoning': reasoning_predownload
-                    }
-
-                    # Update dataset with assessment and mark as complete
-                    yield json.dumps({
-                        'type': 'dataset_update',
-                        'data': {
-                            'id': dataset_id,
-                            'status': 'relevant' if is_relevant_predownload else 'not_relevant',
-                            'relevance': {
-                                'is_relevant': is_relevant_predownload,
-                                'relevance_score': relevance_score_predownload,
-                                'reasoning': reasoning_predownload
+                else:
+                    # 1. Pre-download relevance assessment for non-Census datasets
+                    from factchecker.processing.analysis.search_result_analyzer import assess_datafile_relevance_predownload
+                    try:
+                        is_relevant, relevance_score, reasoning = assess_datafile_relevance_predownload(
+                            query, 
+                            dataset,
+                            relevance_threshold=0.4
+                        )
+                        
+                        # Update dataset with pre-assessment results
+                        dataset['pre_assessment'] = {
+                            'is_relevant': is_relevant,
+                            'relevance_score': relevance_score,
+                            'reasoning': reasoning
+                        }
+                        
+                        # Simple status update about relevance with reasoning
+                        relevance_message = "relevant" if is_relevant else "not relevant"
+                        yield json.dumps({
+                            'type': 'status',
+                            'message': f'I\'ve completed my assessment: This dataset appears to be {relevance_message}.\nReasoning: {reasoning}',
+                            'timestamp': time.time() - start_time
+                        }, cls=NumpyEncoder) + '\n'
+                    except Exception as e:
+                        print(f"Error assessing relevance: {e}")
+                        yield json.dumps({
+                            'type': 'dataset_update',
+                            'data': {
+                                'id': dataset_id,
+                                'status': 'error',
+                                'error': f'Assessment error: {str(e)}',
+                                'processing_complete': True
                             },
-                            'processing_complete': True
-                        },
-                        'timestamp': time.time() - start_time
-                    }, cls=NumpyEncoder) + '\n'
-                    
-                    # Skip if not relevant - but we've already sent the dataset_update message
-                    if not is_relevant_predownload:
+                            'timestamp': time.time() - start_time
+                        }, cls=NumpyEncoder) + '\n'
                         continue
-
-                except Exception as e:
-                    print(f"Error assessing relevance: {e}")
-                    yield json.dumps({
-                        'type': 'dataset_update',
-                        'data': {
-                            'id': dataset_id,
-                            'status': 'error',
-                            'error': f'Assessment error: {str(e)}',
-                            'processing_complete': True
-                        },
-                        'timestamp': time.time() - start_time
-                    }, cls=NumpyEncoder) + '\n'
-                    continue
                 
-                # SKIP ALL THE DOWNLOADING AND POST-DOWNLOAD ASSESSMENT CODE
-                # (Download resources, multi-file analysis, loading data, and final assessment)
+                # Store relevance assessment and update status (common code for both Census and non-Census)
+                dataset['relevance'] = {
+                    'is_relevant': is_relevant,
+                    'relevance_score': relevance_score,
+                    'reasoning': reasoning
+                }
+
+                # Update dataset with assessment and mark as complete
+                yield json.dumps({
+                    'type': 'dataset_update',
+                    'data': {
+                        'id': dataset_id,
+                        'status': 'relevant' if is_relevant else 'not_relevant',
+                        'relevance': {
+                            'is_relevant': is_relevant,
+                            'relevance_score': relevance_score,
+                            'reasoning': reasoning
+                        },
+                        'processing_complete': True
+                    },
+                    'timestamp': time.time() - start_time
+                }, cls=NumpyEncoder) + '\n'
+                
+                # Skip if not relevant - but we've already sent the dataset_update message
+                if not is_relevant:
+                    continue
             
             # Final execution time
             final_execution_time = time.time() - start_time
