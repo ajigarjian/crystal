@@ -660,7 +660,7 @@ def stream_search_datasets(request):
                 if search_method in ['vector', None]:  # Vector or hybrid
                     yield json.dumps({
                         'type': 'status',
-                        'message': 'I\'m searching through government databases...',
+                        'message': 'I\'m searching through data.gov datasets...',
                         'timestamp': time.time() - start_time
                     }, cls=NumpyEncoder) + '\n'
                     
@@ -690,7 +690,7 @@ def stream_search_datasets(request):
                 if search_method in ['keyword', None]:  # Keyword or hybrid
                     yield json.dumps({
                         'type': 'status',
-                        'message': 'I\'m checking additional government data sources...',
+                        'message': 'I\'m checking additional data.gov datasets...',
                         'timestamp': time.time() - start_time
                     }, cls=NumpyEncoder) + '\n'
                     
