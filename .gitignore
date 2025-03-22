@@ -42,7 +42,7 @@ ENV/
 data_files/
 
 # Pre-populated database
-db.sqlite3
+db.sqlite3*
 data_gov_catalog.json
 
 .DS_Store
