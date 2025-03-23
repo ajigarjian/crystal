@@ -53,3 +53,15 @@ faiss_index/
 faiss_index/*
 *.index
 dataset_ids.pkl
+
+# Firebase
+firebase-debug.log
+.firebaserc
+.firebase/
+.firebase/*
+
+# Firebase Functions
+functions/node_modules/
+functions/lib/
+functions/package-lock.json
+functions/.runtimeconfig.json
