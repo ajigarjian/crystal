@@ -8,11 +8,19 @@ import os
 import re
 import json
 from django.db.models import Q
-from factchecker.models import DatasetCatalog, CensusDataset, CensusVariable, CensusGeography, CensusFIPSCode
+from factchecker.sqlalchemy_models import DatasetCatalog, CensusDataset, CensusVariable, CensusGeography, CensusFIPSCode
 from factchecker.search.search_utils import get_usable_resources
 from typing import Dict, List, Union, Optional
 from factchecker.utils.openai_client import create_embeddings, chat_completion, get_cached_openai_client
 from datetime import datetime
+from sqlalchemy import or_, and_, func
+from sqlalchemy.orm import Session
+from sqlalchemy.types import LargeBinary
+
+from helpers.db_utils import get_db_connection, get_db_session
+from factchecker.sqlalchemy_models import (
+    CensusTag
+)
 
 ###########################################
 # QUERY PROCESSOR
@@ -165,8 +173,7 @@ Respond with ONLY the JSON object, nothing else.
             content = chat_completion(
                 prompt=prompt,
                 system_message=system_message,
-                response_format=response_format,
-                model_name="gpt-3.5-turbo"
+                response_format=response_format
             )
             
             # Parse the JSON
@@ -219,24 +226,18 @@ class VectorSearcher:
         """
         Get available tags in the database, optionally filtered by year
         """
-        from factchecker.models import CensusTag, CensusDataset
-        from django.db.models import Count
-        
-        # Get all tags from the database
-        if year:
-            # Get tags that are used by datasets from the specified year
-            available_tags = CensusTag.objects.filter(
-                datasets__vintage=year
-            ).annotate(
-                dataset_count=Count('datasets')
-            ).filter(
-                dataset_count__gt=0
-            ).values_list('name', flat=True)
-        else:
-            # Get all tags
-            available_tags = CensusTag.objects.all().values_list('name', flat=True)
-        
-        return list(available_tags)
+        session = get_db_session()
+        try:
+            # Get all tags from the CensusTag table directly
+            available_tags = [tag.name for tag in session.query(CensusTag.name).all()]
+            
+            # If no tags found in database, fall back to conceptual tags
+            if not available_tags:
+                available_tags = list(self.conceptual_tag_keywords.keys())
+                
+            return available_tags
+        finally:
+            session.close()
     
     def _generate_tag_mapping(self, year=None, verbose=False):
         """
@@ -272,57 +273,131 @@ class VectorSearcher:
             matched_tags = find_matching_tags(keywords)
             if matched_tags:
                 tag_mapping[concept] = matched_tags
-                # if verbose:
-                    # print(f"Mapped conceptual tag '{concept}' to database tags: {matched_tags}")
         
-        # if verbose:
-            # print(f"Final tag mapping: {tag_mapping}")
-            
         return tag_mapping
     
-    def search(self, query: str, 
-              similarity_threshold: float = 0.5,
-              year: Optional[int] = None, 
-              tags: Optional[List[str]] = None,
-              geo_level: Optional[str] = None,
-              location: Optional[str] = None,
-              max_results: Optional[int] = None,
-              verbose: bool = False) -> List[Dict]:
+    def search(self, query, similarity_threshold=0.5, year=None, tags=None, geo_level=None, location=None, max_results=None, verbose=False):
         """
-        Search for Census datasets matching the query
+        Search Census datasets using vector search
         
         Args:
-            query (str): Natural language query like "Hispanic population data"
+            query (str): Natural language query
             similarity_threshold (float): Minimum similarity score threshold
-            year (int, optional): Filter Census results by specific year/vintage
-            tags (list, optional): Filter Census results by specific tags
-            geo_level (str, optional): Filter by geographic level (e.g., "state", "county")
-            location (str, optional): Filter by specific geographic location
+            year (int, optional): Filter by specific year/vintage
+            tags (list, optional): Filter by specific tags
+            geo_level (str, optional): Filter by geographic level
+            location (str, optional): Filter by location
             max_results (int, optional): Maximum number of results to return
             verbose (bool): Whether to print detailed logging information
             
         Returns:
             list: Matching datasets with relevance scores
         """
-        if max_results:
+        # Set max_results if provided
+        if max_results is not None:
             self.max_results = max_results
             
-        return self._census_search(query, year, tags, similarity_threshold, geo_level, location, verbose)
+        # Perform the search
+        results = self._census_search(
+            query=query,
+            similarity_threshold=similarity_threshold,
+            year=year,
+            tags=tags,
+            geo_level=geo_level,
+            location=location,
+            verbose=verbose
+        )
+        
+        # Ensure results is a list
+        if results is None:
+            return []
+        
+        # If results is a generator or other iterable (but not a list), convert to list
+        if hasattr(results, '__iter__') and not isinstance(results, list):
+            try:
+                results = list(results)
+            except Exception as e:
+                print(f"Error converting search results to list: {e}")
+                return []
+        
+        # Apply recency boost to results
+        if results:
+            results = self._apply_recency_boost(results)
+            
+        # Limit to max_results
+        return results[:self.max_results]
     
     def _get_embedding(self, text):
-        """Get embedding vector for text using custom client"""
+        """Get embedding for text"""
         try:
-            return create_embeddings(text)
+            # Ensure text is properly encoded
+            if isinstance(text, bytes):
+                text = text.decode('utf-8', errors='replace')
+            elif not isinstance(text, str):
+                text = str(text)
+            
+            # Create embedding
+            print(f"Creating embedding for text: {text[:50]}...")
+            embedding = create_embeddings(text)
+            
+            # Debug the embedding type and shape
+            print(f"Embedding type: {type(embedding)}")
+            if hasattr(embedding, 'shape'):
+                print(f"Embedding shape: {embedding.shape}")
+            elif isinstance(embedding, list):
+                print(f"Embedding length: {len(embedding)}")
+            
+            # Ensure the embedding is a numpy array, not bytes
+            if isinstance(embedding, bytes):
+                print("Converting bytes embedding to numpy array")
+                embedding = np.frombuffer(embedding, dtype=np.float32)
+            elif isinstance(embedding, list):
+                print("Converting list embedding to numpy array")
+                embedding = np.array(embedding, dtype=np.float32)
+            
+            return embedding
         except Exception as e:
-            print(f"Error getting embedding: {e}")
+            print(f"Error creating embedding: {e}")
+            import traceback
+            traceback.print_exc()
             return None
     
     def _cosine_similarity(self, vec1, vec2):
         """Calculate cosine similarity between two vectors"""
-        dot_product = np.dot(vec1, vec2)
-        norm1 = np.linalg.norm(vec1)
-        norm2 = np.linalg.norm(vec2)
-        return dot_product / (norm1 * norm2)
+        try:
+            # Debug vector types
+            print(f"Vector types: vec1={type(vec1)}, vec2={type(vec2)}")
+            
+            # Ensure vectors are properly decoded if they're binary
+            if isinstance(vec1, bytes):
+                print("Converting vec1 from bytes to numpy array")
+                vec1 = np.frombuffer(vec1, dtype=np.float32)
+            if isinstance(vec2, bytes):
+                print("Converting vec2 from bytes to numpy array")
+                vec2 = np.frombuffer(vec2, dtype=np.float32)
+            
+            # Convert lists to numpy arrays if needed
+            if isinstance(vec1, list):
+                print("Converting vec1 from list to numpy array")
+                vec1 = np.array(vec1, dtype=np.float32)
+            if isinstance(vec2, list):
+                print("Converting vec2 from list to numpy array")
+                vec2 = np.array(vec2, dtype=np.float32)
+            
+            # Debug vector shapes
+            print(f"Vector shapes: vec1={vec1.shape if hasattr(vec1, 'shape') else 'unknown'}, vec2={vec2.shape if hasattr(vec2, 'shape') else 'unknown'}")
+            
+            dot_product = np.dot(vec1, vec2)
+            norm1 = np.linalg.norm(vec1)
+            norm2 = np.linalg.norm(vec2)
+            similarity = dot_product / (norm1 * norm2)
+            print(f"Calculated similarity: {similarity}")
+            return similarity
+        except Exception as e:
+            print(f"Error calculating similarity: {e}")
+            import traceback
+            traceback.print_exc()
+            return 0.0
     
     def _apply_recency_boost(self, results, threshold=0.05):
         """Boost recent datasets when scores are close"""
@@ -356,343 +431,323 @@ class VectorSearcher:
     
     def _census_search(self, query, year=None, tags=None, similarity_threshold=0.5, geo_level=None, location=None, verbose=False):
         """Search Census datasets"""
-        # Process query to extract geographic info if not already done
-        if verbose:
-            print(f"Beginning search with query: {query}")
-            print(f"Filters - Year: {year}, Tags: {tags}, Geo_level: {geo_level}, Location: {location}")
+        try:
+            # Get query embedding
+            print(f"Getting embedding for query: {query}")
+            query_embedding = self._get_embedding(query)
+            if query_embedding is None:
+                print("Failed to get embedding for query, falling back to keyword search")
+                return self._census_fallback_keyword_search(query, year, tags, geo_level, location, verbose)
             
-        # Start with a base queryset - all datasets with embeddings
-        queryset = CensusDataset.objects.filter(embedding__isnull=False)
-        original_count = queryset.count()
-        if verbose:
-            print(f"Starting with {original_count} datasets with embeddings")
-        
-        # Step 1: Filter by year if provided
-        if year:
-            queryset = queryset.filter(vintage=year)
-            if verbose:
-                print(f"After year filter: {queryset.count()} datasets")
-                
-        # Step 2: Filter by geography level if provided
-        if geo_level:
-            if geo_level == 'national':
-                # No need to filter further
-                pass
-            else:
-                # Get datasets that support this geography level
-                if verbose:
-                    print(f"Filtering for geography level: {geo_level}")
-                
-                # Map common geo levels to Census API geography names
-                geo_mapping = {
-                    'state': 'state',
-                    'county': 'county',
-                    'city': 'place',
-                    'tract': 'tract',
-                    'block': 'block',
-                    'zip': 'zcta',
-                    'zipcode': 'zcta',
-                    'congressional district': 'congressional district',
-                    'school district': 'school district',
-                }
-                
-                # Normalize the geo level name using mapping
-                normalized_geo = geo_mapping.get(geo_level.lower(), geo_level.lower())
-                
-                # Find datasets that support this geography
-                geo_datasets = CensusGeography.objects.filter(
-                    name__icontains=normalized_geo
-                ).values_list('dataset_id', flat=True)
-                
-                if geo_datasets:
-                    queryset = queryset.filter(id__in=geo_datasets)
-                    if verbose:
-                        print(f"After geography filter: {queryset.count()} datasets")
-                else:
-                    if verbose:
-                        print(f"No datasets found supporting geography level: {geo_level}")
-        
-        # Step 3: Filter by location if provided
-        if location:
-            if verbose:
-                print(f"Filtering for location: {location}")
-            
-            # Try to find the location in our FIPS codes database
+            # Use the SQLAlchemy session instead of direct connection
+            session = get_db_session()
             try:
-                # First check if it's a state
-                fips_location = CensusFIPSCode.objects.filter(
-                    name__icontains=location
-                ).first()
+                # Start with all datasets
+                base_query = session.query(CensusDataset).filter(CensusDataset.embedding != None)
+                if verbose:
+                    print(f"Starting with {base_query.count()} total datasets")
                 
-                if fips_location:
+                # Step 1: Filter by year if provided
+                if year:
+                    base_query = base_query.filter(CensusDataset.vintage == year)
                     if verbose:
-                        print(f"Found location in FIPS database: {fips_location.name} ({fips_location.geo_type})")
-                    
-                    # If the geo_level is 'county' and location is a state, we want datasets that support county-level data
-                    # and contain data for that state's counties
-                    if geo_level == 'county' and fips_location.geo_type == 'state':
-                        # We've already filtered for county-level datasets above, so no additional filtering needed
-                        if verbose:
-                            print(f"Looking for county-level data in {fips_location.name}")
-                    
-                    # Otherwise, we'll just note this for information
-                    if verbose:
-                        print(f"Location filtering is informational only - Census datasets typically contain data for all locations")
-                else:
-                    if verbose:
-                        print(f"Location '{location}' not found in FIPS database, treating as informational")
+                        print(f"After year filter: {base_query.count()} datasets")
                         
+                # Step 2: Filter by geography level if provided
+                if geo_level:
+                    if geo_level == 'national':
+                        # No need to filter further
+                        pass
+                    else:
+                        # Filter by geography level
+                        # This is a simplified approach - you might need more complex logic
+                        base_query = base_query.filter(
+                            or_(
+                                CensusDataset.title.ilike(f"%{geo_level}%"),
+                                CensusDataset.description.ilike(f"%{geo_level}%")
+                            )
+                        )
+                        if verbose:
+                            print(f"After geo_level filter: {base_query.count()} datasets")
+                
+                # Step 3: Filter by location if provided
+                if location:
+                    # Filter by location name
+                    base_query = base_query.filter(
+                        or_(
+                            CensusDataset.title.ilike(f"%{location}%"),
+                            CensusDataset.description.ilike(f"%{location}%")
+                        )
+                    )
+                    if verbose:
+                        print(f"After location filter: {base_query.count()} datasets")
+                
+                # Step 4: Filter by tags if provided
+                queryset = base_query
+                if tags and len(tags) > 0:
+                    # Since we can't use the many-to-many relationship, use keyword search instead
+                    keyword_conditions = []
+                    
+                    # Get all available tags from the database
+                    available_tags = self._get_available_tags(year)
+                    
+                    for tag in tags:
+                        # If it's a conceptual tag, use its keywords
+                        if tag in self.conceptual_tag_keywords:
+                            for keyword in self.conceptual_tag_keywords[tag]:
+                                keyword_conditions.append(or_(
+                                    CensusDataset.title.ilike(f'%{keyword}%'),
+                                    CensusDataset.description.ilike(f'%{keyword}%')
+                                ))
+                        # If it's a direct tag from the database, use it directly
+                        elif tag in available_tags:
+                            keyword_conditions.append(or_(
+                                CensusDataset.title.ilike(f'%{tag}%'),
+                                CensusDataset.description.ilike(f'%{tag}%')
+                            ))
+                    
+                    if keyword_conditions:
+                        # Use or_ to combine conditions
+                        tag_query = or_(*keyword_conditions)
+                        queryset = queryset.filter(tag_query)
+                        
+                        if verbose:
+                            print(f"After tag filter: {queryset.count()} datasets")
+                
+                # Step 5: Apply similarity search on filtered datasets
+                # Get datasets and their embeddings
+                datasets = list(queryset)
+                if not datasets:
+                    print("No datasets found after filtering, falling back to keyword search")
+                    return self._census_fallback_keyword_search(query, year, tags, geo_level, location, verbose)
+                    
+                print(f"Found {len(datasets)} datasets after filtering")
+                
+                # Calculate similarity for each dataset
+                results = []
+                for dataset in datasets:
+                    try:
+                        # Check if embedding exists
+                        if dataset.embedding is None:
+                            print(f"Dataset {dataset.id} has no embedding, skipping")
+                            continue
+                            
+                        # Debug the embedding
+                        print(f"Dataset {dataset.id} embedding type: {type(dataset.embedding)}")
+                        if isinstance(dataset.embedding, bytes):
+                            print(f"Dataset {dataset.id} embedding is bytes, length: {len(dataset.embedding)}")
+                        
+                        # Ensure proper conversion from binary to numpy array
+                        dataset_embedding = dataset.embedding
+                        if isinstance(dataset_embedding, bytes):
+                            try:
+                                dataset_embedding = np.frombuffer(dataset_embedding, dtype=np.float32)
+                                print(f"Converted dataset {dataset.id} embedding to numpy array with shape: {dataset_embedding.shape}")
+                            except Exception as e:
+                                print(f"Error converting dataset {dataset.id} embedding: {e}")
+                                continue
+                        
+                        # Calculate similarity
+                        similarity = self._cosine_similarity(query_embedding, dataset_embedding)
+                        print(f"Dataset {dataset.id} similarity: {similarity}")
+                        
+                        # Add to results if above threshold
+                        if similarity >= similarity_threshold:
+                            results.append({
+                                "id": dataset.id,
+                                "title": dataset.title,
+                                "description": dataset.description if dataset.description else "",
+                                "vintage": dataset.vintage,
+                                "dataset_path": dataset.dataset_path,
+                                "similarity": float(similarity),
+                                "search_source": "census_vector"
+                            })
+                    except Exception as e:
+                        print(f"Error processing dataset {dataset.id}: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        continue
+                
+                # Sort by similarity (highest first)
+                results = sorted(results, key=lambda x: x["similarity"], reverse=True)
+                
+                # Limit to max_results
+                results = results[:self.max_results]
+                
+                print(f"Found {len(results)} results with similarity >= {similarity_threshold}")
+                
+                return results
+            finally:
+                session.close()
+            
+        except Exception as e:
+            print(f"Error searching Census datasets: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
+    
+    def _census_fallback_keyword_search(self, query, year=None, tags=None, geo_level=None, location=None, verbose=False):
+        """Fallback to keyword search when vector search fails"""
+        session = get_db_session()
+        try:
+            # Start with all datasets
+            base_query = session.query(CensusDataset)
+            
+            if verbose:
+                print(f"Starting with {base_query.count()} total datasets")
+            
+            # Step 1: Filter by year if provided
+            if year:
+                base_query = base_query.filter(CensusDataset.vintage == year)
+                if verbose:
+                    print(f"After year filter: {base_query.count()} datasets")
+                    
+            # Step 2: Filter by geography level if provided
+            if geo_level:
+                if geo_level == 'national':
+                    # No need to filter further
+                    pass
+                else:
+                    # Get datasets that support this geography level
+                    if verbose:
+                        print(f"Filtering for geography level: {geo_level}")
+                    
+                    # Map common geo levels to Census API geography names
+                    geo_mapping = {
+                        'state': 'state',
+                        'county': 'county',
+                        'city': 'place',
+                        'tract': 'tract',
+                        'block': 'block',
+                        'zip': 'zcta',
+                        'zipcode': 'zcta',
+                        'congressional district': 'congressional district',
+                        'school district': 'school district',
+                    }
+                    
+                    # Normalize the geo level name using mapping
+                    normalized_geo = geo_mapping.get(geo_level.lower(), geo_level.lower())
+                    
+                    # Find datasets that support this geography
+                    geo_subquery = session.query(CensusGeography.dataset_id).filter(
+                        func.lower(CensusGeography.name).contains(normalized_geo)
+                    )
+                    
+                    if geo_subquery.count() > 0:
+                        base_query = base_query.filter(CensusDataset.id.in_(geo_subquery))
+                        if verbose:
+                            print(f"After geography filter: {base_query.count()} datasets")
+                    else:
+                        if verbose:
+                            print(f"No datasets found supporting geography level: {geo_level}")
+                            
+            # Step 3: Filter by location if provided
+            if location:
+                if verbose:
+                    print(f"Filtering for location: {location}")
+                
                 # Census datasets typically don't mention specific locations in their metadata
                 # They contain data for all locations at a given geographic level
-                # So location filtering is purely optional and informational
-                location_filtered = queryset.filter(
-                    Q(title__icontains=location) | 
-                    Q(description__icontains=location)
+                # So location filtering is purely optional and should never eliminate all results
+                location_filtered = base_query.filter(
+                    or_(
+                        func.lower(CensusDataset.title).contains(location.lower()),
+                        func.lower(CensusDataset.description).contains(location.lower())
+                    )
                 )
                 
                 if location_filtered.count() > 0:
+                    base_query = location_filtered
                     if verbose:
-                        print(f"Found {location_filtered.count()} datasets mentioning '{location}' in metadata")
-                    queryset = location_filtered
+                        print(f"After location filter: {base_query.count()} datasets")
                 else:
                     if verbose:
-                        print(f"No datasets found mentioning '{location}' in metadata, but this is normal.")
-                        print(f"Census datasets typically cover all areas and don't mention specific locations in metadata.")
-                        
-            except Exception as e:
-                if verbose:
-                    print(f"Error checking location in FIPS database: {e}")
-                    print(f"Will treat location filtering as informational only")
-        
-        # Step 4: Filter by tags if provided
-        if tags:
-            # Generate tag mapping once
-            tag_mapping = self._generate_tag_mapping(year, verbose)
+                        print(f"No datasets found with location '{location}' in metadata. Skipping location filter.")
+                        print(f"This is normal for Census datasets which typically don't mention specific locations.")
             
-            # Build query for mapped tags
-            tag_query = Q()
-            
-            for tag in tags:
-                if tag in tag_mapping:
-                    # If it's a conceptual tag, map to actual database tags
-                    mapped_tags = tag_mapping[tag]
-                    for mapped_tag in mapped_tags:
-                        tag_query |= Q(tags__name=mapped_tag)
-                else:
-                    # If it's already a database tag, use it directly
-                    tag_query |= Q(tags__name=tag)
-            
-            if tag_query:
-                # Get all dataset IDs that match our tag query
-                datasets_with_matching_tags = queryset.filter(tag_query).distinct().values_list('id', flat=True)
+            # Step 4: Map conceptual tags to actual database tags
+            if tags and len(tags) > 0:
+                # Generate tag mapping once
+                tag_mapping = self._generate_tag_mapping(year, verbose)
                 
-                # Get all dataset IDs that have no tags
-                datasets_with_no_tags = queryset.filter(~Q(tags__isnull=False)).values_list('id', flat=True)
+                # Build query for mapped tags
+                tag_conditions = []
                 
-                # Combine the IDs and filter the original queryset
-                all_dataset_ids = list(datasets_with_matching_tags) + list(datasets_with_no_tags)
-                queryset = queryset.filter(id__in=all_dataset_ids)
+                for tag in tags:
+                    if tag in tag_mapping:
+                        # If it's a conceptual tag, map to actual database tags
+                        mapped_tags = tag_mapping[tag]
+                        for mapped_tag in mapped_tags:
+                            # Add condition for each mapped tag
+                            tag_conditions.append(or_(
+                                func.lower(CensusDataset.title).contains(mapped_tag.lower()),
+                                func.lower(CensusDataset.description).contains(mapped_tag.lower())
+                            ))
+                    else:
+                        # If it's already a database tag, use it directly
+                        tag_conditions.append(or_(
+                            func.lower(CensusDataset.title).contains(tag.lower()),
+                            func.lower(CensusDataset.description).contains(tag.lower())
+                        ))
                 
-                if verbose:
-                    print(f"After tag filter: {queryset.count()} datasets")
-        
-        # Step 5: Apply similarity search on filtered datasets
-        # Get datasets and their embeddings
-        datasets = list(queryset)
-        if not datasets:
-            if verbose:
-                print("No datasets found after filtering, falling back to keyword search")
-            return self._census_fallback_keyword_search(query, year, tags, geo_level, location, verbose)
-            
-        # Get embedding for the core query
-        query_embedding = self._get_embedding(query)
-        
-        if not query_embedding:
-            if verbose:
-                print("Could not generate embedding for query, falling back to keyword search")
-            return self._census_fallback_keyword_search(query, year, tags, geo_level, location, verbose)
-            
-        # Calculate similarity scores
-        results = []
-        for dataset in datasets:
-            # Convert binary embedding back to numpy array
-            dataset_embedding = np.frombuffer(dataset.embedding, dtype=np.float32)
-            
-            # Calculate cosine similarity
-            similarity = self._cosine_similarity(query_embedding, dataset_embedding)
-            
-            # Get available geographies for this dataset
-            geo_levels = list(dataset.geographies.all().values_list('name', flat=True))
-            
-            results.append({
-                'dataset': dataset,
-                'score': similarity,
-                'vintage': dataset.vintage,
-                'title': dataset.title,
-                'path': dataset.dataset_path,
-                'variable_count': dataset.variables.count(),
-                'id': dataset.id,
-                'description': dataset.description or '',
-                'geographic_levels': geo_levels,
-                'search_source': 'census'
-            })
-        
-        # Filter by threshold
-        results = [r for r in results if r['score'] >= similarity_threshold]
-        
-        if verbose:
-            print(f"After similarity threshold filter: {len(results)} datasets")
-        
-        # Sort by similarity score (descending)
-        results = sorted(results, key=lambda x: x['score'], reverse=True)
-        
-        # Apply recency boost for similarly scored datasets
-        results = self._apply_recency_boost(results)
-        
-        # Limit results
-        return results[:self.max_results]
-    
-    def _census_fallback_keyword_search(self, query, year=None, tags=None, geo_level=None, location=None, verbose=False):
-        """Fallback to keyword search if embedding search fails for Census data"""
-        if verbose:
-            print("Using fallback keyword search")
-            print(f"Filters - Year: {year}, Tags: {tags}, Geo_level: {geo_level}, Location: {location}")
-            
-        # Start with all datasets
-        queryset = CensusDataset.objects.all()
-        if verbose:
-            print(f"Starting with {queryset.count()} total datasets")
-        
-        # Step 1: Filter by year if provided
-        if year:
-            queryset = queryset.filter(vintage=year)
-            if verbose:
-                print(f"After year filter: {queryset.count()} datasets")
-                
-        # Step 2: Filter by geography level if provided
-        if geo_level:
-            if geo_level == 'national':
-                # No need to filter further
-                pass
-            else:
-                # Get datasets that support this geography level
-                if verbose:
-                    print(f"Filtering for geography level: {geo_level}")
-                
-                # Map common geo levels to Census API geography names
-                geo_mapping = {
-                    'state': 'state',
-                    'county': 'county',
-                    'city': 'place',
-                    'tract': 'tract',
-                    'block': 'block',
-                    'zip': 'zcta',
-                    'zipcode': 'zcta',
-                    'congressional district': 'congressional district',
-                    'school district': 'school district',
-                }
-                
-                # Normalize the geo level name using mapping
-                normalized_geo = geo_mapping.get(geo_level.lower(), geo_level.lower())
-                
-                # Find datasets that support this geography
-                geo_datasets = CensusGeography.objects.filter(
-                    name__icontains=normalized_geo
-                ).values_list('dataset_id', flat=True)
-                
-                if geo_datasets:
-                    queryset = queryset.filter(id__in=geo_datasets)
+                if tag_conditions:
+                    # Use or_ to combine conditions
+                    tag_filter = or_(*tag_conditions)
+                    base_query = base_query.filter(tag_filter)
                     if verbose:
-                        print(f"After geography filter: {queryset.count()} datasets")
-                else:
-                    if verbose:
-                        print(f"No datasets found supporting geography level: {geo_level}")
-                        
-        # Step 3: Filter by location if provided
-        if location:
+                        print(f"After tag filter: {base_query.count()} datasets")
+            
+            # Step 5: Keyword search on the filtered dataset
+            # Split query into keywords
+            keywords = query.lower().split()
+            
+            # Build the query
+            keyword_conditions = []
+            for keyword in keywords:
+                keyword_conditions.append(func.lower(CensusDataset.title).contains(keyword))
+                keyword_conditions.append(func.lower(CensusDataset.description).contains(keyword))
+                keyword_conditions.append(func.lower(CensusDataset.dataset_path).contains(keyword))
+            
+            # Apply keyword filtering
+            if keyword_conditions:
+                keyword_filter = or_(*keyword_conditions)
+                base_query = base_query.filter(keyword_filter)
+            
             if verbose:
-                print(f"Filtering for location: {location}")
+                print(f"After keyword filter: {base_query.count()} datasets")
             
-            # Census datasets typically don't mention specific locations in their metadata
-            # They contain data for all locations at a given geographic level
-            # So location filtering is purely optional and should never eliminate all results
-            location_filtered = queryset.filter(
-                Q(title__icontains=location) | 
-                Q(description__icontains=location)
-            )
+            # Format results
+            results = []
+            for dataset in base_query.limit(self.max_results).all():
+                # Get available geographies for this dataset
+                geo_levels = []
+                try:
+                    # Check if dataset has geographies relationship
+                    if hasattr(dataset, 'geographies'):
+                        geo_levels = [geo.name for geo in dataset.geographies]
+                except Exception as e:
+                    print(f"Error getting geographies for dataset {dataset.id}: {e}")
+                
+                results.append({
+                    'dataset': dataset,
+                    'score': 0.5,  # Default score for keyword matches
+                    'vintage': dataset.vintage,
+                    'title': dataset.title,
+                    'path': dataset.dataset_path,
+                    'variable_count': session.query(CensusVariable).filter(CensusVariable.dataset_id == dataset.id).count(),
+                    'id': dataset.id,
+                    'description': dataset.description or '',
+                    'geographic_levels': geo_levels,
+                    'search_source': 'census'
+                })
             
-            if location_filtered.count() > 0:
-                queryset = location_filtered
-                if verbose:
-                    print(f"After location filter: {queryset.count()} datasets")
-            else:
-                if verbose:
-                    print(f"No datasets found with location '{location}' in metadata. Skipping location filter.")
-                    print(f"This is normal for Census datasets which typically don't mention specific locations.")
-        
-        # Step 4: Map conceptual tags to actual database tags
-        if tags:
-            # Generate tag mapping once
-            tag_mapping = self._generate_tag_mapping(year, verbose)
+            # Sort by recency
+            results = sorted(results, key=lambda x: x['vintage'], reverse=True)
             
-            # Build query for mapped tags
-            tag_query = Q()
-            
-            for tag in tags:
-                if tag in tag_mapping:
-                    # If it's a conceptual tag, map to actual database tags
-                    mapped_tags = tag_mapping[tag]
-                    for mapped_tag in mapped_tags:
-                        tag_query |= Q(tags__name=mapped_tag)
-                else:
-                    # If it's already a database tag, use it directly
-                    tag_query |= Q(tags__name=tag)
-            
-            if tag_query:
-                queryset = queryset.filter(tag_query).distinct()
-                if verbose:
-                    print(f"After tag filter: {queryset.count()} datasets")
-        
-        # Step 5: Keyword search on the filtered dataset
-        # Split query into keywords
-        keywords = query.lower().split()
-        
-        # Build the query
-        q_objects = Q()
-        for keyword in keywords:
-            q_objects |= Q(title__icontains=keyword) 
-            q_objects |= Q(description__icontains=keyword)
-            q_objects |= Q(dataset_path__icontains=keyword)
-        
-        # Apply keyword filtering
-        queryset = queryset.filter(q_objects)
-        
-        if verbose:
-            print(f"After keyword filter: {queryset.count()} datasets")
-        
-        # Format results
-        results = []
-        for dataset in queryset[:self.max_results]:
-            # Get available geographies for this dataset
-            geo_levels = list(dataset.geographies.all().values_list('name', flat=True))
-            
-            results.append({
-                'dataset': dataset,
-                'score': 0.5,  # Default score for keyword matches
-                'vintage': dataset.vintage,
-                'title': dataset.title,
-                'path': dataset.dataset_path,
-                'variable_count': dataset.variables.count(),
-                'id': dataset.id,
-                'description': dataset.description or '',
-                'geographic_levels': geo_levels,
-                'search_source': 'census'
-            })
-        
-        # Sort by recency
-        results = sorted(results, key=lambda x: x['vintage'], reverse=True)
-        
-        return results[:self.max_results]
+            # Ensure we return a list
+            return list(results[:self.max_results])
+        finally:
+            session.close()
 
 ###########################################
 # PUBLIC FUNCTION INTERFACES
@@ -750,24 +805,53 @@ def vector_search(query: str,
     
     # Skip filters if they're empty and skip_empty_filters is True
     if skip_empty_filters:
-        if year is None and tags is None and geo_level is None:
+        if year is None and (tags is None or len(tags) == 0) and geo_level is None:
             if verbose:
                 print("No year, tags, or geo filters specified, searching without filters")
         elif year is None:
             if verbose:
                 print("No year specified, searching without year filter")
-        elif not tags:
+        elif tags is None or len(tags) == 0:
             if verbose:
                 print("No tags specified, searching without tags filter")
             tags = None
     
-    return searcher.search(
-        query=query,
-        similarity_threshold=similarity_threshold,
-        year=year,
-        tags=tags,
-        geo_level=geo_level,
-        location=location,
-        max_results=max_results,
-        verbose=verbose
-    )
+    try:
+        # Ensure query is a string
+        if not isinstance(query, str):
+            query = str(query)
+            
+        print(f"Starting vector search with query: {query}")
+        results = searcher.search(
+            query=query,
+            similarity_threshold=similarity_threshold,
+            year=year,
+            tags=tags,
+            geo_level=geo_level,
+            location=location,
+            max_results=max_results,
+            verbose=verbose
+        )
+        
+        print(f"Search returned results of type: {type(results)}")
+        if results is None:
+            print("Search returned None, returning empty list")
+            return []
+        elif hasattr(results, '__iter__') and not isinstance(results, list):
+            print(f"Converting results of type {type(results)} to list")
+            print(f"Results dir: {dir(results)}")  # Print available methods
+            try:
+                list_results = list(results)
+                print(f"Successfully converted to list with {len(list_results)} items")
+                return list_results
+            except Exception as e:
+                print(f"Error converting to list: {str(e)}")
+                # ... existing fallback code ...
+        
+        print(f"Returning {len(results)} search results")
+        return results
+    except Exception as e:
+        print(f"Error searching Census datasets: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return []

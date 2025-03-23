@@ -9,7 +9,6 @@ import time
 import uuid
 import datetime
 
-from factchecker.models import DatasetCatalog
 from factchecker.processing.analysis.dataset_analyzer import ExtendedJSONEncoder
 from factchecker.utils.openai_client import chat_completion
 

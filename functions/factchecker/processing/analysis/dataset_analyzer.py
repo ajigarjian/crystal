@@ -9,7 +9,6 @@ import traceback
 import re
 import json
 import datetime
-from factchecker.models import DatasetCatalog  # Import here to avoid circular imports
 import os
 from factchecker.utils.openai_client import chat_completion
 from factchecker.processing.analysis.pdf_analyzer import analyze_and_extract_pdf_data
