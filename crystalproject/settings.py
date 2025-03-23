@@ -22,11 +22,11 @@ DATA_GOV_API_KEY = os.getenv('DATA_GOV_API_KEY')
 PINECONE_API_KEY= os.getenv('PINECONE_API_KEY')
 PINECONE_ENVIRONMENT= os.getenv('PINECONE_ENVIRONMENT')
 
+# OpenAI API configuration
 try:
     AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY")
     AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
     provider = "azure"
-
 except KeyError:
     print("Error loading Azure OpenAI provider. Falling back to native OpenAI.")
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -41,12 +41,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-14c*b7^%l6z2-0n@34m9i-8z2zd4+4@lj1f_b0h58m-2huh3ub'
+SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-14c*b7^%l6z2-0n@34m9i-8z2zd4+4@lj1f_b0h58m-2huh3ub')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
 
 
@@ -96,15 +96,37 @@ TEMPLATES = [
 WSGI_APPLICATION = 'crystalproject.wsgi.application'
 
 
-# Database
+# Database configuration
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.environ.get('DB_NAME'),
+        'USER': os.environ.get('DB_USER'),
+        'PASSWORD': os.environ.get('DB_PASSWORD'),
+        'HOST': os.environ.get('DB_HOST'),
+        'PORT': os.environ.get('DB_PORT', '5432'),
     }
 }
+
+# Original database configuration (commented out)
+# if os.getenv('DATABASE_URL'):
+#     # Running in production with Cloud SQL
+#     import dj_database_url
+#     DATABASES = {
+#         'default': dj_database_url.config(
+#             default=os.getenv('DATABASE_URL')
+#         )
+#     }
+# else:
+#     # Running locally with SQLite
+#     DATABASES = {
+#         'default': {
+#             'ENGINE': 'django.db.backends.sqlite3',
+#             'NAME': BASE_DIR / 'db.sqlite3',
+#         }
+#     }
 
 
 # Password validation
@@ -139,13 +161,14 @@ USE_TZ = True
 
 
 # Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/5.1/howto/static-files/
-
 STATIC_URL = 'static/'
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+
+# Media files
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 # Default primary key field type
-# https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field
-
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Add REST Framework settings
@@ -158,11 +181,10 @@ REST_FRAMEWORK = {
 }
 
 # CORS settings
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",  # Assuming Next.js runs on port 3000
-]
+CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:3000').split(',')
 
 # For development only - remove in production
-CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_ALL_ORIGINS = DEBUG
 
+# OpenAI API key
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
