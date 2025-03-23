@@ -11,10 +11,9 @@ import traceback
 import numpy as np
 import concurrent.futures
 from threading import Lock
-import psycopg2
-from psycopg2.extras import RealDictCursor
 
-from helpers import search_helpers
+from helpers.db_utils import execute_query, get_db_connection
+from helpers.stream_search_datasets import stream_search_datasets_helper
 
 from dotenv import load_dotenv
 
@@ -31,119 +30,6 @@ logger = logging.getLogger(__name__)
 
 # Initialize Firebase app
 firebase_admin.initialize_app()
-
-# PostgreSQL connection configuration
-def get_db_connection():
-    """Create and return a connection to the PostgreSQL database"""
-    try:
-        # Check if running in production or local environment
-        if os.getenv('FUNCTIONS_EMULATOR'):
-            # Local development - connect via local Cloud SQL Proxy
-            conn = psycopg2.connect(
-                host=os.environ.get('DB_HOST', 'localhost'),
-                database=os.environ.get('DB_NAME'),
-                user=os.environ.get('DB_USER'),
-                password=os.environ.get('DB_PASSWORD'),
-                port=os.environ.get('DB_PORT', 1234)
-            )
-        else:
-            # Production environment - use Unix socket
-            db_instance = os.environ.get('DB_INSTANCE')
-            db_name = os.environ.get('DB_NAME')
-            db_user = os.environ.get('DB_USER')
-            db_password = os.environ.get('DB_PASSWORD')
-            
-            # Unix socket path for Cloud SQL
-            socket_dir = os.environ.get('DB_SOCKET_DIR', '/cloudsql')
-            unix_socket = f'{socket_dir}/{db_instance}'
-            
-            conn = psycopg2.connect(
-                dbname=db_name,
-                user=db_user,
-                password=db_password,
-                host=unix_socket  # Use Unix socket in production
-            )
-        
-        return conn
-    except Exception as e:
-        logger.error(f"Database connection error: {e}")
-        raise
-
-def execute_query(query, params=None, fetch_all=True):
-    """Execute a query and return results"""
-    conn = None
-    try:
-        conn = get_db_connection()
-        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-            cursor.execute(query, params)
-            if fetch_all:
-                return cursor.fetchall()
-            else:
-                return cursor.fetchone()
-    except Exception as e:
-        logger.error(f"Query execution error: {e}")
-        raise
-    finally:
-        if conn:
-            conn.close()
-
-# Helper functions for dataset search and processing
-def vector_search_datasets(query, similarity_threshold=0.3, max_results=15):
-    """
-    Placeholder for vector search function - replace with actual implementation
-    """
-    # This would call your actual vector search implementation
-    # For now, return empty list as placeholder
-    logger.info(f"Vector search called with query: {query}")
-    return []
-
-def search_datasets(query, api_key, similarity_threshold=0.5):
-    """
-    Placeholder for keyword search function - replace with actual implementation
-    """
-    # This would call your actual keyword search implementation
-    # For now, return empty list as placeholder
-    logger.info(f"Keyword search called with query: {query}")
-    return []
-
-def process_census_query(query):
-    """
-    Placeholder for census query processing - replace with actual implementation
-    """
-    # Extract structured info from query for Census search
-    # Return empty dict as placeholder
-    return {}
-
-def census_vector_search(query, similarity_threshold=0.3, year=None, tags=None, 
-                         geo_level=None, location=None, max_results=5, verbose=False):
-    """
-    Placeholder for census vector search - replace with actual implementation
-    """
-    # This would call your actual census search implementation
-    # For now, return empty list as placeholder
-    logger.info(f"Census search called with query: {query}")
-    return []
-
-def single_search(query, search_function, similarity_threshold=0.3, max_results=15, verbose=False):
-    """
-    Placeholder for single search function - replace with actual implementation
-    """
-    # This would call your actual search implementation
-    # For now, return empty list as placeholder
-    return []
-
-def assess_datafile_relevance_predownload(query, dataset, relevance_threshold=0.4):
-    """
-    Placeholder for relevance assessment - replace with actual implementation
-    """
-    # This would call your actual relevance assessment
-    # For now, return mock values
-    is_relevant = True
-    relevance_score = 0.8
-    reasoning = f"This dataset appears to be relevant to your query about '{query}'."
-    return is_relevant, relevance_score, reasoning
-
-
 
 @https_fn.on_call(
     cors=options.CorsOptions(
@@ -258,7 +144,7 @@ def stream_search_datasets(request):
         final_result = None
         
         # Process the streaming search
-        for chunk in search_helpers.stream_search_datasets_helper(
+        for chunk in stream_search_datasets_helper(
             query=query,
             similarity_threshold=similarity_threshold,
             search_method=search_method,
@@ -308,6 +194,89 @@ def stream_search_datasets(request):
             "X-Accel-Buffering": "no"
         }
     )
+
+@https_fn.on_request(
+    cors=options.CorsOptions(
+        cors_origins=["*"],
+        cors_methods=["get", "post"],
+    )
+)
+def register_waitlist(request):
+    """HTTP Cloud Function that registers a user to the waitlist."""
+    # Parse request data
+    request_json = request.get_json(silent=True)
+    
+    if not request_json:
+        return https_fn.Response(
+            json.dumps({"error": "No JSON data provided"}),
+            status=400,
+            headers={"Content-Type": "application/json"}
+        )
+    
+    # Get the required parameters
+    email = request_json.get('email', '')
+    first_name = request_json.get('first_name', '')
+    
+    # Basic validation
+    if not email:
+        return https_fn.Response(
+            json.dumps({"error": "Email is required"}),
+            status=400,
+            headers={"Content-Type": "application/json"}
+        )
+    
+    try:
+        # Check if email already exists in waitlist - using correct table name
+        check_query = "SELECT id FROM factchecker_waitlistentry WHERE email = %s"
+        existing_entry = execute_query(check_query, (email,), fetch_all=False)
+        
+        if existing_entry:
+            return https_fn.Response(
+                json.dumps({"error": "This email is already registered"}),
+                status=400,
+                headers={"Content-Type": "application/json"}
+            )
+        
+        # Insert new waitlist entry - using correct table name
+        insert_query = """
+            INSERT INTO factchecker_waitlistentry (email, first_name, created_at) 
+            VALUES (%s, %s, NOW()) 
+            RETURNING id
+        """
+        
+        # Use a connection to execute the insert and commit the transaction
+        conn = get_db_connection()
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute(insert_query, (email, first_name))
+                result = cursor.fetchone()
+                conn.commit()
+                
+                logger.info(f"Added user to waitlist: {email}")
+                
+                return https_fn.Response(
+                    json.dumps({
+                        "status": "success",
+                        "message": "Successfully added to waitlist",
+                        "id": result['id'] if result else None
+                    }),
+                    status=201,
+                    headers={"Content-Type": "application/json"}
+                )
+        finally:
+            conn.close()
+            
+    except Exception as e:
+        logger.error(f"Error registering for waitlist: {e}")
+        logger.error(traceback.format_exc())
+        return https_fn.Response(
+            json.dumps({
+                "status": "error",
+                "message": f"Failed to register: {str(e)}"
+            }),
+            status=500,
+            headers={"Content-Type": "application/json"}
+        )
 
 @https_fn.on_request(
     cors=options.CorsOptions(
