@@ -1,1 +1,0 @@
-# Functions for the processing module for performing basic data validation and type checking.
