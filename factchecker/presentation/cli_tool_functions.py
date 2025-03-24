@@ -304,53 +304,32 @@ def summarize_findings_structured(
         dataset_source = data.get("dataset_source", "Unknown Source")
         organization = data.get("organization", "")
         
-        # Extract the actual data, handling nested structures
-        extracted = None
+        print(f"\n[DEBUG] Processing dataset: {dataset_title} (ID: {dataset_id})")
+        
+        # Use the recursive extract_usable_data function to find any usable data
         results_dict = data.get('results_dict')
+        if results_dict is not None:
+            # Search for usable data starting from results_dict
+            extracted = extract_usable_data(results_dict, dataset_title)
+        else:
+            print(f"[WARNING] No results_dict found for dataset {dataset_title}")
+            extracted = None
         
-        # Try to locate the actual data through multiple possible paths
-        if results_dict:
-            if isinstance(results_dict, dict) and 'data' in results_dict:
-                print(f"[DEBUG] Found 'data' key in results_dict")
-                extracted = results_dict['data']
-                
-                # If extracted is still a dict with 'subset_df', extract that
-                if isinstance(extracted, dict) and 'subset_df' in extracted:
-                    print(f"[DEBUG] Found nested 'subset_df' in data")
-                    extracted = extracted['subset_df']
-                    
-            # Check if results_dict contains a direct 'subset_df' key
-            elif isinstance(results_dict, dict) and 'subset_df' in results_dict:
-                print(f"[DEBUG] Found 'subset_df' key in results_dict")
-                extracted = results_dict['subset_df']
-        
-        # If data not found in results_dict paths, check if there's an extracted_data field
-        if extracted is None and 'extracted_data' in data:
-            extracted = data['extracted_data']
+        # If no data found in results_dict, try searching the entire data structure
+        if extracted is None:
+            print(f"[DEBUG] Trying to find data in other fields")
+            # Search the entire data dictionary excluding results_dict to avoid recursion
+            data_copy = {k: v for k, v in data.items() if k != 'results_dict'}
+            extracted = extract_usable_data(data_copy, dataset_title)
         
         # If we still don't have data, log and continue
         if extracted is None:
-            print(f"[WARNING] Could not locate extracted data for dataset {dataset_title}")
+            print(f"[WARNING] Could not locate any usable data for dataset {dataset_title}")
             continue
         
-        # Check if we have actual usable data
-        has_data = False
-        if isinstance(extracted, pd.DataFrame) and not extracted.empty:
-            print(f"[DEBUG] Processing DataFrame with {len(extracted)} rows, {len(extracted.columns)} columns")
-            has_data = True
-        elif isinstance(extracted, dict) and extracted:
-            print(f"[DEBUG] Processing dictionary data with {len(extracted)} keys")
-            has_data = True
-        elif isinstance(extracted, list) and extracted:
-            print(f"[DEBUG] Processing list data with {len(extracted)} items")
-            has_data = True
-        
-        if not has_data:
-            print(f"[WARNING] Extracted data for dataset {dataset_title} is empty")
-            continue
-            
         # We found usable data
         found_usable_data = True
+        print(f"[DEBUG] Successfully found usable data for {dataset_title}")
         
         # Add to temporary sources list (without citation ID yet)
         source_details[dataset_id] = {
@@ -361,18 +340,33 @@ def summarize_findings_structured(
             "data": extracted
         }
         
-        # Store any aggregations we find for later use
-        if isinstance(results_dict, dict) and 'aggregations' in results_dict:
-            aggregations = results_dict['aggregations']
-            # Add aggregation data to key_data_points (we'll update citation IDs later)
-            for key, value in aggregations.items():
-                if isinstance(value, (int, float, str)):
-                    key_data_points.append({
-                        "dataset_id": dataset_id,
-                        "dataset_title": dataset_title,
-                        "metric_name": key,
-                        "value": value
-                    })
+        # Look for aggregations in the results_dict
+        if isinstance(results_dict, dict):
+            # Check for aggregations directly in results_dict
+            if 'aggregations' in results_dict:
+                aggregations = results_dict['aggregations']
+                # Add aggregation data to key_data_points
+                for key, value in aggregations.items():
+                    if isinstance(value, (int, float, str)):
+                        key_data_points.append({
+                            "dataset_id": dataset_id,
+                            "dataset_title": dataset_title,
+                            "metric_name": key,
+                            "value": value
+                        })
+            
+            # Also check for aggregations nested in 'data'
+            if 'data' in results_dict and isinstance(results_dict['data'], dict) and 'aggregations' in results_dict['data']:
+                aggregations = results_dict['data']['aggregations']
+                # Add aggregation data to key_data_points
+                for key, value in aggregations.items():
+                    if isinstance(value, (int, float, str)):
+                        key_data_points.append({
+                            "dataset_id": dataset_id,
+                            "dataset_title": dataset_title,
+                            "metric_name": key,
+                            "value": value
+                        })
     
     # Now assign sequential citation IDs to all usable datasets
     for idx, (dataset_id, source_info) in enumerate(source_details.items(), 1):
@@ -416,7 +410,7 @@ def summarize_findings_structured(
         You are analyzing data to answer: "{query}"
 
         Your task is to write two sections:
-        1. A detailed SUMMARY of the findings (250-400 words)
+        1. A detailed SUMMARY of the findings (250-400 words). Do not include a word count in your output.
         2. 3-5 KEY FINDINGS (1-2 sentences each)
 
         IMPORTANT: For both sections, you MUST cite the source of each claim using the citation format [N] where N is the source number.
@@ -436,7 +430,7 @@ def summarize_findings_structured(
             prompt=citation_prompt,
             system_message="You are a professional data analyst who provides rigorous, citation-supported research for journalists and policy researchers.",
             reasoning_effort="high",
-            model_name="o1"
+            model_name="o3-mini"
         )
     except Exception as e:
         print(f"[WARNING] Error calling reasoning client: {e}")
@@ -523,3 +517,67 @@ def format_citation(organization, year, title, source):
         return f"{title} ({year})."
     else:
         return f"{title}."
+
+def extract_usable_data(data_structure, dataset_title):
+    """
+    Recursively search through any data structure to find usable data.
+    Returns the first DataFrame, non-empty list, or meaningful dictionary found.
+    """
+    print(f"[DEBUG] Examining data structure: {type(data_structure)}")
+    
+    # Base case: If we have a DataFrame, use it
+    if isinstance(data_structure, pd.DataFrame):
+        if not data_structure.empty:
+            print(f"[DEBUG] Found usable DataFrame with shape {data_structure.shape}")
+            return data_structure
+        else:
+            print(f"[DEBUG] Found empty DataFrame, continuing search")
+            return None
+    
+    # If we have a list with content, use it
+    elif isinstance(data_structure, list):
+        if len(data_structure) > 0:
+            print(f"[DEBUG] Found usable list with {len(data_structure)} items")
+            return data_structure
+        else:
+            print(f"[DEBUG] Found empty list, continuing search")
+            return None
+    
+    # If we have a dictionary, recursively search its values
+    elif isinstance(data_structure, dict):
+        print(f"[DEBUG] Searching dictionary with keys: {list(data_structure.keys())}")
+        
+        # First, look for DataFrames
+        for key, value in data_structure.items():
+            if isinstance(value, pd.DataFrame) and not value.empty:
+                print(f"[DEBUG] Found DataFrame in key '{key}' with shape {value.shape}")
+                return value
+        
+        # Next, look for non-empty lists
+        for key, value in data_structure.items():
+            if isinstance(value, list) and len(value) > 0:
+                print(f"[DEBUG] Found non-empty list in key '{key}' with {len(value)} items")
+                return value
+        
+        # Then, recursively search nested dictionaries
+        for key, value in data_structure.items():
+            if isinstance(value, dict):
+                nested_result = extract_usable_data(value, dataset_title)
+                if nested_result is not None:
+                    print(f"[DEBUG] Found usable data in nested key '{key}'")
+                    return nested_result
+        
+        # If dictionary has content but no nested structures, it might be usable itself
+        if len(data_structure) > 0:
+            print(f"[DEBUG] Using dictionary itself as data")
+            return data_structure
+    
+    # Check other types that might be directly usable
+    elif isinstance(data_structure, pd.Series):
+        if not data_structure.empty:
+            print(f"[DEBUG] Found usable Series with length {len(data_structure)}")
+            return data_structure
+    
+    # If nothing usable found
+    print(f"[WARNING] No usable data found in this structure for dataset {dataset_title}")
+    return None

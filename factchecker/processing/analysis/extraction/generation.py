@@ -72,7 +72,7 @@ def generate_extraction_code(
                     f"- Column '{col_name}': Potentially relevant values: {relevant_values}"
                 )
     
-    # Create prompt for OpenAI
+    # Create prompt for OpenAI with a stronger template
     prompt = f"""
 You are a data analysis expert. Given a dataset and analysis of potentially relevant columns and values, generate pandas code to extract the relevant data.
 
@@ -94,22 +94,31 @@ PREVIOUSLY GENERATED CODE TO IMPROVE UPON:
 {code if code else "N/A"}
 
 Based on the user query and column analysis, generate pandas code to extract the relevant data. The code should:
-1. Consider how specific a user query is. If they dont mention any geographical or spatial "filters" etc, dont filter by identified columns.
+1. Consider how specific a user query is. If they don't mention any geographical or spatial "filters" etc, don't filter by identified columns.
 2. If applicable, filter the dataframe to include only rows with relevant values in the identified columns
 3. If multiple columns have relevant values, combine the filters appropriately
 4. If no relevant columns or values were identified, return a suitable subset of the data that might be relevant
 5. Do not use matplotlib.
 6. Code should be simple, no more than 25 lines.
 
-Return ONLY the Python code, with no additional text or explanation. Use 'df' as the variable name for the input DataFrame.
+CRITICAL: Your code MUST end by creating and returning the exact dictionary structure below:
 
-Object to return at end of the Python code:
-
-{{
-    "subset_df": <A subset DataFrame variable name from your code>,
-    "aggregations": {{"key": "value"}} # A dict of key-value pairs for any aggregate and comparison values.
+```python
+# Create the required return structure 
+subset_df = df  # Replace with your actual subset DataFrame variable
+aggregations = {{  # Fill with your calculated metrics
+    "metric1": value1,
+    "metric2": value2
 }}
 
+# The final line MUST be this exact structure:
+{{
+    "subset_df": subset_df,
+    "aggregations": aggregations
+}}
+```
+
+Return ONLY the Python code with no additional text or explanation. Use 'df' as the variable name for the input DataFrame.
 """
 
     try:
@@ -156,6 +165,24 @@ Object to return at end of the Python code:
         # Ensure pandas is always imported
         if "import pandas as pd" not in code:
             code = "import pandas as pd\n" + code
+    
+    # Validate the generated code contains the required return structure
+    if '{"subset_df":' not in code and '"subset_df":' not in code:
+        # Add the proper return structure if missing
+        code += """
+# Ensure proper return structure
+if 'subset_df' not in locals():
+    subset_df = df  # Use original DataFrame if no subset created
+    
+if 'aggregations' not in locals():
+    aggregations = {}  # Create empty aggregations if none created
+
+# Required return structure
+{
+    "subset_df": subset_df,
+    "aggregations": aggregations
+}
+"""
     
     return code
 

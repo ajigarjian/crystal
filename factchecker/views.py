@@ -477,8 +477,8 @@ def stream_search_datasets(request):
     # Get optional parameters with defaults
     similarity_threshold = float(request.data.get('similarity_threshold', 0.3))
     search_method = request.data.get('search_method', None)  # 'vector', 'keyword', or None for hybrid
-    max_results = int(request.data.get('max_results', 3))
-    census_max_results = int(request.data.get('census_max_results', 1))  # New parameter with default of 5
+    max_results = int(request.data.get('max_results', 1))
+    census_max_results = int(request.data.get('census_max_results', 0))  # New parameter with default of 5
     relevance_threshold = float(request.data.get('relevance_threshold', 0.4))
     
     print(f"Parameters: method={search_method}, threshold={similarity_threshold}, max_results={max_results}, census_max_results={census_max_results}")
@@ -1617,6 +1617,7 @@ def stream_analyze_datasets(request):
                     
                     # Format the summary for the frontend
                     frontend_summary = {
+                        'query': query,
                         'text': structured_summary.get('summary', ''),
                         'key_findings': structured_summary.get('key_findings', []),
                         'sources': [

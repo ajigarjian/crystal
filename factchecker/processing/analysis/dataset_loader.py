@@ -52,16 +52,30 @@ def load_datafile(file_path: str) -> Union[pd.DataFrame, Dict[str, Any]]:
         return load_json_document(file_path)
     
     try:
-        # Handle Excel files
+        # Handle Excel files - ENHANCED
         if file_extension in ['.xlsx', '.xls']:
             logger.info(f"Detected Excel file: {file_path}")
             loading_attempts = [
                 # Standard loading
                 lambda: pd.read_excel(file_path),
-                # Try with explicit engine
+                # Try with explicit openpyxl engine
                 lambda: pd.read_excel(file_path, engine='openpyxl'),
                 # Try with xlrd engine for older .xls files
-                lambda: pd.read_excel(file_path, engine='xlrd')
+                lambda: pd.read_excel(file_path, engine='xlrd'),
+                # Try with specific sheet (first sheet)
+                lambda: pd.read_excel(file_path, sheet_name=0),
+                # Try with skiprows to handle headers
+                lambda: pd.read_excel(file_path, skiprows=1),
+                # Try with skiprows and specific sheet
+                lambda: pd.read_excel(file_path, sheet_name=0, skiprows=1),
+                # Try with different data_only option for openpyxl
+                lambda: pd.read_excel(file_path, engine='openpyxl', storage_options={'data_only': True}),
+                # Try with ODF engine for other formats
+                lambda: pd.read_excel(file_path, engine='odf') if pd.__version__ >= '1.3.0' else pd.read_excel(file_path),
+                # Try with all sheets at once
+                lambda: pd.read_excel(file_path, sheet_name=None),
+                # Try with lower memory footprint
+                lambda: pd.read_excel(file_path, memory_map=True)
             ]
         # Handle CSV files
         else:
@@ -97,20 +111,91 @@ def load_datafile(file_path: str) -> Union[pd.DataFrame, Dict[str, Any]]:
             try:
                 logger.info(f"Attempt {i+1} to load dataset")
                 df = attempt()
-                # If we got here, loading succeeded
-                logger.info(f"Successfully loaded dataset with attempt {i+1}")
                 
-                # Log the DataFrame info
-                logger.info(f"DataFrame shape: {df.shape}")
-                logger.info(f"DataFrame columns: {list(df.columns)}")
-                logger.info(f"DataFrame sample:\n{df.head(5).to_string()}")
-                
-                break
+                # Check if we got a valid DataFrame (not empty or too small)
+                if isinstance(df, pd.DataFrame) and not df.empty and len(df.columns) > 1:
+                    logger.info(f"Successfully loaded dataset with attempt {i+1}")
+                    
+                    # Log the DataFrame info
+                    logger.info(f"DataFrame shape: {df.shape}")
+                    logger.info(f"DataFrame columns: {list(df.columns)}")
+                    logger.info(f"DataFrame sample:\n{df.head(5).to_string()}")
+                    
+                    break
+                elif isinstance(df, dict) and sheet_name is None:
+                    # If we got a dict of DataFrames (multiple sheets)
+                    logger.info(f"Got multiple sheets: {list(df.keys())}")
+                    # Take the largest sheet
+                    largest_sheet = max(df.items(), key=lambda x: (0 if x[1].empty else len(x[1])))[0]
+                    logger.info(f"Using largest sheet: {largest_sheet}")
+                    df = df[largest_sheet]
+                    
+                    if not df.empty and len(df.columns) > 1:
+                        logger.info(f"Successfully extracted sheet with shape: {df.shape}")
+                        break
+                    else:
+                        logger.warning(f"Largest sheet is empty or has only one column, continuing search")
+                        df = None
+                else:
+                    logger.warning(f"Attempt {i+1} produced invalid DataFrame, continuing search")
+                    df = None
+                    
             except Exception as e:
                 errors.append(str(e))
                 logger.warning(f"Attempt {i+1} failed: {str(e)}")
                 continue
         
+        # If all standard attempts failed, try binary reading approaches for Excel
+        if df is None and file_extension in ['.xlsx', '.xls']:
+            logger.info("Trying binary Excel reading approaches")
+            try:
+                # Try using xlrd for .xls with binary mode
+                if file_extension == '.xls':
+                    import xlrd
+                    logger.info("Attempting xlrd with binary mode")
+                    wb = xlrd.open_workbook(file_path, logfile=open(os.devnull, 'w'))
+                    sheet = wb.sheet_by_index(0)
+                    
+                    # Extract headers from first row
+                    headers = [str(cell.value) for cell in sheet.row(0)]
+                    
+                    # Extract data from remaining rows
+                    data = []
+                    for row_idx in range(1, sheet.nrows):
+                        row_data = [cell.value for cell in sheet.row(row_idx)]
+                        data.append(row_data)
+                    
+                    # Create DataFrame
+                    df = pd.DataFrame(data, columns=headers)
+                    logger.info(f"Successfully loaded with binary xlrd: {df.shape}")
+                
+                # Try using openpyxl for .xlsx with binary mode
+                elif file_extension == '.xlsx':
+                    import openpyxl
+                    logger.info("Attempting openpyxl with binary mode")
+                    
+                    # Load workbook with minimal features
+                    wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True, keep_links=False)
+                    
+                    # Get the first sheet
+                    sheet = wb.active
+                    
+                    # Convert to DataFrame
+                    data = []
+                    for row in sheet.iter_rows(values_only=True):
+                        data.append(row)
+                    
+                    # Separate headers and data if we have rows
+                    if data:
+                        headers = data[0]
+                        data_rows = data[1:]
+                        df = pd.DataFrame(data_rows, columns=headers)
+                        logger.info(f"Successfully loaded with binary openpyxl: {df.shape}")
+            
+            except Exception as e:
+                logger.warning(f"Binary Excel reading approach failed: {str(e)}")
+        
+        # If still no DataFrame, create placeholder
         if df is None:
             logger.warning("All parsing attempts failed, creating placeholder DataFrame")
             try:
@@ -124,11 +209,21 @@ def load_datafile(file_path: str) -> Union[pd.DataFrame, Dict[str, Any]]:
                 
                 # Try to include a sample of the file content if possible
                 try:
-                    with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
-                        sample_content = f.read(1000)  # First 1000 chars
+                    # Use binary mode for reading which works for both text and binary files
+                    with open(file_path, 'rb') as f:
+                        binary_content = f.read(1000)
+                        
+                        # Try to decode as text if possible
+                        try:
+                            sample_content = binary_content.decode('utf-8', errors='replace')
+                        except:
+                            # If decoding fails completely, provide a hex dump
+                            sample_content = f"Binary content (hex): {binary_content.hex()[:100]}..."
+                        
                         df['content_sample'] = [sample_content]
-                except Exception:
-                    pass  # Ignore errors reading content
+                except Exception as e:
+                    logger.warning(f"Could not read file content: {str(e)}")
+                    df['content_sample'] = ["Could not read file content"]
                 
                 return df
             except Exception as e:

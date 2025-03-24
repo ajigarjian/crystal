@@ -32,6 +32,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Progress } from "@/components/ui/progress";
 import { AlertCircle, CheckCircle2, FileText, Database, ArrowRight, Download, FileCheck, Loader2 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
+import { SummaryReport } from "@/components/SummaryReport";
+import { SummaryReportSkeleton } from "@/components/SummaryReportSkeleton";
 
 interface Resource {
   id: string;
@@ -146,6 +148,13 @@ export default function DatasetsPage() {
   const [selectedDatasets, setSelectedDatasets] = useState<{[key: string]: boolean}>({});
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [processingDatasets, setProcessingDatasets] = useState<DatasetProcessingState[]>([]);
+  const [summaryData, setSummaryData] = useState<{
+    query: string;
+    summary: string;
+    keyFindings: string[];
+    sources: { citation_id: string; title: string; organization: string }[];
+  } | null>(null);
+  const [isSummaryLoading, setIsSummaryLoading] = useState(false);
   
   // Scroll to the latest discovered dataset
   const discoveryEndRef = useRef<HTMLDivElement>(null);
@@ -626,6 +635,23 @@ export default function DatasetsPage() {
                 setStatusMessages(prev => [...prev, assessmentMessage]);
                 break;
                 
+              case 'structured_summary':
+                console.log("Received structured summary:", data);
+                // Set the summary data using the query field from backend
+                setSummaryData({
+                  query: data.data.query || query, // Use the query from backend, fallback to local query
+                  summary: data.data.text,
+                  keyFindings: data.data.key_findings || [],
+                  sources: data.data.sources || []
+                });
+                console.log("Set summaryData:", {
+                  query: data.data.query || query,
+                  summary: data.data.text,
+                  keyFindings: data.data.key_findings || [],
+                  sources: data.data.sources || []
+                });
+                break;
+                
               default:
                 console.log(`Unknown message type: ${data.type}`, data);
             }
@@ -910,15 +936,18 @@ export default function DatasetsPage() {
             switch (parsedMessage.type) {
               case 'status':
                 // Add to status messages
-                setStatusMessages(prev => [
-                  ...prev, 
-                  {
+                const statusMsg = {
                     id: crypto.randomUUID(),
                     message: parsedMessage.message,
                     timestamp: parsedMessage.timestamp * 1000,
                     type: 'status'
-                  }
-                ]);
+                };
+                setStatusMessages(prev => [...prev, statusMsg]);
+                
+                // Check for summary generation message
+                if (parsedMessage.message.includes('Generating structured summary')) {
+                  setIsSummaryLoading(true);
+                }
                 break;
                 
               case 'dataset_update':
@@ -994,6 +1023,17 @@ export default function DatasetsPage() {
                 // setSummary(parsedMessage.data);
                 break;
                 
+              case 'structured_summary':
+                console.log("Received structured summary:", parsedMessage);
+                setSummaryData({
+                  query: parsedMessage.data.query || query,
+                  summary: parsedMessage.data.text,
+                  keyFindings: parsedMessage.data.key_findings || [],
+                  sources: parsedMessage.data.sources || []
+                });
+                setIsSummaryLoading(false); // Hide skeleton when summary is received
+                break;
+                
               case 'complete':
                 // Analysis is complete
                 setStatusMessages(prev => [
@@ -1020,6 +1060,8 @@ export default function DatasetsPage() {
                     return d;
                   });
                 });
+                // Analysis phase is complete, now we're likely generating the summary
+                // Don't set isSummaryLoading here
                 break;
             }
           } catch (e) {
@@ -1888,6 +1930,18 @@ export default function DatasetsPage() {
                       </TableBody>
                     </Table>
                   </div>
+
+                  {/* Summary Report - Move it inside the datasets flow */}
+                  {isSummaryLoading ? (
+                    <SummaryReportSkeleton query={query} />
+                  ) : summaryData && (
+                    <SummaryReport
+                      query={`"${summaryData.query || query}"`}
+                      summary={summaryData.summary}
+                      keyFindings={summaryData.keyFindings}
+                      sources={summaryData.sources}
+                    />
+                  )}
                 </>
               ) : (
                 <div className="text-center py-10">
@@ -1898,39 +1952,6 @@ export default function DatasetsPage() {
           )}
         </div>
       )}
-      
-      {/* Add fadeIn animation to the global styles */}
-      <style jsx global>{`
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateY(10px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        
-        .animate-fadeIn {
-          opacity: 0;
-          animation: fadeIn 1s ease-in-out forwards;
-          animation-delay: var(--animation-delay, 0ms);
-        }
-        
-        /* Custom scrollbar styles */
-        .space-y-1.max-h-[200px], .space-y-1.max-h-[300px] {
-          scrollbar-width: thin;
-          scrollbar-color: rgba(156, 163, 175, 0.3) transparent;
-        }
-        
-        .space-y-1.max-h-[200px]::-webkit-scrollbar, .space-y-1.max-h-[300px]::-webkit-scrollbar {
-          width: 6px;
-        }
-        
-        .space-y-1.max-h-[200px]::-webkit-scrollbar-track, .space-y-1.max-h-[300px]::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        
-        .space-y-1.max-h-[200px]::-webkit-scrollbar-thumb, .space-y-1.max-h-[300px]::-webkit-scrollbar-thumb {
-          background-color: rgba(156, 163, 175, 0.3);
-          border-radius: 20px;
-        }
-      `}</style>
 
       {/* Dataset Preview Dialog */}
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
@@ -2059,7 +2080,6 @@ export default function DatasetsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      
     </>
   );
 }
