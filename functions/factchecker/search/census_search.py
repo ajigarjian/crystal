@@ -17,7 +17,7 @@ from sqlalchemy import or_, and_, func
 from sqlalchemy.orm import Session
 from sqlalchemy.types import LargeBinary
 
-from helpers.db_utils import get_db_connection, get_db_session
+from helpers.db_utils import get_db_session
 from factchecker.sqlalchemy_models import (
     CensusTag
 )
