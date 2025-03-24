@@ -100,14 +100,13 @@ Based on the user query and column analysis, generate pandas code to extract the
 4. If no relevant columns or values were identified, return a suitable subset of the data that might be relevant
 5. Do not use matplotlib.
 6. Code should be simple, no more than 25 lines.
-7. ALWAYS begin with 'import pandas as pd' to ensure pandas is available in all execution contexts.
 
 Return ONLY the Python code, with no additional text or explanation. Use 'df' as the variable name for the input DataFrame.
 
 Object to return at end of the Python code:
 
 {{
-    "subset_df": "A subset DataFrame generated in the program that contains helpful information.,
+    "subset_df": <A subset DataFrame variable name from your code>,
     "aggregations": {{"key": "value"}} # A dict of key-value pairs for any aggregate and comparison values.
 }}
 
@@ -141,6 +140,22 @@ Object to return at end of the Python code:
             code = code[3:-3].strip()
         if code.startswith("```python") and code.endswith("```"):
             code = code[9:-3].strip()
+        
+        # Remove any standalone "python" lines
+        lines = code.split('\n')
+        clean_lines = []
+        for line in lines:
+            # Skip if the line contains only "python" (with possible whitespace)
+            if line.strip().lower() == "python":
+                continue
+            clean_lines.append(line)
+        
+        # Rejoin the cleaned lines
+        code = '\n'.join(clean_lines)
+        
+        # Ensure pandas is always imported
+        if "import pandas as pd" not in code:
+            code = "import pandas as pd\n" + code
     
     return code
 

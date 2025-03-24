@@ -7,7 +7,7 @@ from factchecker.serializers import DatasetCatalogSerializer
 from factchecker.search.pinecone_search import vector_search_datasets_pinecone as vector_search_datasets
 from factchecker.search import search_datasets
 from factchecker.processing.analysis import load_datafile, assess_datafile_relevance, extract_relevant_data, analyze_dataset_overview
-from factchecker.presentation.cli_tool_functions import summarize_findings, summarize_findings_alternate
+from factchecker.presentation.cli_tool_functions import summarize_findings, summarize_findings_alternate, summarize_findings_structured
 from django.conf import settings
 import os
 from django.core.management import call_command
@@ -1473,63 +1473,209 @@ def stream_analyze_datasets(request):
                         # Continue with next dataset
                 
                 # 6. SUMMARIZE: Generate summary of findings
-                if extracted_data_list:
-                    print(f"\n[DEBUG] Starting summary generation with {len(extracted_data_list)} datasets")
-                    print(f"  - Dataset titles included in summary:")
-                    for data in extracted_data_list:
-                        print(f"    * {data.get('dataset_title', 'Unknown')}")
+                print(f"\n[DEBUG] Starting summary generation with {len(extracted_data_list)} datasets")
+                print(f"  - Dataset titles included in summary:")
+                for data in extracted_data_list:
+                    print(f"    * {data.get('dataset_title', 'Unknown')}")
+                
+                # NEW CODE: Detailed logging of data being passed to the summary function
+                print("\n======= DATA BEING PASSED TO SUMMARY FUNCTION =======")
+                print(f"QUERY: {query}")
+                
+                print("\nEXTRACTED_DATA_LIST DETAILS:")
+                for i, data in enumerate(extracted_data_list, 1):
+                    print(f"\n--- DATASET #{i}: {data.get('dataset_title', 'Unknown')} ---")
                     
+                    # Dataset identifiers
+                    print(f"  dataset_id: {data.get('dataset_id', 'None')}")
+                    print(f"  organization: {data.get('organization', 'None')}")
+                    print(f"  dataset_source: {data.get('dataset_source', 'None')}")
+                    
+                    # DataFrame info
+                    if 'results_dict' in data:
+                        results_dict = data['results_dict']
+                        if isinstance(results_dict, pd.DataFrame):
+                            print(f"  results_dict: DataFrame with {len(results_dict)} rows, {len(results_dict.columns)} columns")
+                            print(f"  columns: {list(results_dict.columns)}")
+                            if not results_dict.empty:
+                                print("  sample (first row):")
+                                print(f"    {results_dict.iloc[0].to_dict()}")
+                        elif isinstance(results_dict, dict):
+                            print(f"  results_dict: Dictionary with {len(results_dict)} keys")
+                            print(f"  keys: {list(results_dict.keys())}")
+                            # If there's a 'subset_df' key containing a DataFrame, print details about it
+                            if 'subset_df' in results_dict and isinstance(results_dict['subset_df'], pd.DataFrame):
+                                subset_df = results_dict['subset_df']
+                                print(f"  subset_df: DataFrame with {len(subset_df)} rows, {len(subset_df.columns)} columns")
+                                print(f"  subset_df columns: {list(subset_df.columns)}")
+                                if not subset_df.empty:
+                                    print("  subset_df sample (first row):")
+                                    print(f"    {subset_df.iloc[0].to_dict()}")
+                        elif isinstance(results_dict, list):
+                            print(f"  results_dict: List with {len(results_dict)} items")
+                        else:
+                            print(f"  results_dict: {type(results_dict)}")
+                    else:
+                        print(f"  results_dict: Not found")
+                    
+                    # Check for explanation field
+                    if 'explanation' in data:
+                        explanation = data['explanation']
+                        print(f"  explanation: {explanation[:100]}..." if len(explanation) > 100 else explanation)
+                
+                print("\nDATASET_ANALYSES DETAILS:")
+                if dataset_analyses:
+                    for i, analysis in enumerate(dataset_analyses, 1):
+                        print(f"\n--- ANALYSIS #{i}: {analysis.get('dataset_title', 'Unknown')} ---")
+                        print(f"  dataset_id: {analysis.get('dataset_id', 'None')}")
+                        if 'geographic_scope' in analysis:
+                            print(f"  geographic_scope: {analysis.get('geographic_scope', {})}")
+                        if 'temporal_scope' in analysis:
+                            print(f"  temporal_scope: {analysis.get('temporal_scope', {})}")
+                else:
+                    print("  No dataset analyses available")
+                print("=======================================================\n")
+                
+                yield json.dumps({
+                    'type': 'status',
+                    'message': f"Generating structured summary of findings from all datasets...",
+                    'timestamp': time.time() - start_time
+                }, cls=NumpyEncoder) + '\n'
+                
+                try:
+                    # Enhance extracted_data_list with organization info from datasets
+                    for data in extracted_data_list:
+                        dataset_id = data.get('dataset_id')
+                        if not dataset_id:
+                            continue
+                            
+                        # For datasets that were processed through the full pipeline
+                        for dataset_info in results:
+                            if dataset_info.get('id') == dataset_id:
+                                # Copy organization info if available
+                                if 'organization' in dataset_info:
+                                    data['organization'] = dataset_info['organization']
+                                break
+                            
+                            # If we didn't find organization data yet, check if this is a Data.gov dataset
+                            if 'organization' not in data and not dataset_id.startswith('census-'):
+                                try:
+                                    # Get dataset from database
+                                    db_dataset = DatasetCatalog.objects.get(dataset_id=dataset_id)
+                                    data['organization'] = db_dataset.organization_title or db_dataset.organization_name
+                                except Exception as e:
+                                    print(f"[WARNING] Could not get organization for {dataset_id}: {str(e)}")
+                    
+                    # Generate structured summary
+                    print(f"[DEBUG] Calling summarize_findings_structured function...")
+                    from factchecker.presentation.cli_tool_functions import summarize_findings_structured
+                    
+                    structured_summary = summarize_findings_structured(
+                        query, 
+                        extracted_data_list,
+                        dataset_analyses
+                    )
+                    
+                    # Debug the key_findings structure
+                    print("\n======= KEY FINDINGS STRUCTURE ANALYSIS =======")
+                    if 'key_findings' in structured_summary:
+                        findings = structured_summary['key_findings']
+                        print(f"Number of findings: {len(findings)}")
+                        for i, finding in enumerate(findings):
+                            print(f"Finding #{i+1}:")
+                            print(f"  Type: {type(finding)}")
+                            print(f"  Length: {len(finding)}")
+                            print(f"  Content: '{finding}'")
+                            if finding.startswith('•') or finding.startswith('-'):
+                                print(f"  Note: Finding starts with bullet point character")
+                            if not finding.strip():
+                                print(f"  Warning: Empty finding")
+                            print()
+                    else:
+                        print("No key_findings in structured_summary")
+                    print("==============================================\n")
+                    
+                    # Print the summary info
+                    print("\n======= GENERATED STRUCTURED SUMMARY =======")
+                    print(f"Query: {structured_summary.get('query', 'N/A')}")
+
+                    # Print actual summary text
+                    print("\nSUMMARY:")
+                    print(structured_summary.get('summary', 'No summary generated'))
+
+                    # Print key findings with numbers
+                    print("\nKEY FINDINGS:")
+                    for i, finding in enumerate(structured_summary.get('key_findings', []), 1):
+                        print(f"{i}. {finding}")
+
+                    # Print sources
+                    print("\nSOURCES:")
+                    for i, source in enumerate(structured_summary.get('sources', []), 1):
+                        print(f"{i}. [{source.get('citation_id', 'UNKNOWN')}] {source.get('title', 'Untitled')} ({source.get('organization', 'No organization')})")
+
+                    print("=================================\n")
+                    
+                    # Format the summary for the frontend
+                    frontend_summary = {
+                        'text': structured_summary.get('summary', ''),
+                        'key_findings': structured_summary.get('key_findings', []),
+                        'sources': [
+                            {
+                                'citation_id': source.get('citation_id', ''),
+                                'title': source.get('title', ''),
+                                'organization': source.get('organization', '')
+                            }
+                            for source in structured_summary.get('sources', [])
+                        ],
+                        'temporal_context': structured_summary.get('context', {}).get('temporal', {}),
+                        'geographic_context': structured_summary.get('context', {}).get('geographic', {}),
+                        'datasets_analyzed': [
+                            {
+                                'id': r.get('id', ''),
+                                'title': r.get('title', ''),
+                                'relevance_score': r.get('relevance_score', 0)
+                            }
+                            for r in results if r.get('id') and r.get('title')
+                        ]
+                    }
+                    
+                    # Send status message about completion
                     yield json.dumps({
                         'type': 'status',
-                        'message': f"Generating summary of findings from all datasets...",
+                        'message': f"Summary generated with {len(structured_summary.get('key_findings', []))} key findings",
                         'timestamp': time.time() - start_time
                     }, cls=NumpyEncoder) + '\n'
                     
-                    try:
-                        # Generate summary
-                        print(f"[DEBUG] Calling summarize_findings function...")
-                        summary_text = summarize_findings(
-                            query, 
-                            extracted_data_list,
-                            dataset_analyses
-                        )
-                        
-                        # Print the full summary text to the console
-                        print("\n======= GENERATED SUMMARY =======")
-                        print(summary_text)
-                        print("=================================\n")
-                        
-                        # Create a summary object
-                        summary = {
-                            'text': summary_text,
-                            'confidence': 0.8,  # Placeholder confidence score
-                            'datasets_analyzed': [
-                                {
-                                    'id': r['id'],
-                                    'title': r['title'],
-                                    'relevance_score': r.get('relevance_score', 0)
-                                }
-                                for r in results
-                            ]
-                        }
-                        
-                        yield json.dumps({
-                            'type': 'summary',
-                            'data': summary,
-                            'timestamp': time.time() - start_time
-                        }, cls=NumpyEncoder) + '\n'
-                    except Exception as e:
-                        error_msg = f"Error generating summary: {str(e)}"
-                        logger.error(error_msg)
-                        logger.error(traceback.format_exc())
-                        print(f"[ERROR] {error_msg}")
-                        print(traceback.format_exc())
-                        
-                        yield json.dumps({
-                            'type': 'error',
-                            'message': error_msg,
-                            'timestamp': time.time() - start_time
-                        }, cls=NumpyEncoder) + '\n'
+                    # Send the structured summary
+                    yield json.dumps({
+                        'type': 'structured_summary',
+                        'data': frontend_summary,
+                        'timestamp': time.time() - start_time
+                    }, cls=NumpyEncoder) + '\n'
+                    
+                    # Also send the original summary format for backward compatibility
+                    yield json.dumps({
+                        'type': 'summary',
+                        'data': {
+                            'text': structured_summary.get('summary', ''),
+                            'confidence': structured_summary.get('confidence', {}).get('score', 0) / 5.0,  # Scale to 0-1
+                            'datasets_analyzed': frontend_summary['datasets_analyzed']
+                        },
+                        'timestamp': time.time() - start_time
+                    }, cls=NumpyEncoder) + '\n'
+                    
+                except Exception as e:
+                    error_msg = f"Error generating summary: {str(e)}"
+                    logger.error(error_msg)
+                    logger.error(traceback.format_exc())
+                    print(f"[ERROR] {error_msg}")
+                    print(traceback.format_exc())
+                    
+                    yield json.dumps({
+                        'type': 'error',
+                        'message': error_msg,
+                        'timestamp': time.time() - start_time
+                    }, cls=NumpyEncoder) + '\n'
                 else:
                     no_data_msg = "No data could be extracted from any datasets. Unable to generate summary."
                     print(f"[DEBUG] {no_data_msg}")
@@ -1538,23 +1684,23 @@ def stream_analyze_datasets(request):
                         'message': no_data_msg,
                         'timestamp': time.time() - start_time
                     }, cls=NumpyEncoder) + '\n'
-                
-                # Calculate final execution time
-                final_execution_time = time.time() - start_time
-                
-                # Send completion message
-                yield json.dumps({
-                    'type': 'complete',
-                    'data': {
-                        'query': query,
-                        'execution_time': final_execution_time,
-                        'total_datasets': len(dataset_ids),
-                        'successful_datasets': len(results)
-                    },
-                    'message': f"Analysis complete! Processed {len(results)} datasets in {final_execution_time:.1f} seconds.",
-                    'timestamp': final_execution_time
-                }, cls=NumpyEncoder) + '\n'
-                
+            
+            # Calculate final execution time
+            final_execution_time = time.time() - start_time
+            
+            # Send completion message
+            yield json.dumps({
+                'type': 'complete',
+                'data': {
+                    'query': query,
+                    'execution_time': final_execution_time,
+                    'total_datasets': len(dataset_ids),
+                    'successful_datasets': len(results)
+                },
+                'message': f"Analysis complete! Processed {len(results)} datasets in {final_execution_time:.1f} seconds.",
+                'timestamp': final_execution_time
+            }, cls=NumpyEncoder) + '\n'
+            
         except Exception as e:
             # Send error message for any uncaught exceptions
             error_message = str(e)
@@ -1580,3 +1726,15 @@ def stream_analyze_datasets(request):
     response['Cache-Control'] = 'no-cache'
     response['X-Accel-Buffering'] = 'no'
     return response
+
+def format_source_citation(dataset, dataset_id):
+    """Format a consistent citation for a dataset"""
+    # Truncate description if it's too long (e.g., first 100 characters)
+    description = dataset.get('dataset_source', '')
+    short_description = description[:100] + '...' if len(description) > 100 else description
+    
+    organization = dataset.get('organization', 'Unknown Organization')
+    title = dataset.get('title', 'Untitled Dataset')
+    
+    # Format the citation consistently
+    return f"[{dataset_id.upper()[:8]}] {title} ({organization})"

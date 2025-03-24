@@ -20,7 +20,11 @@ from factchecker.processing.analysis import (
     analyze_dataset_overview
 )
 
-from factchecker.presentation.cli_tool_functions import summarize_findings, summarize_findings_alternate
+from factchecker.presentation.cli_tool_functions import (
+    summarize_findings, 
+    summarize_findings_alternate,
+    summarize_findings_structured  # Add the new function
+)
 
 # Import Django settings including API keys
 from django.conf import settings
@@ -763,69 +767,133 @@ class Command(BaseCommand):
             self.stdout.write(f"{i}. {source_indicator} {result['title']} (Similarity: {result.get('similarity', 0):.4f}) {relevance_info} - {result.get('row_count', 'ERROR')} rows")
         
         if extracted_data_list:
-            self.stdout.write("\nGenerating summary of findings...")
+            print(f"\n[DEBUG] Starting summary generation with {len(extracted_data_list)} datasets")
+            print(f"  - Dataset titles included in summary:")
+            for data in extracted_data_list:
+                print(f"    * {data.get('dataset_title', 'Unknown')}")
             
-
-            # Summarize findings
-            if options.get('json_output'):
-                # Use alternate function for JSON output
-                self.stdout.write("Using comprehensive JSON output format...")
-                output = summarize_findings_alternate(
+            yield json.dumps({
+                'type': 'status',
+                'message': f"Generating structured summary of findings from all datasets...",
+                'timestamp': time.time() - start_time
+            }, cls=NumpyEncoder) + '\n'
+            
+            try:
+                # Enhance extracted_data_list with organization info from the original datasets
+                for data in extracted_data_list:
+                    dataset_id = data.get('dataset_id')
+                    if not dataset_id:
+                        continue
+                        
+                    # Find original dataset in results to get organization info
+                    found = False
+                    for result in results:
+                        if result.get('id') == dataset_id:
+                            # If we already processed this dataset, the organization might be in dataset_info
+                            if 'organization' in result:
+                                data['organization'] = result['organization']
+                                found = True
+                                break
+                
+                    # If not found in results, try to get from database
+                    if not found and not dataset_id.startswith('census-'):
+                        try:
+                            db_dataset = DatasetCatalog.objects.get(dataset_id=dataset_id)
+                            data['organization'] = db_dataset.organization_title or db_dataset.organization_name
+                            # Also add year if available
+                            if hasattr(db_dataset, 'year'):
+                                data['year'] = db_dataset.year
+                        except Exception as e:
+                            print(f"[WARNING] Could not get organization for {dataset_id}: {str(e)}")
+                
+                # Generate structured summary
+                print(f"[DEBUG] Calling summarize_findings_structured function...")
+                structured_summary = summarize_findings_structured(
                     query, 
                     extracted_data_list,
                     dataset_analyses
                 )
                 
-                # For command line, print a readable summary version
-                try:
-                    output_dict = json.loads(output)
-                    
-                    self.stdout.write(self.style.SUCCESS("\nSUMMARY:"))
-                    
-                    # Handle case where 'text' might be nested inside summary or directly present
-                    if isinstance(output_dict["summary"], dict) and "text" in output_dict["summary"]:
-                        summary_text = output_dict["summary"]["text"]
-                    else:
-                        summary_text = str(output_dict["summary"])
-                    #self.stdout.write(summary_text)
-                    print("Skipping printed summary because --json-output flag was passed.")
-                    
-                    # Handle case where confidence score might be nested or directly present
-                    if isinstance(output_dict["summary"], dict) and "confidence" in output_dict["summary"]:
-                        confidence = output_dict["summary"]["confidence"] 
-                        self.stdout.write(f"Confidence: {confidence:.2f}")
-                    
-                    # Display datasets analyzed
-                    self.stdout.write(self.style.SUCCESS("\nDATASETS ANALYZED:"))
-                    for dataset in output_dict["relevant_datasets"]:
-                        format_info = ""
-                        if dataset["files"] and "format" in dataset["files"][0]:
-                            format_info = f" ({dataset['files'][0]['format']})"
-                        
-                        self.stdout.write(f"- {dataset['title']} (ID: {dataset['dataset_id']}){format_info}")
-                    
-                    # Save JSON to file
-                    output_file = f"results_{int(time.time())}.json"
-                    with open(output_file, 'w') as f:
-                        f.write(output)
-                    self.stdout.write(f"\nFull JSON output saved to: {output_file}")
-                    
-                except Exception as e:
-                    # Log the error
-                    self.stderr.write(self.style.ERROR(f"Error processing JSON output: {str(e)}"))
-                    self.stdout.write(self.style.SUCCESS("\nRAW OUTPUT:"))
-                    self.stdout.write(output)
-            else:
-                # Use original function for text output
-                summary = summarize_findings(
-                    query, 
-                    extracted_data_list,
-                    dataset_analyses
-                )
-                self.stdout.write(self.style.SUCCESS("\nFINDINGS:"))
-                self.stdout.write(summary)
+                # Log summary information
+                print("\n======= GENERATED STRUCTURED SUMMARY =======")
+                print(f"Query: {structured_summary.get('query', 'N/A')}")
+                print(f"Key findings: {len(structured_summary.get('key_findings', []))} items")
+                print(f"Confidence: {structured_summary.get('confidence', {}).get('score', 'N/A')}/5")
+                print(f"Sources: {len(structured_summary.get('sources', []))} sources")
+                print("============================================\n")
+                
+                # Create a compact summary for frontend display
+                frontend_summary = {
+                    'text': structured_summary.get('summary', ''),
+                    'key_findings': structured_summary.get('key_findings', []),
+                    'methodology_assessment': structured_summary.get('methodology_assessment', ''),
+                    'information_gaps': structured_summary.get('information_gaps', ''),
+                    'confidence': structured_summary.get('confidence', {'score': 3, 'explanation': 'No explanation provided'}),
+                    'sources': [
+                        {
+                            'citation_id': source.get('citation_id', ''),
+                            'title': source.get('title', ''),
+                            'organization': source.get('organization', '')
+                        }
+                        for source in structured_summary.get('sources', [])
+                    ],
+                    'temporal_context': structured_summary.get('context', {}).get('temporal', {}),
+                    'geographic_context': structured_summary.get('context', {}).get('geographic', {}),
+                    'datasets_analyzed': [
+                        {
+                            'id': r.get('id', ''),
+                            'title': r.get('title', ''),
+                            'relevance_score': r.get('relevance_score', 0)
+                        }
+                        for r in results if r.get('id') and r.get('title')
+                    ]
+                }
+                
+                # Send status update about summary completion
+                yield json.dumps({
+                    'type': 'status',
+                    'message': f"Summary generated with {len(structured_summary.get('key_findings', []))} key findings and confidence score of {structured_summary.get('confidence', {}).get('score', 'N/A')}/5",
+                    'timestamp': time.time() - start_time
+                }, cls=NumpyEncoder) + '\n'
+                
+                # Send the structured summary data
+                yield json.dumps({
+                    'type': 'structured_summary',
+                    'data': frontend_summary,
+                    'timestamp': time.time() - start_time
+                }, cls=NumpyEncoder) + '\n'
+                
+                # Also send basic summary for backward compatibility
+                yield json.dumps({
+                    'type': 'summary',
+                    'data': {
+                        'text': structured_summary.get('summary', ''),
+                        'confidence': structured_summary.get('confidence', {}).get('score', 0) / 5.0,  # Convert to 0-1 range
+                        'datasets_analyzed': frontend_summary['datasets_analyzed']
+                    },
+                    'timestamp': time.time() - start_time
+                }, cls=NumpyEncoder) + '\n'
+                
+            except Exception as e:
+                error_msg = f"Error generating summary: {str(e)}"
+                logger.error(error_msg)
+                logger.error(traceback.format_exc())
+                print(f"[ERROR] {error_msg}")
+                print(traceback.format_exc())
+                
+                yield json.dumps({
+                    'type': 'error',
+                    'message': error_msg,
+                    'timestamp': time.time() - start_time
+                }, cls=NumpyEncoder) + '\n'
         else:
-            self.stdout.write(self.style.WARNING("\nNo relevant data found to answer the query."))
+            no_data_msg = "No data could be extracted from any datasets. Unable to generate summary."
+            print(f"[DEBUG] {no_data_msg}")
+            yield json.dumps({
+                'type': 'status',
+                'message': no_data_msg,
+                'timestamp': time.time() - start_time
+            }, cls=NumpyEncoder) + '\n'
         
         # Calculate and display execution time
         execution_time = time.time() - start_time

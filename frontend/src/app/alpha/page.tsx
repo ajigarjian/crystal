@@ -1823,7 +1823,7 @@ export default function DatasetsPage() {
                               </TableCell>
                               <TableCell className="text-center">
                                 <div className="flex items-center justify-center">
-                                  {relevanceScore > 0.7 ? (
+                                  {relevanceScore > 0.65 ? (
                                     <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300">
                                       <CheckCircle2 className="h-3 w-3 mr-1" />
                                       {Math.round(relevanceScore * 100)}%

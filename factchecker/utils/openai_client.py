@@ -104,7 +104,7 @@ def create_embeddings(query):
         model="text-embedding-3-small"
     )
 
-    return response.data[0].embedding
+    return response.data[0].embedding    
 
 def chat_completion(
     prompt: str, 
@@ -159,3 +159,85 @@ def chat_completion(
     except Exception as e:
         print(f"Error calling OpenAI API: {str(e)}")
         return f"Error generating response: {str(e)}" 
+
+def reasoning_completion(
+    prompt: str,
+    system_message: str = "You are a helpful AI assistant.",
+    reasoning_effort: str = "high",
+    model_name: str = "o1",
+    max_retries: int = 3,
+    retry_delay: int = 5
+) -> str:
+    """
+    Generate completions using OpenAI's API with reasoning models.
+    
+    Args:
+        prompt: The user prompt to send to the model
+        system_message: Optional system message to set the context
+        reasoning_effort: Level of reasoning effort ("low", "medium", "high")
+        model_name: The model to use (default: "gpt-4o")
+        max_retries: Maximum number of retry attempts on API error
+        retry_delay: Delay between retries in seconds
+        
+    Returns:
+        The generated text response
+    """
+    import openai
+    import time
+    import logging
+    from django.conf import settings
+
+    logger = logging.getLogger(__name__)
+    
+    # Configure API key
+    if hasattr(settings, 'AZURE_OPENAI_API_KEY') and settings.AZURE_OPENAI_API_KEY:
+        # Azure OpenAI setup
+        client = openai.AzureOpenAI(
+            api_key=settings.AZURE_OPENAI_API_KEY,
+            api_version=settings.AZURE_OPENAI_API_VERSION,
+            azure_endpoint=settings.AZURE_OPENAI_ENDPOINT
+        )
+        # Map model names to their Azure deployment IDs if needed
+        azure_model_map = {
+            "gpt-4o": settings.AZURE_GPT4O_DEPLOYMENT_NAME,
+            "gpt-4-turbo": settings.AZURE_GPT4_TURBO_DEPLOYMENT_NAME,
+            "gpt-3.5-turbo": settings.AZURE_GPT35_TURBO_DEPLOYMENT_NAME
+        }
+        model = azure_model_map.get(model_name, model_name)
+    else:
+        # Standard OpenAI setup
+        client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
+        model = model_name
+    
+    # Validate reasoning_effort
+    valid_efforts = ["low", "medium", "high"]
+    if reasoning_effort not in valid_efforts:
+        logger.warning(f"Invalid reasoning_effort '{reasoning_effort}'. Using 'high' instead.")
+        reasoning_effort = "high"
+    
+    # Prepare messages
+    messages = [
+        {"role": "system", "content": system_message},
+        {"role": "user", "content": prompt}
+    ]
+    
+    # Try to generate completion with retries
+    for attempt in range(max_retries):
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                reasoning_effort=reasoning_effort
+            )
+            return response.choices[0].message.content
+            
+        except Exception as e:
+            if attempt < max_retries - 1:
+                logger.warning(f"API error: {str(e)}. Retrying in {retry_delay} seconds... (Attempt {attempt + 1}/{max_retries})")
+                time.sleep(retry_delay)
+            else:
+                logger.error(f"Failed after {max_retries} attempts: {str(e)}")
+                raise
+    
+    # This line should never be reached due to the raise in the exception handler
+    return "Error generating response." 
