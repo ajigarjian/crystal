@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Link from "next/link";
+import { registerWaitlist } from "@/lib/firebase";
 
 export default function WaitlistPage() {
   // State for the waitlist form
@@ -15,6 +16,8 @@ export default function WaitlistPage() {
   
   // State for submission feedback
   const [submitted, setSubmitted] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   
   // Handle form input changes
   const handleWaitlistInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -23,30 +26,24 @@ export default function WaitlistPage() {
       ...prev,
       [name]: value
     }));
+    // Clear any previous error when user starts typing again
+    if (error) setError(null);
   };
   
   // Handle waitlist submission
   const handleWaitlistSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setIsSubmitting(true);
+    setError(null);
     
     try {
-      const response = await fetch('http://localhost:8000/api/waitlist/register/', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
-        body: JSON.stringify({
-          first_name: waitlistForm.firstName,
-          email: waitlistForm.email
-        }),
+      // Call the Firebase Cloud Function with the correct data structure
+      const result = await registerWaitlist({
+        email: waitlistForm.email,
+        first_name: waitlistForm.firstName
       });
-
-      const data = await response.json();
       
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to register');
-      }
+      console.log("Function result:", result.data); // Log the response data
       
       // Show success message
       setSubmitted(true);
@@ -59,9 +56,15 @@ export default function WaitlistPage() {
           email: ""
         });
       }, 3000);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error submitting form:', error);
-      alert(error.message || "Failed to register. Please try again later.");
+      // Extract error message from Firebase response
+      const errorMessage = error.message || 
+                          (error.details && error.details.error) || 
+                          "Failed to register. Please try again later.";
+      setError(errorMessage);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -142,6 +145,12 @@ export default function WaitlistPage() {
                 </div>
               ) : (
                 <div className="space-y-4">
+                  {error && (
+                    <div className="bg-red-500/30 text-white p-3 rounded-md text-center border border-red-400/50 text-sm">
+                      {error}
+                    </div>
+                  )}
+                  
                   <div className="space-y-2">
                     <Label htmlFor="firstName" className="text-white">
                       First Name
@@ -153,6 +162,7 @@ export default function WaitlistPage() {
                       value={waitlistForm.firstName}
                       onChange={handleWaitlistInputChange}
                       required
+                      disabled={isSubmitting}
                       className="bg-white/20 border-white/30 text-white placeholder:text-white/80 focus:border-green-400/70 focus:ring-1 focus:ring-green-400/70"
                     />
                   </div>
@@ -169,6 +179,7 @@ export default function WaitlistPage() {
                       value={waitlistForm.email}
                       onChange={handleWaitlistInputChange}
                       required
+                      disabled={isSubmitting}
                       className="bg-white/20 border-white/30 text-white placeholder:text-white/80 focus:border-green-400/70 focus:ring-1 focus:ring-green-400/70"
                     />
                   </div>
@@ -176,8 +187,9 @@ export default function WaitlistPage() {
                   <Button 
                     type="submit" 
                     className="w-full bg-green-500/80 hover:bg-green-500/90 text-white mt-2 font-medium transition-all"
+                    disabled={isSubmitting}
                   >
-                    Join Waitlist
+                    {isSubmitting ? "Submitting..." : "Join Waitlist"}
                   </Button>
                 </div>
               )}
