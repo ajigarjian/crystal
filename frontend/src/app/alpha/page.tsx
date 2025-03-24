@@ -106,6 +106,19 @@ interface StatusMessage {
   count?: number;
 }
 
+// Add this interface after the existing interfaces
+interface DatasetProcessingState {
+  id: string;
+  title: string;
+  status: 'queued' | 'downloading' | 'downloaded' | 'loading' | 'loaded' | 'assessing' | 'assessed' | 'extracting' | 'extracted' | 'analyzing' | 'analyzed' | 'error';
+  progress?: number;
+  startTime?: number;
+  endTime?: number;
+  fileSize?: number;
+  downloadedSize?: number;
+  error?: string;
+}
+
 export default function DatasetsPage() {
   const [query, setQuery] = useState("");
   const [datasets, setDatasets] = useState<Dataset[]>([]);
@@ -130,6 +143,9 @@ export default function DatasetsPage() {
   }[]>([]);
   const [selectedPreview, setSelectedPreview] = useState<Dataset | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [selectedDatasets, setSelectedDatasets] = useState<{[key: string]: boolean}>({});
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [processingDatasets, setProcessingDatasets] = useState<DatasetProcessingState[]>([]);
   
   // Scroll to the latest discovered dataset
   const discoveryEndRef = useRef<HTMLDivElement>(null);
@@ -646,10 +662,9 @@ export default function DatasetsPage() {
     }
   };
 
-  // Handle form submission
+  // Update the handleSubmit function
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    // Use the streaming function
     processStreamingQuery(query);
   };
 
@@ -799,6 +814,387 @@ export default function DatasetsPage() {
       maxHeight: 0,
       marginBottom: 0,
       padding: 0,
+    }
+  };
+
+  // Add a function to handle checkbox changes
+  const handleCheckboxChange = (datasetId: string, isChecked: boolean) => {
+    setSelectedDatasets(prev => ({
+      ...prev,
+      [datasetId]: isChecked
+    }));
+  };
+
+  // Update the handleAnalyzeClick function with the correct API endpoint
+  const handleAnalyzeClick = async () => {
+    // Get all selected dataset IDs
+    const datasetIds = Object.keys(selectedDatasets).filter(id => selectedDatasets[id]);
+    
+    if (datasetIds.length === 0) {
+      alert("Please select at least one dataset to analyze.");
+      return;
+    }
+    
+    // Set analyzing state without clearing datasets
+    setIsAnalyzing(true);
+    
+    // Clear status messages but keep datasets
+    setStatusMessages([]); 
+    
+    // Initialize processing state for each dataset
+    const initialProcessingState = datasetIds.map(id => {
+      const dataset = datasets.find(d => d.id === id);
+      return {
+        id,
+        title: dataset?.title || 'Unknown Dataset',
+        status: 'queued' as const,
+        startTime: Date.now()
+      };
+    });
+    
+    setProcessingDatasets(initialProcessingState);
+    
+    try {
+      // Use the correct API route in Next.js
+      const response = await fetch('/api/stream-analyze', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          query: query,
+          dataset_ids: datasetIds,
+        }),
+      });
+      
+      // Set up stream reader
+      const reader = response.body?.getReader();
+      if (!reader) {
+        setStatusMessages([{
+          id: 'error',
+          message: 'Error initializing stream reader',
+          timestamp: Date.now(),
+          type: 'error'
+        }]);
+        setIsAnalyzing(false);
+        return;
+      }
+      
+      // Process streaming response
+      let buffer = '';
+      
+      // Process each chunk
+      while (true) {
+        const { done, value } = await reader.read();
+        
+        if (done) {
+          break;
+        }
+        
+        // Decode the chunk
+        const chunk = new TextDecoder().decode(value);
+        buffer += chunk;
+        
+        // Split by newlines and process each complete message
+        let newlineIndex;
+        while ((newlineIndex = buffer.indexOf('\n')) >= 0) {
+          const message = buffer.slice(0, newlineIndex);
+          buffer = buffer.slice(newlineIndex + 1);
+          
+          if (message.trim() === '') continue;
+          
+          try {
+            const parsedMessage = JSON.parse(message);
+            
+            // Process different message types
+            switch (parsedMessage.type) {
+              case 'status':
+                // Add to status messages
+                setStatusMessages(prev => [
+                  ...prev, 
+                  {
+                    id: crypto.randomUUID(),
+                    message: parsedMessage.message,
+                    timestamp: parsedMessage.timestamp * 1000,
+                    type: 'status'
+                  }
+                ]);
+                break;
+                
+              case 'dataset_update':
+                // Update an existing dataset
+                setDatasets(prev => {
+                  const updatedDatasets = [...prev];
+                  const datasetIndex = updatedDatasets.findIndex(d => d.id === parsedMessage.data.id);
+                  
+                  if (datasetIndex >= 0) {
+                    // Merge the update with existing dataset
+                    updatedDatasets[datasetIndex] = {
+                      ...updatedDatasets[datasetIndex],
+                      ...parsedMessage.data
+                    };
+                  }
+                  
+                  return updatedDatasets;
+                });
+                break;
+                
+              case 'dataset_processing':
+                // Update processing state for a dataset
+                setProcessingDatasets(prev => {
+                  return prev.map(d => {
+                    if (d.id === parsedMessage.dataset_id) {
+                      return {
+                        ...d,
+                        status: parsedMessage.status,
+                        progress: parsedMessage.progress,
+                        downloadedSize: parsedMessage.downloaded_size,
+                        fileSize: parsedMessage.file_size,
+                        ...(parsedMessage.status.endsWith('ed') && { endTime: Date.now() }),
+                        ...(parsedMessage.error && { error: parsedMessage.error })
+                      };
+                    }
+                    return d;
+                  });
+                });
+                break;
+                
+              case 'error':
+                // Handle error message
+                setStatusMessages(prev => [
+                  ...prev, 
+                  {
+                    id: crypto.randomUUID(),
+                    message: parsedMessage.message,
+                    timestamp: parsedMessage.timestamp * 1000,
+                    type: 'error'
+                  }
+                ]);
+                
+                // Update processing state if dataset_id is provided
+                if (parsedMessage.dataset_id) {
+                  setProcessingDatasets(prev => {
+                    return prev.map(d => {
+                      if (d.id === parsedMessage.dataset_id) {
+                        return {
+                          ...d,
+                          status: 'error',
+                          error: parsedMessage.message,
+                          endTime: Date.now()
+                        };
+                      }
+                      return d;
+                    });
+                  });
+                }
+                break;
+                
+              case 'summary':
+                // Set the summary from analysis
+                // setSummary(parsedMessage.data);
+                break;
+                
+              case 'complete':
+                // Analysis is complete
+                setStatusMessages(prev => [
+                  ...prev, 
+                  {
+                    id: 'complete',
+                    message: parsedMessage.message,
+                    timestamp: parsedMessage.timestamp * 1000,
+                    type: 'status'
+                  }
+                ]);
+                setIsAnalyzing(false);
+                
+                // Mark any remaining datasets as completed
+                setProcessingDatasets(prev => {
+                  return prev.map(d => {
+                    if (!d.endTime) {
+                      return {
+                        ...d,
+                        status: 'analyzed',
+                        endTime: Date.now()
+                      };
+                    }
+                    return d;
+                  });
+                });
+                break;
+            }
+          } catch (e) {
+            console.error('Error parsing message:', e, message);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error analyzing datasets:', error);
+      setStatusMessages(prev => [
+        ...prev, 
+        {
+          id: 'fetch-error',
+          message: `Error analyzing datasets: ${error}`,
+          timestamp: Date.now(),
+          type: 'error'
+        }
+      ]);
+      setIsAnalyzing(false);
+    }
+  };
+
+  // Then, use useEffect to set all datasets as checked when they are loaded
+  useEffect(() => {
+    // Only proceed if we have datasets and they aren't already all selected
+    if (datasets.length > 0) {
+      const newSelectedState: {[key: string]: boolean} = {};
+      
+      // Set each dataset as selected (checked)
+      datasets.forEach(dataset => {
+        newSelectedState[dataset.id] = true;
+      });
+      
+      // Update the state
+      setSelectedDatasets(newSelectedState);
+    }
+  }, [datasets]); // This effect runs whenever the datasets array changes
+
+  // Add this function to your component
+  const calculateOverallProgress = () => {
+    if (!processingDatasets.length) return 0;
+    
+    // Count completed stages for each dataset
+    let completedStages = 0;
+    let totalStages = 0;
+    
+    processingDatasets.forEach(dataset => {
+      // Each dataset has 5 stages: download, load, assess, extract, analyze
+      totalStages += 5;
+      
+      // Count completed stages based on status
+      switch (dataset.status) {
+        case 'analyzed':
+          completedStages += 5;
+          break;
+        case 'analyzing':
+          completedStages += 4;
+          break;
+        case 'extracted':
+          completedStages += 4;
+          break;
+        case 'extracting':
+          completedStages += 3;
+          break;
+        case 'assessed':
+          completedStages += 3;
+          break;
+        case 'assessing':
+          completedStages += 2;
+          break;
+        case 'loaded':
+          completedStages += 2;
+          break;
+        case 'loading':
+          completedStages += 1;
+          break;
+        case 'downloaded':
+          completedStages += 1;
+          break;
+        case 'downloading':
+          // Partial credit for downloading based on progress
+          if (dataset.progress) {
+            completedStages += dataset.progress / 100;
+          }
+          break;
+        case 'queued':
+        default:
+          // No stages completed
+          break;
+      }
+    });
+    
+    // Calculate percentage
+    return Math.round((completedStages / totalStages) * 100);
+  };
+
+  // Also add these helper functions
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'downloading':
+      case 'downloaded':
+        return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300';
+      case 'loading':
+      case 'loaded':
+        return 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300';
+      case 'assessing':
+      case 'assessed':
+        return 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300';
+      case 'extracting':
+      case 'extracted':
+        return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300';
+      case 'analyzing':
+      case 'analyzed':
+        return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300';
+      case 'error':
+        return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300';
+      case 'queued':
+      default:
+        return 'bg-gray-100 text-gray-800 dark:bg-gray-800/30 dark:text-gray-300';
+    }
+  };
+
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case 'downloading':
+        return <Download className="h-3 w-3 animate-pulse" />;
+      case 'downloaded':
+        return <Download className="h-3 w-3" />;
+      case 'loading':
+      case 'assessing':
+      case 'extracting':
+      case 'analyzing':
+        return <Loader2 className="h-3 w-3 animate-spin" />;
+      case 'loaded':
+      case 'assessed':
+      case 'extracted':
+      case 'analyzed':
+        return <CheckCircle2 className="h-3 w-3" />;
+      case 'error':
+        return <AlertCircle className="h-3 w-3" />;
+      case 'queued':
+      default:
+        return <FileText className="h-3 w-3" />;
+    }
+  };
+
+  const getStatusLabel = (status: string) => {
+    // Convert status to a more readable format
+    switch (status) {
+      case 'downloading':
+        return 'Downloading';
+      case 'downloaded':
+        return 'Downloaded';
+      case 'loading':
+        return 'Loading';
+      case 'loaded':
+        return 'Loaded';
+      case 'assessing':
+        return 'Assessing';
+      case 'assessed':
+        return 'Assessed';
+      case 'extracting':
+        return 'Extracting';
+      case 'extracted':
+        return 'Extracted';
+      case 'analyzing':
+        return 'Analyzing';
+      case 'analyzed':
+        return 'Analyzed';
+      case 'error':
+        return 'Error';
+      case 'queued':
+        return 'Queued';
+      default:
+        return status.charAt(0).toUpperCase() + status.slice(1);
     }
   };
 
@@ -952,24 +1348,27 @@ export default function DatasetsPage() {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 className="flex-1"
-                disabled={loading}
+                disabled={loading || isAnalyzing}
               />
-              <Button 
-                type="submit" 
-                disabled={loading} 
-                className={`${
-                  !loading && searchComplete && datasets.length > 0
-                    ? "bg-black hover:bg-black/90 text-white animate-pulse" 
-                    : "bg-green-600 hover:bg-green-700 text-white"
-                }`}
-              >
-                {loading 
-                  ? "Searching..." 
-                  : (searchComplete && datasets.length > 0) 
-                    ? "Analyze" 
-                    : "Search"
-                }
-              </Button>
+              
+              {(!loading && searchComplete && datasets.length > 0) ? (
+                    <Button 
+                  type="button" 
+                  onClick={handleAnalyzeClick}
+                  disabled={isAnalyzing}
+                  className="bg-black hover:bg-black/90 text-white animate-pulse"
+                >
+                  {isAnalyzing ? "Analyzing..." : "Analyze"}
+                    </Button>
+              ) : (
+                            <Button 
+                  type="submit" 
+                  disabled={loading} 
+                  className="bg-green-600 hover:bg-green-700 text-white"
+                >
+                  {loading ? "Searching..." : "Search"}
+                </Button>
+              )}
             </div>
           </form>
 
@@ -983,77 +1382,84 @@ export default function DatasetsPage() {
           {/* Loading state with live discovery feed */}
           {loading && (
             <div className="space-y-4">
-              {/* Status messages */}
+              {/* Status messages - Updated with collapsible functionality */}
               <div className="p-3 bg-neutral-50 dark:bg-neutral-900 rounded-md border border-neutral-200 dark:border-neutral-800">
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center">
                     <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse mr-2"></div>
                     <h3 className="font-medium">Search Progress</h3>
                   </div>
-                  {shouldShowAllButton(statusMessages) && (
+                  <div className="flex items-center gap-2">
+                    
                     <Button 
                       variant="ghost" 
                       size="sm" 
-                      className="h-6 text-xs"
-                      onClick={() => setShowAllMessages(prev => !prev)}
+                      className="flex items-center gap-1 text-xs text-neutral-500 hover:text-green-700 h-6"
+                      onClick={toggleProcessDetails}
                     >
-                      {showAllMessages ? "Show Less" : "Show All"}
+                      {showProcessDetails ? (
+                        <ChevronUp className="h-4 w-4" />
+                      ) : (
+                        <ChevronDown className="h-4 w-4" />
+                      )}
                     </Button>
-                  )}
+                  </div>
                 </div>
                 
-                <div className="space-y-1 max-h-[200px] overflow-y-auto pr-1 status-message-container">
-                  {(showAllMessages ? statusMessages : statusMessages.slice(-3)).map((msg) => (
-                    <div 
-                      key={msg.id}
-                      className={`text-sm ${msg.type === 'error' ? 'text-red-500' : 'text-neutral-600 dark:text-neutral-400'} mb-2`}
-                    >
-                      {msg.message && typeof msg.message === 'string' && msg.message.includes("Assessing dataset") ? (
-                        // Format assessment messages in a more conversational style
-                        <div dangerouslySetInnerHTML={{ 
-                          __html: msg.message.replace(/Assessing dataset \d+\/\d+: (.+)/, (match, datasetName) => {
-                            // Extract organization name from the message if available
-                            const orgMatch = msg.message.match(/organization_name":\s*"([^"]+)"/);
-                            const orgName = orgMatch ? orgMatch[1] : "";
-                            
-                            if (orgName) {
-                              return `I'm assessing the dataset <strong>${datasetName}</strong> from <strong>${orgName}</strong>`;
-                            } else {
-                              return `I'm assessing the dataset <strong>${datasetName}</strong>`;
-                            }
-                          })
-                        }} />
-                      ) : msg.message && typeof msg.message === 'string' && msg.message.includes("Pre-assessment:") ? (
-                        // Format pre-assessment messages
-                        <div dangerouslySetInnerHTML={{ 
-                          __html: msg.message.replace(
-                            /Pre-assessment: Dataset is (relevant|not relevant) \(Score: (.+)\)(\s*)Reasoning: (.+)/,
-                            function(match, relevance, score, space, reasoning) {
-                              // Convert first letter of reasoning to lowercase
-                              const lowerCaseReasoning = reasoning.charAt(0).toLowerCase() + reasoning.slice(1);
-                              return `It appears to be <strong>${relevance}</strong> because ${lowerCaseReasoning} I'll download the files for additional insight.`;
-                            }
-                          )
-                        }} />
-                      ) : msg.message && typeof msg.message === 'string' && msg.message.includes("Final assessment:") ? (
-                        // Format final assessment messages
-                        <div dangerouslySetInnerHTML={{ 
-                          __html: msg.message.replace(
-                            /Final assessment: Dataset is (relevant|not relevant) \(Score: (.+)\)(\s*)Reasoning: (.+)/,
-                            function(match, relevance, score, space, reasoning) {
-                              // Convert first letter of reasoning to lowercase
-                              const lowerCaseReasoning = reasoning.charAt(0).toLowerCase() + reasoning.slice(1);
-                              return `Based on the actual files, this dataset is <strong>${relevance}</strong> because ${lowerCaseReasoning}`;
-                            }
-                          )
-                        }} />
-                      ) : (
-                        // Keep other messages as is or handle undefined
-                        msg.message || ""
-                      )}
-                    </div>
-                  ))}
-                </div>
+                {showProcessDetails && (
+                  <div className="space-y-1 max-h-[200px] overflow-y-auto pr-1 status-message-container">
+                    {(showAllMessages ? statusMessages : statusMessages.slice(-3)).map((msg) => (
+                      <div 
+                        key={msg.id}
+                        className={`text-sm ${msg.type === 'error' ? 'text-red-500' : 'text-neutral-600 dark:text-neutral-400'} mb-2`}
+                      >
+                        {msg.message && typeof msg.message === 'string' && msg.message.includes("Assessing dataset") ? (
+                          // Format assessment messages in a more conversational style
+                          <div dangerouslySetInnerHTML={{ 
+                            __html: msg.message.replace(/Assessing dataset \d+\/\d+: (.+)/, (match, datasetName) => {
+                              // Extract organization name from the message if available
+                              const orgMatch = msg.message.match(/organization_name":\s*"([^"]+)"/);
+                              const orgName = orgMatch ? orgMatch[1] : "";
+                              
+                              if (orgName) {
+                                return `I'm assessing the dataset <strong>${datasetName}</strong> from <strong>${orgName}</strong>`;
+                              } else {
+                                return `I'm assessing the dataset <strong>${datasetName}</strong>`;
+                              }
+                            })
+                          }} />
+                        ) : msg.message && typeof msg.message === 'string' && msg.message.includes("Pre-assessment:") ? (
+                          // Format pre-assessment messages
+                          <div dangerouslySetInnerHTML={{ 
+                            __html: msg.message.replace(
+                              /Pre-assessment: Dataset is (relevant|not relevant) \(Score: (.+)\)(\s*)Reasoning: (.+)/,
+                              function(match, relevance, score, space, reasoning) {
+                                // Convert first letter of reasoning to lowercase
+                                const lowerCaseReasoning = reasoning.charAt(0).toLowerCase() + reasoning.slice(1);
+                                return `It appears to be <strong>${relevance}</strong> because ${lowerCaseReasoning} I'll download the files for additional insight.`;
+                              }
+                            )
+                          }} />
+                        ) : msg.message && typeof msg.message === 'string' && msg.message.includes("Final assessment:") ? (
+                          // Format final assessment messages
+                          <div dangerouslySetInnerHTML={{ 
+                            __html: msg.message.replace(
+                              /Final assessment: Dataset is (relevant|not relevant) \(Score: (.+)\)(\s*)Reasoning: (.+)/,
+                              function(match, relevance, score, space, reasoning) {
+                                // Convert first letter of reasoning to lowercase
+                                const lowerCaseReasoning = reasoning.charAt(0).toLowerCase() + reasoning.slice(1);
+                                return `Based on the actual files, this dataset is <strong>${relevance}</strong> because ${lowerCaseReasoning}`;
+                              }
+                            )
+                          }} />
+                        ) : (
+                          // Keep other messages as is or handle undefined
+                          msg.message || ""
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
               
               <p className="text-sm text-neutral-600 dark:text-neutral-400 animate-pulse">
@@ -1275,41 +1681,14 @@ export default function DatasetsPage() {
                     
                     {/* Collapsible process details */}
                     {showProcessDetails && (
-                      <div className="mt-2 border rounded-md overflow-hidden border-green-100 dark:border-green-900">
-                        {/* AI thinking process */}
-                        <div className="border-b p-3 bg-green-50 dark:bg-green-900/30">
-                          <h3 className="font-medium text-sm mb-2 text-green-900 dark:text-green-400">Search Strategy</h3>
-                          
-                          {/* Search stages with timing */}
-                          <div className="space-y-2 mb-3">
-                            {searchStages.map((stage, index) => (
-                              <div key={index} className="flex items-center justify-between text-sm">
-                                <div className="flex items-center gap-2">
-                                  {stage.complete ? (
-                                    <svg className="h-4 w-4 text-green-600" viewBox="0 0 20 20" fill="currentColor">
-                                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                                    </svg>
-                                  ) : (
-                                    <div className="h-4 w-4 rounded-full border-2 border-green-300 animate-pulse"></div>
-                                  )}
-                                  <span className={stage.complete ? "text-green-900 dark:text-green-300" : "text-neutral-500 dark:text-neutral-400"}>
-                                    {stage.stage}
-                                  </span>
-                                </div>
-                                <span className="text-xs text-green-700 dark:text-green-400">
-                                  {formatDuration(stage.startTime, stage.endTime)}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                          
-                
-                        </div>
-                        
-                        {/* Status messages */}
-                        <div className="p-3 bg-white dark:bg-neutral-800">
+                      <div className="mt-2 border rounded-md overflow-hidden">
+                        {/* Status messages - Updated to match search phase styling */}
+                        <div className="p-3 bg-neutral-50 dark:bg-neutral-900 rounded-md border border-neutral-200 dark:border-neutral-800">
                           <div className="flex items-center justify-between mb-2">
-                            <h3 className="font-medium text-sm">Search Progress</h3>
+                            <div className="flex items-center">
+                              <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse mr-2"></div>
+                              <h3 className="font-medium">Search Progress</h3>
+                            </div>
                             {shouldShowAllButton(statusMessages) && (
                               <Button 
                                 variant="ghost" 
@@ -1387,6 +1766,7 @@ export default function DatasetsPage() {
                           <TableHead className="max-w-[250px] w-[250px]">Dataset</TableHead>
                           <TableHead className="w-[80px] text-center">Files</TableHead>
                           <TableHead className="w-[100px] text-center">Relevance</TableHead>
+                          <TableHead className="w-[150px] text-center">Status</TableHead>
                           <TableHead className="w-[60px] text-center">Download</TableHead>
                           <TableHead className="w-[100px] text-center">Include in Analysis</TableHead>
                         </TableRow>
@@ -1395,6 +1775,10 @@ export default function DatasetsPage() {
                         {datasets.map((dataset) => {
                           const statusInfo = getDatasetStatusInfo(dataset);
                           const relevanceScore = dataset.relevance?.relevance_score || dataset.similarity || 0;
+                          
+                          // Get processing status from processingDatasets if exists
+                          const processingStatus = isAnalyzing ? 
+                            processingDatasets.find(d => d.id === dataset.id)?.status : null;
                           
                           return (
                             <TableRow 
@@ -1451,6 +1835,26 @@ export default function DatasetsPage() {
                                   )}
                                 </div>
                               </TableCell>
+                              
+                              {/* New Status column showing processing stage */}
+                              <TableCell className="text-center">
+                                {processingStatus ? (
+                                  <div className="flex flex-col items-center justify-center">
+                                    <Badge className={`${getStatusColor(processingStatus)}`}>
+                                      {getStatusIcon(processingStatus)}
+                                      <span className="ml-1">{getStatusLabel(processingStatus)}</span>
+                                    </Badge>
+                                    
+                                  </div>
+                                ) : (
+                                  <span className="text-xs text-neutral-500">
+                                    {isAnalyzing ? 
+                                      (selectedDatasets[dataset.id] === true ? 'Queued' : 'Skipped') : 
+                                      'Ready'}
+                                  </span>
+                                )}
+                              </TableCell>
+                              
                               <TableCell className="text-center">
                                 <Button 
                                   variant="ghost" 
@@ -1468,12 +1872,12 @@ export default function DatasetsPage() {
                               </TableCell>
                               <TableCell className="text-center">
                                 <Checkbox
-                                  defaultChecked={true}
+                                  defaultChecked={selectedDatasets[dataset.id] || false}
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    // Implementation for checkbox state change would go here
-                                    console.log(`Include dataset ${dataset.id} in analysis: ${(e.target as HTMLInputElement).checked}`);
+                                    handleCheckboxChange(dataset.id, (e.target as HTMLInputElement).checked);
                                   }}
+                                  disabled={isAnalyzing}
                                   aria-label="Include in analysis"
                                   className="mx-auto"
                                 />
@@ -1655,6 +2059,7 @@ export default function DatasetsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      
     </>
   );
 }

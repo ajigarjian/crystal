@@ -12,4 +12,5 @@ urlpatterns = [
     path('api/alpha/', views.get_datasets, name='get_datasets'),
     path('search/', views.search_datasets_api, name='search_datasets_api'),
     path('stream-search/', views.stream_search_datasets, name='stream_search_datasets'),
+    path('stream-analyze/', views.stream_analyze_datasets, name='stream_analyze_datasets'),
 ]

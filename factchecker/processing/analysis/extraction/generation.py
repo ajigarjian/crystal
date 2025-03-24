@@ -100,6 +100,7 @@ Based on the user query and column analysis, generate pandas code to extract the
 4. If no relevant columns or values were identified, return a suitable subset of the data that might be relevant
 5. Do not use matplotlib.
 6. Code should be simple, no more than 25 lines.
+7. ALWAYS begin with 'import pandas as pd' to ensure pandas is available in all execution contexts.
 
 Return ONLY the Python code, with no additional text or explanation. Use 'df' as the variable name for the input DataFrame.
 
