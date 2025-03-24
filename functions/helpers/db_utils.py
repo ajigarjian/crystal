@@ -31,22 +31,34 @@ def get_db_connection():
                 port=os.environ.get('DB_PORT', 1234)
             )
         else:
-            # Production environment - use Unix socket
-            db_instance = os.environ.get('DB_INSTANCE')
+            # Production environment - use Unix socket or public IP
+            db_instance = os.environ.get('DB_INSTANCE', 'crystal-2f87e:us-east4:crystal-sql')
             db_name = os.environ.get('DB_NAME')
             db_user = os.environ.get('DB_USER')
             db_password = os.environ.get('DB_PASSWORD')
             
-            # Unix socket path for Cloud SQL
-            socket_dir = os.environ.get('DB_SOCKET_DIR', '/cloudsql')
-            unix_socket = f'{socket_dir}/{db_instance}'
-            
-            conn = psycopg2.connect(
-                dbname=db_name,
-                user=db_user,
-                password=db_password,
-                host=unix_socket  # Use Unix socket in production
-            )
+            # Try connecting via Unix socket first
+            try:
+                # Unix socket path for Cloud SQL
+                socket_dir = os.environ.get('DB_SOCKET_DIR', '/cloudsql')
+                unix_socket = f'{socket_dir}/{db_instance}'
+                
+                conn = psycopg2.connect(
+                    dbname=db_name,
+                    user=db_user,
+                    password=db_password,
+                    host=unix_socket  # Use Unix socket in production
+                )
+            except Exception as socket_error:
+                logger.warning(f"Socket connection failed, trying public IP: {socket_error}")
+                # Fall back to public IP connection
+                conn = psycopg2.connect(
+                    dbname=db_name,
+                    user=db_user,
+                    password=db_password,
+                    host='34.48.13.135',  # Public IP address
+                    port=5432
+                )
         
         return conn
     except Exception as e:
@@ -70,18 +82,24 @@ def get_sqlalchemy_engine():
             db_url = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
             _engine = create_engine(db_url)
         else:
-            # Production environment - use Unix socket
-            db_instance = os.environ.get('DB_INSTANCE')
+            # Production environment - try Unix socket first, then public IP
+            db_instance = os.environ.get('DB_INSTANCE', 'crystal-2f87e:us-east4:crystal-sql')
             db_name = os.environ.get('DB_NAME')
             db_user = os.environ.get('DB_USER')
             db_password = os.environ.get('DB_PASSWORD')
             
-            # Unix socket path for Cloud SQL
-            socket_dir = os.environ.get('DB_SOCKET_DIR', '/cloudsql')
-            unix_socket = f'{socket_dir}/{db_instance}'
-            
-            db_url = f"postgresql://{db_user}:{db_password}@/{db_name}?host={unix_socket}"
-            _engine = create_engine(db_url)
+            try:
+                # Unix socket path for Cloud SQL
+                socket_dir = os.environ.get('DB_SOCKET_DIR', '/cloudsql')
+                unix_socket = f'{socket_dir}/{db_instance}'
+                
+                db_url = f"postgresql://{db_user}:{db_password}@/{db_name}?host={unix_socket}"
+                _engine = create_engine(db_url)
+            except Exception as socket_error:
+                logger.warning(f"Socket engine creation failed, trying public IP: {socket_error}")
+                # Fall back to public IP connection
+                db_url = f"postgresql://{db_user}:{db_password}@34.48.13.135:5432/{db_name}"
+                _engine = create_engine(db_url)
     
     return _engine
 

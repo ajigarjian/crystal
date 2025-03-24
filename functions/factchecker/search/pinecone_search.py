@@ -276,6 +276,12 @@ def vector_search_datasets_pinecone(
         # Get dataset IDs for batch database query
         dataset_ids = [match.id for match in filtered_matches]
         
+        # Check if we have any dataset IDs before querying the database
+        if not dataset_ids:
+            if verbose:
+                logger.info("No datasets found with similarity above threshold.")
+            return []
+        
         # Get all datasets in one query
         datasets_query = """
         SELECT dataset_id, title, notes, organization_title

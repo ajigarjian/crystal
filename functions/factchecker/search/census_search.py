@@ -7,7 +7,6 @@ import numpy as np
 import os
 import re
 import json
-from django.db.models import Q
 from factchecker.sqlalchemy_models import DatasetCatalog, CensusDataset, CensusVariable, CensusGeography, CensusFIPSCode
 from factchecker.search.search_utils import get_usable_resources
 from typing import Dict, List, Union, Optional
@@ -365,165 +364,153 @@ class VectorSearcher:
     def _cosine_similarity(self, vec1, vec2):
         """Calculate cosine similarity between two vectors"""
         try:
-            # Debug vector types
-            print(f"Vector types: vec1={type(vec1)}, vec2={type(vec2)}")
-            
-            # Ensure vectors are properly decoded if they're binary
+            # If either is bytes, check if it's actually ASCII hex like b'\\x4d1a49...'
             if isinstance(vec1, bytes):
-                print("Converting vec1 from bytes to numpy array")
-                vec1 = np.frombuffer(vec1, dtype=np.float32)
+                if vec1.startswith(b'\\x'):
+                    hex_str = vec1.decode('utf-8')[2:]
+                    raw_bin = bytes.fromhex(hex_str)
+                    vec1 = np.frombuffer(raw_bin, dtype=np.float32) if len(raw_bin) % 4 == 0 else raw_bin
+                else:
+                    # If it's raw binary, parse only if length % 4 == 0
+                    vec1 = np.frombuffer(vec1, dtype=np.float32) if len(vec1) % 4 == 0 else vec1
+
             if isinstance(vec2, bytes):
-                print("Converting vec2 from bytes to numpy array")
-                vec2 = np.frombuffer(vec2, dtype=np.float32)
-            
-            # Convert lists to numpy arrays if needed
+                if vec2.startswith(b'\\x'):
+                    hex_str = vec2.decode('utf-8')[2:]
+                    raw_bin = bytes.fromhex(hex_str)
+                    vec2 = np.frombuffer(raw_bin, dtype=np.float32) if len(raw_bin) % 4 == 0 else raw_bin
+                else:
+                    vec2 = np.frombuffer(vec2, dtype=np.float32) if len(vec2) % 4 == 0 else vec2
+
+            # If either is still a list, convert to numpy
             if isinstance(vec1, list):
-                print("Converting vec1 from list to numpy array")
                 vec1 = np.array(vec1, dtype=np.float32)
             if isinstance(vec2, list):
-                print("Converting vec2 from list to numpy array")
                 vec2 = np.array(vec2, dtype=np.float32)
-            
-            # Debug vector shapes
-            print(f"Vector shapes: vec1={vec1.shape if hasattr(vec1, 'shape') else 'unknown'}, vec2={vec2.shape if hasattr(vec2, 'shape') else 'unknown'}")
-            
+
+            # If they're still raw bytes, bail out or do your fallback
+            if not isinstance(vec1, np.ndarray) or not isinstance(vec2, np.ndarray):
+                print("Warning: could not parse one of the vectors as float32 array.")
+                return 0.0
+
             dot_product = np.dot(vec1, vec2)
             norm1 = np.linalg.norm(vec1)
             norm2 = np.linalg.norm(vec2)
-            similarity = dot_product / (norm1 * norm2)
-            print(f"Calculated similarity: {similarity}")
-            return similarity
+            return dot_product / (norm1 * norm2)
+
         except Exception as e:
-            print(f"Error calculating similarity: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"Error computing cosine similarity: {e}")
             return 0.0
     
-    def _apply_recency_boost(self, results, threshold=0.05):
-        """Boost recent datasets when scores are close"""
+    def _apply_recency_boost(self, results):
+        """Apply a recency boost to the search results"""
         if not results:
             return results
+        
+        # Sort by similarity first
+        results = sorted(results, key=lambda x: x.get("similarity", 0), reverse=True)
+        
+        # Apply recency boost
+        current_year = datetime.now().year
+        
+        # Create a copy to avoid modifying while iterating
+        boosted_results = []
+        
+        for i, result in enumerate(results):
+            # Get the vintage (year) of the dataset
+            vintage = result.get("vintage")
             
-        # Group results with similar scores
-        groups = []
-        current_group = [results[0]]
-        
-        for i in range(1, len(results)):
-            prev_score = results[i-1]['score']
-            curr_score = results[i]['score']
+            # Skip if no vintage
+            if not vintage:
+                boosted_results.append(result)
+                continue
             
-            if abs(prev_score - curr_score) <= threshold:
-                current_group.append(results[i])
-            else:
-                groups.append(current_group)
-                current_group = [results[i]]
+            # Convert to int if it's a string
+            if isinstance(vintage, str):
+                try:
+                    vintage = int(vintage)
+                except ValueError:
+                    boosted_results.append(result)
+                    continue
+                
+            # Calculate age in years
+            age = current_year - vintage
+            
+            # Calculate recency boost (newer datasets get a higher boost)
+            recency_boost = max(0, 0.1 * (1 - age / 10))  # 10% max boost, decreasing with age
+            
+            # Apply the boost to the similarity score
+            original_similarity = result.get("similarity", 0)
+            boosted_similarity = min(1.0, original_similarity * (1 + recency_boost))
+            
+            # Create a new result with the boosted score
+            boosted_result = result.copy()
+            boosted_result["similarity"] = boosted_similarity
+            boosted_result["original_similarity"] = original_similarity
+            boosted_result["recency_boost"] = recency_boost
+            
+            boosted_results.append(boosted_result)
         
-        if current_group:
-            groups.append(current_group)
+        # Re-sort by boosted similarity
+        boosted_results = sorted(boosted_results, key=lambda x: x.get("similarity", 0), reverse=True)
         
-        # Sort each group by recency (using vintage)
-        sorted_results = []
-        for group in groups:
-            sorted_group = sorted(group, key=lambda x: x['vintage'], reverse=True)
-            sorted_results.extend(sorted_group)
-        
-        return sorted_results
+        return boosted_results
     
     def _census_search(self, query, year=None, tags=None, similarity_threshold=0.5, geo_level=None, location=None, verbose=False):
         """Search Census datasets"""
         try:
-            # Get query embedding
             print(f"Getting embedding for query: {query}")
             query_embedding = self._get_embedding(query)
             if query_embedding is None:
                 print("Failed to get embedding for query, falling back to keyword search")
                 return self._census_fallback_keyword_search(query, year, tags, geo_level, location, verbose)
-            
-            # Use the SQLAlchemy session instead of direct connection
+
+            # Debug: Print out filter parameters
+            print(f"Debug => year: {year}, tags: {tags}, geo_level: {geo_level}, location: {location}")
+
             session = get_db_session()
             try:
-                # Start with all datasets
+                # Start the base query
                 base_query = session.query(CensusDataset).filter(CensusDataset.embedding != None)
-                if verbose:
-                    print(f"Starting with {base_query.count()} total datasets")
-                
-                # Step 1: Filter by year if provided
+                print("Debug => Base query for CensusDataset where embedding != None. Testing row count…")
+                debug_count = base_query.count()
+                print(f"Debug => Row count so far: {debug_count}")
+
+                # Apply optional filters
                 if year:
+                    print(f"Debug => Applying year filter: {year}")
                     base_query = base_query.filter(CensusDataset.vintage == year)
-                    if verbose:
-                        print(f"After year filter: {base_query.count()} datasets")
-                        
-                # Step 2: Filter by geography level if provided
-                if geo_level:
-                    if geo_level == 'national':
-                        # No need to filter further
-                        pass
-                    else:
-                        # Filter by geography level
-                        # This is a simplified approach - you might need more complex logic
-                        base_query = base_query.filter(
-                            or_(
-                                CensusDataset.title.ilike(f"%{geo_level}%"),
-                                CensusDataset.description.ilike(f"%{geo_level}%")
-                            )
-                        )
-                        if verbose:
-                            print(f"After geo_level filter: {base_query.count()} datasets")
-                
-                # Step 3: Filter by location if provided
+                    debug_count = base_query.count()
+                    print(f"Debug => Row count after year filter: {debug_count}")
+
+                if tags and isinstance(tags, list):
+                    print(f"Debug => Applying tags filter: {tags}")
+                    base_query = base_query.join(CensusDataset.tags).filter(CensusTag.name.in_(tags))
+                    debug_count = base_query.count()
+                    print(f"Debug => Row count after tags filter: {debug_count}")
+
                 if location:
-                    # Filter by location name
-                    base_query = base_query.filter(
-                        or_(
-                            CensusDataset.title.ilike(f"%{location}%"),
-                            CensusDataset.description.ilike(f"%{location}%")
-                        )
-                    )
-                    if verbose:
-                        print(f"After location filter: {base_query.count()} datasets")
-                
-                # Step 4: Filter by tags if provided
-                queryset = base_query
-                if tags and len(tags) > 0:
-                    # Since we can't use the many-to-many relationship, use keyword search instead
-                    keyword_conditions = []
-                    
-                    # Get all available tags from the database
-                    available_tags = self._get_available_tags(year)
-                    
-                    for tag in tags:
-                        # If it's a conceptual tag, use its keywords
-                        if tag in self.conceptual_tag_keywords:
-                            for keyword in self.conceptual_tag_keywords[tag]:
-                                keyword_conditions.append(or_(
-                                    CensusDataset.title.ilike(f'%{keyword}%'),
-                                    CensusDataset.description.ilike(f'%{keyword}%')
-                                ))
-                        # If it's a direct tag from the database, use it directly
-                        elif tag in available_tags:
-                            keyword_conditions.append(or_(
-                                CensusDataset.title.ilike(f'%{tag}%'),
-                                CensusDataset.description.ilike(f'%{tag}%')
-                            ))
-                    
-                    if keyword_conditions:
-                        # Use or_ to combine conditions
-                        tag_query = or_(*keyword_conditions)
-                        queryset = queryset.filter(tag_query)
-                        
-                        if verbose:
-                            print(f"After tag filter: {queryset.count()} datasets")
-                
-                # Step 5: Apply similarity search on filtered datasets
-                # Get datasets and their embeddings
-                datasets = list(queryset)
+                    print(f"Debug => Potential location filter: {location}")
+                    # If you have location-based logic, do it here:
+                    # base_query = base_query.filter(...)
+                    # debug_count = base_query.count()
+                    # print(f"Debug => Row count after location filter: {debug_count}")
+
+                if geo_level:
+                    print(f"Debug => Potential geo_level filter: {geo_level}")
+                    # If you have geographic level logic, do it here:
+                    # base_query = base_query.filter(...)
+                    # debug_count = base_query.count()
+                    # print(f"Debug => Row count after geo_level filter: {debug_count}")
+
+                # Finally, get the datasets
+                datasets = base_query.all()
+                print(f"Found {len(datasets)} datasets after filtering")
+
                 if not datasets:
                     print("No datasets found after filtering, falling back to keyword search")
                     return self._census_fallback_keyword_search(query, year, tags, geo_level, location, verbose)
-                    
-                print(f"Found {len(datasets)} datasets after filtering")
-                
-                # Calculate similarity for each dataset
+
                 results = []
                 for dataset in datasets:
                     try:
@@ -540,12 +527,30 @@ class VectorSearcher:
                         # Ensure proper conversion from binary to numpy array
                         dataset_embedding = dataset.embedding
                         if isinstance(dataset_embedding, bytes):
-                            try:
-                                dataset_embedding = np.frombuffer(dataset_embedding, dtype=np.float32)
-                                print(f"Converted dataset {dataset.id} embedding to numpy array with shape: {dataset_embedding.shape}")
-                            except Exception as e:
-                                print(f"Error converting dataset {dataset.id} embedding: {e}")
-                                continue
+                            if dataset_embedding.startswith(b'\\x'):
+                                hex_str = dataset_embedding.decode('utf-8')[2:]
+                                raw_bin = bytes.fromhex(hex_str)
+                                if len(raw_bin) % 4 == 0:
+                                    try:
+                                        dataset_embedding = np.frombuffer(raw_bin, dtype=np.float32)
+                                        print(f"Converted dataset {dataset.id} to np array shape {dataset_embedding.shape}")
+                                    except Exception as e:
+                                        print(f"Error converting dataset {dataset.id} embedding: {e}")
+                                        continue
+                                else:
+                                    print(f"Dataset {dataset.id} embedding length {len(raw_bin)} not multiple of 4")
+                                    continue
+                            else:
+                                # If it's raw binary, parse only if length % 4 == 0
+                                if len(dataset_embedding) % 4 == 0:
+                                    try:
+                                        dataset_embedding = np.frombuffer(dataset_embedding, dtype=np.float32)
+                                    except Exception as e:
+                                        print(f"Error converting dataset {dataset.id} embedding: {e}")
+                                        continue
+                                else:
+                                    print(f"Dataset {dataset.id} embedding length {len(dataset_embedding)} not multiple of 4")
+                                    continue
                         
                         # Calculate similarity
                         similarity = self._cosine_similarity(query_embedding, dataset_embedding)

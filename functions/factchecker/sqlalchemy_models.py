@@ -15,34 +15,62 @@ class BinaryEmbedding(TypeDecorator):
         """Process the value before it's sent to the database"""
         if value is None:
             return None
-        if isinstance(value, bytes):
-            # Convert bytes to base64 string for TEXT storage
-            return base64.b64encode(value).decode('ascii')
-        if isinstance(value, str):
+            
+        # If it's already a PostgreSQL bytea literal string (starts with \x)
+        if isinstance(value, str) and value.startswith('\\x'):
             return value
-        # If it's a list or other serializable type, convert to JSON
+            
+        # If it's bytes, convert to PostgreSQL bytea format
+        if isinstance(value, bytes):
+            return '\\x' + value.hex()
+            
+        # If it's a numpy array, convert to bytes then to hex
+        if hasattr(value, 'tobytes'):
+            return '\\x' + value.tobytes().hex()
+            
+        # If it's a list, convert to numpy array, then to bytes, then to hex
+        if isinstance(value, list):
+            import numpy as np
+            arr = np.array(value, dtype=np.float32)
+            return '\\x' + arr.tobytes().hex()
+            
+        # For other types, try JSON
         return json.dumps(value)
     
     def process_result_value(self, value, dialect):
-        """Process the value when it's retrieved from the database"""
-        # Add detailed debug logging
-        print(f"DEBUG - BinaryEmbedding.process_result_value - Type: {type(value)}, Value preview: {str(value)[:100] if value else 'None'}")
-        
+        """Process the value when it's retrieved from the database."""
         if value is None:
             return None
         
-        # Handle different types of stored data
-        if isinstance(value, str):
-            print(f"DEBUG - Processing string value of length: {len(value)}")
+        # If it's a PostgreSQL bytea string (starts with \x):
+        if isinstance(value, str) and value.startswith('\\x'):
             try:
-                # Try to decode as base64 first (for binary data stored as text)
-                return base64.b64decode(value)
-            except:
-                # If not base64, return as is
-                return value.encode('utf-8')
+                binary_data = bytes.fromhex(value[2:])
+                # Attempt float32 only if divisible by 4:
+                if len(binary_data) % 4 == 0:
+                    import numpy as np
+                    try:
+                        # Attempt to interpret as float32 array
+                        return np.frombuffer(binary_data, dtype=np.float32)
+                    except Exception:
+                        # If float32 parse fails, just return raw bytes
+                        return binary_data
+                else:
+                    # If the size isn't a multiple of 4, just return raw bytes
+                    return binary_data
+            except Exception as e:
+                print(f"Error processing bytea embedding: {e}")
+                return value
         
-        # If we get here, it's some other type
-        print(f"DEBUG - Unhandled type in BinaryEmbedding.process_result_value: {type(value)}")
+        # If it's a regular string (JSON or otherwise), try loading JSON
+        if isinstance(value, str):
+            import json
+            try:
+                return json.loads(value)
+            except Exception:
+                return value
+        
+        # Otherwise, return as is
         return value
 
 Base = declarative_base()
@@ -189,17 +217,18 @@ class CensusDataset(Base):
     
     # Temporal coverage
     reference_period = Column(String(50), nullable=True)  # e.g., "2016-2020"
-    modified_date = Column(DateTime, nullable=True)
+    modified_date = Column(String(50), nullable=True)  # Changed from DateTime to String
     
     # API endpoint
     api_endpoint = Column(String(500))
     
     # Fields for search optimization
-    embedding = Column(BinaryEmbedding, nullable=True)  # For vector search
+    embedding = Column(BinaryEmbedding, nullable=True)  # For vector search - stored as TEXT in PostgreSQL bytea format
     
     # Metadata fields
-    created_at = Column(DateTime, default=datetime.now)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    created_at = Column(String(50), default=lambda: datetime.now().isoformat())  # Changed from DateTime to String
+    updated_at = Column(String(50), default=lambda: datetime.now().isoformat(), 
+                        onupdate=lambda: datetime.now().isoformat())  # Changed from DateTime to String
     
     # Define unique constraint and indexes
     __table_args__ = (

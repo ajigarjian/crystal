@@ -9,8 +9,8 @@ import requests
 import json
 import concurrent.futures
 from typing import Dict, List, Tuple, Callable, Any
-from django.conf import settings
 from factchecker.utils.openai_client import chat_completion
+import os
 
 def get_usable_resources(dataset_id: str, verbose: bool = False) -> List[Dict]:
     """
@@ -25,7 +25,7 @@ def get_usable_resources(dataset_id: str, verbose: bool = False) -> List[Dict]:
     """
     try:
         # Get API key from settings
-        api_key = settings.DATA_GOV_API_KEY
+        api_key = os.environ["DATA_GOV_API_KEY"]
         
         if not api_key:
             if verbose:

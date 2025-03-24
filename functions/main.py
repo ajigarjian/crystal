@@ -36,7 +36,7 @@ firebase_admin.initialize_app()
     cors=options.CorsOptions(
         cors_origins=[
             "https://crystal-2f87e.web.app/",
-            "http://localhost:5173"  
+            "http://localhost:5173"
             ],
         cors_methods=["get", "post"],
     )
@@ -102,17 +102,19 @@ def handle_crystal_request(request):
         logger.error(traceback.format_exc())
         return {"status": "error", "error": str(e)}
 
-@https_fn.on_call(
+@https_fn.on_request(
     cors=options.CorsOptions(
-        cors_origins=[
-            "https://crystal-2f87e.web.app/",
-            "http://localhost:3000"  
-            ],
+        cors_origins=["*"],
         cors_methods=["get", "post"],
-    )
+    ),
+    memory=options.MemoryOption.MB_512
 )
 def stream_search_datasets(request):
     """HTTP Cloud Function that streams dataset search results."""
+
+    # Initialize db
+    db = firestore.client()
+    
     # Parse request data
     request_json = request.get_json(silent=True)
     
@@ -165,7 +167,7 @@ def stream_search_datasets(request):
                 pass
             
             # Yield the chunk
-            yield chunk
+            yield chunk + "\n"  # Add newline to ensure proper parsing on client side
         
         # If we have a final result, store it in Firestore for later retrieval
         if final_result:
@@ -199,62 +201,71 @@ def stream_search_datasets(request):
         }
     )
 
-@https_fn.on_call(
+@https_fn.on_request(
     cors=options.CorsOptions(
         cors_origins=[
-            "https://crystal-2f87e.web.app/",
-            "http://localhost:3000"
-            ],
-        cors_methods=["get", "post"],
+            "https://crystal-2f87e.web.app",
+            "http://localhost:3000",
+            "http://localhost:5173",
+        ],
+        cors_methods=["get", "post", "options"]
     )
 )
 def register_waitlist(request):
     """HTTP Cloud Function that registers a user to the waitlist."""
     logger.info("Starting register_waitlist function")
-    
-    # For callable functions, data is directly in request.data
-    data = request.data
-    logger.info(f"Request data: {data}")
-    
+
+    # Parse the request data from bytes to JSON
+    try:
+        if request.data:
+            data = json.loads(request.data)
+        else:
+            data = {}
+        logger.info(f"Request data: {request.data}")
+    except json.JSONDecodeError:
+        logger.error("Invalid JSON data")
+        return https_fn.Response(
+            json.dumps({"error": "Invalid JSON data", "status": "error"}),
+            status=400,
+            headers={"Content-Type": "application/json"}
+        )
+
     if not data:
         logger.error("No data provided")
-        return {"error": "No data provided", "status": "error"}
-    
-    # Get the required parameters
+        return https_fn.Response(
+            json.dumps({"error": "No data provided", "status": "error"}),
+            status=400,
+            headers={"Content-Type": "application/json"}
+        )
+
     email = data.get('email', '')
     first_name = data.get('first_name', '')
     logger.info(f"Received registration request for email: {email}, first_name: {first_name}")
-    
-    # Basic validation
+
     if not email:
         logger.error("Email is required but was not provided")
-        return {"error": "Email is required", "status": "error"}
-    
+        return https_fn.Response(
+            json.dumps({"error": "Email is required", "status": "error"}),
+            status=400,
+            headers={"Content-Type": "application/json"}
+        )
+
     try:
-        # Get a database connection
-        logger.info("Getting database connection")
         conn = get_db_connection()
-        
         try:
-            # Check if email already exists
             with conn.cursor() as cursor:
-                logger.info(f"Checking if email {email} already exists in waitlist")
-                cursor.execute(
-                    "SELECT id FROM factchecker_waitlistentry WHERE email = %s", 
-                    (email,)
-                )
+                cursor.execute("SELECT id FROM factchecker_waitlistentry WHERE email = %s", (email,))
                 existing = cursor.fetchone()
                 
                 if existing:
                     logger.info(f"Email {email} already registered with ID: {existing[0]}")
-                    return {"error": "This email is already registered", "status": "error"}
+                    return https_fn.Response(
+                        json.dumps({"error": "This email is already registered", "status": "error"}),
+                        status=400,
+                        headers={"Content-Type": "application/json"}
+                    )
                 
-                # Generate a unique ID (timestamp + random number)
                 unique_id = int(time.time() * 1000) + random.randint(1, 1000)
-                logger.info(f"Generated unique ID: {unique_id}")
-                
-                # Insert new entry directly with SQL
-                logger.info(f"Inserting new waitlist entry for {email}")
                 cursor.execute(
                     """
                     INSERT INTO factchecker_waitlistentry (id, email, first_name, created_at) 
@@ -263,32 +274,32 @@ def register_waitlist(request):
                     (unique_id, email, first_name, datetime.now().isoformat())
                 )
                 
-                # Commit the transaction
                 conn.commit()
                 logger.info(f"Added user to waitlist: {email} with ID: {unique_id}")
                 
-                return {
-                    "status": "success",
-                    "message": "Successfully added to waitlist",
-                    "id": unique_id
-                }
-                
+                return https_fn.Response(
+                    json.dumps({
+                        "status": "success",
+                        "message": "Successfully added to waitlist",
+                        "id": unique_id
+                    }),
+                    status=200,
+                    headers={"Content-Type": "application/json"}
+                )
         except Exception as db_error:
             logger.error(f"Database error: {db_error}")
-            logger.error(traceback.format_exc())
             conn.rollback()
             raise
         finally:
-            logger.info("Closing database connection")
             conn.close()
-            
     except Exception as e:
         logger.error(f"Error registering for waitlist: {e}")
         logger.error(traceback.format_exc())
-        return {
-            "status": "error",
-            "message": f"Failed to register: {str(e)}"
-        }
+        return https_fn.Response(
+            json.dumps({"status": "error", "message": f"Failed to register: {str(e)}"}),
+            status=500,
+            headers={"Content-Type": "application/json"}
+        )
 
 @https_fn.on_request(
     cors=options.CorsOptions(
