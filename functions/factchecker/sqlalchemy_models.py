@@ -170,19 +170,6 @@ class DatasetResource(Base):
     def __str__(self):
         return f"{self.name} ({self.format})"
 
-class WaitlistEntry(Base):
-    __tablename__ = 'factchecker_waitlistentry'
-    
-    id = Column(Integer, primary_key=True)
-    first_name = Column(String(100))
-    email = Column(String(255), unique=True)
-    created_at = Column(DateTime, default=datetime.now)
-    
-    def __str__(self):
-        return f"{self.email}"
-
-# CENSUS API MODELS
-
 class CensusDataset(Base):
     """Model to store Census API dataset metadata"""
     __tablename__ = 'factchecker_censusdataset'
