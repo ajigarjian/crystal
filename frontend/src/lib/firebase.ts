@@ -32,13 +32,193 @@ if (process.env.NODE_ENV === 'development') {
 
 // Export a helper for calling the waitlist registration function
 export const registerWaitlist = async (data: { email: string, first_name: string }) => {
-  const registerWaitlistFunction = httpsCallable(functions, 'register_waitlist');
+  // Get the region and project ID from the functions instance
+  const region = functions.region || 'us-central1';
+  const projectId = firebaseConfig.projectId;
+  
+  // Construct the URL for the HTTP function
+  let baseUrl = '';
+  if (process.env.NODE_ENV === 'development') {
+    // Use emulator URL in development
+    baseUrl = `http://localhost:5001/${projectId}/${region}`;
+  } else {
+    // Use production URL in production
+    baseUrl = `https://${region}-${projectId}.cloudfunctions.net`;
+  }
+  
+  const url = `${baseUrl}/register_waitlist`;
   
   try {
-    const result = await registerWaitlistFunction(data);
-    return result;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(data),
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Failed to register');
+    }
+    
+    const result = await response.json();
+    return { data: result };
   } catch (error: any) {
     console.error('Error calling register_waitlist:', error);
     throw new Error(error.message || 'Failed to register');
   }
+};
+
+// Export a helper for calling the stream search datasets function
+export const streamSearchDatasets = async (
+  data: {
+    query: string;
+    search_method: string | null;
+    similarity_threshold: number;
+    max_results?: number;
+    census_max_results?: number;
+    relevance_threshold?: number;
+  },
+  onChunk?: (chunk: any) => void // Make callback optional
+) => {
+  // Create a default onChunk function if none is provided
+  const processChunk = typeof onChunk === 'function' 
+    ? onChunk 
+    : (chunk: any) => {
+        console.log('Received chunk:', chunk);
+        // Default implementation just logs the chunk
+      };
+
+  // Get the region and project ID from the functions instance
+  const region = functions.region || 'us-central1';
+  const projectId = firebaseConfig.projectId;
+  
+  // Construct the URL for the HTTP function
+  let baseUrl = '';
+  if (process.env.NODE_ENV === 'development') {
+    // Use emulator URL in development
+    baseUrl = `http://localhost:5001/${projectId}/${region}`;
+  } else {
+    // Use production URL in production
+    baseUrl = `https://${region}-${projectId}.cloudfunctions.net`;
+  }
+  
+  const url = `${baseUrl}/stream_search_datasets`;
+  
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(data),
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Error response:', errorText);
+      throw new Error(errorText || 'Failed to search datasets');
+    }
+    
+    // For streaming responses, we need to process the response as a stream
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw new Error('Stream reader not available');
+    }
+    
+    // Process the stream and parse each chunk as JSON
+    const decoder = new TextDecoder();
+    let buffer = '';
+    const chunks = []; // Store processed chunks to return
+    
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      
+      // Decode the chunk and add it to our buffer
+      buffer += decoder.decode(value, { stream: true });
+      
+      // Split the buffer by newlines to get individual JSON objects
+      const lines = buffer.split('\n');
+      
+      // Process all complete lines
+      for (let i = 0; i < lines.length - 1; i++) {
+        const line = lines[i].trim();
+        if (line) {
+          try {
+            const data = JSON.parse(line);
+            // Call the callback with each chunk of data
+            processChunk(data);
+            chunks.push(data);
+          } catch (e) {
+            console.error('Error parsing JSON:', e, 'Line:', line);
+          }
+        }
+      }
+      
+      // Keep the last (potentially incomplete) line in the buffer
+      buffer = lines[lines.length - 1];
+    }
+    
+    // Process any remaining data in the buffer
+    if (buffer.trim()) {
+      try {
+        const data = JSON.parse(buffer.trim());
+        processChunk(data);
+        chunks.push(data);
+      } catch (e) {
+        console.error('Error parsing final JSON:', e);
+      }
+    }
+    
+    return chunks; // Return all processed chunks
+  } catch (error: any) {
+    console.error('Error calling stream_search_datasets:', error);
+    throw new Error(error.message || 'Failed to search datasets');
+  }
+};
+
+// Add a helper function to process dataset chunks for UI display
+export const processDatasetChunks = (chunks: any[]) => {
+  // Extract all datasets, including non-relevant ones
+  const datasets = chunks
+    .filter(chunk => chunk.type === 'dataset' || 
+                    (chunk.type === 'dataset_update' && chunk.data))
+    .map(chunk => {
+      // For dataset_update chunks, use the updated data which includes relevance score
+      if (chunk.type === 'dataset_update') {
+        return {
+          ...chunk.data,
+          timestamp: chunk.timestamp
+        };
+      }
+      // For initial dataset chunks
+      return {
+        ...chunk.data,
+        timestamp: chunk.timestamp
+      };
+    });
+  
+  // Get the final status from the complete chunk
+  const completeChunk = chunks.find(chunk => chunk.type === 'complete');
+  const finalStatus = completeChunk ? completeChunk.message : '';
+  
+  // Get all status messages for progress display
+  const statusMessages = chunks
+    .filter(chunk => chunk.type === 'status' || 
+                    chunk.type === 'discovery' || 
+                    chunk.type === 'phase_complete' ||
+                    chunk.type === 'complete')
+    .map(chunk => ({
+      message: chunk.message,
+      timestamp: chunk.timestamp,
+      type: chunk.type
+    }));
+  
+  return {
+    datasets,
+    finalStatus,
+    statusMessages
+  };
 }; 
