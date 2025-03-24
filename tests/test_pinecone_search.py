@@ -13,15 +13,10 @@ import datetime
 
 # Add the parent directory to sys.path so Python can find your Django project
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
-# Configure Django settings
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'crystalproject.settings')
-
 # Initialize Django
 import django
 django.setup()
 
-from django.conf import settings
 from factchecker.search.pinecone_search import vector_search_datasets_pinecone
 from factchecker.search.search_utils import generate_similar_queries, parallel_search, single_search
 

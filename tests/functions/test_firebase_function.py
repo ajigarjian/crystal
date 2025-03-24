@@ -8,7 +8,7 @@ FUNCTION_URL = "http://localhost:5001/crystal-2f87e/us-central1/stream_search_da
 
 # Test data to send
 test_data = {
-    "query": "population growth in California",
+    "query": "Electric Vehicles",
     "similarity_threshold": 0.3,
     "search_method": None,  # Use hybrid search (default)
     "max_results": 10,

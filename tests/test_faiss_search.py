@@ -14,14 +14,11 @@ import datetime
 # Add the parent directory to sys.path so Python can find your Django project
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-# Configure Django settings
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'crystalproject.settings')
 
 # Initialize Django
 import django
 django.setup()
 
-from django.conf import settings
 from factchecker.search.faiss_search import FAISSSearcher
 
 # List of 20 diverse queries to test

@@ -144,9 +144,73 @@ def check_specific_table(table_name):
         logger.error(f"Error checking table {table_name}: {str(e)}")
         logger.error(f"Traceback: {__import__('traceback').format_exc()}")
 
+def check_census_embeddings():
+    """
+    Diagnose the 'embedding' column of 'factchecker_censusdataset' to see if
+    it's storing valid data or if there's an issue with lengths, non-hex, etc.
+    """
+    logger.info("Checking 'factchecker_censusdataset.embedding' for validity...")
+    engine = get_direct_db_connection()
+    
+    if engine is None:
+        logger.error("Could not establish database connection")
+        return
+    
+    try:
+        with engine.connect() as conn:
+            # Query all embedding rows
+            query = text("""
+                SELECT id, embedding
+                FROM factchecker_censusdataset
+                WHERE embedding IS NOT NULL
+            """)
+            rows = conn.execute(query).fetchall()
+            
+            for row in rows:
+                dataset_id = row.id
+                embed_str = row.embedding
+                
+                # We expect this to be a TEXT column with optional "\x" prefix if using Postgres bytea format
+                if not isinstance(embed_str, str):
+                    logger.warning(f"Dataset {dataset_id} embedding is not a string: {type(embed_str)}")
+                    continue
+                
+                if embed_str.startswith('\\x'):
+                    # Attempt to interpret as hex 
+                    hex_str = embed_str[2:]
+                    try:
+                        binary_data = bytes.fromhex(hex_str)
+                        # Log the length to see if it's multiple of 4
+                        if len(binary_data) % 4 != 0:
+                            logger.warning(
+                                f"Dataset {dataset_id} embedding is hex but length {len(binary_data)} "
+                                f"is NOT multiple of 4 -> might not be float32"
+                            )
+                        else:
+                            logger.info(
+                                f"Dataset {dataset_id} embedding is hex with length {len(binary_data)} (multiple of 4)"
+                            )
+                    except Exception as e:
+                        logger.error(
+                            f"Dataset {dataset_id} embedding: failed to decode hex: {str(e)}. "
+                            f"Raw preview: {embed_str[:64]}"
+                        )
+                else:
+                    # Maybe it's JSON or something else
+                    logger.info(
+                        f"Dataset {dataset_id} embedding does not start with '\\x': Probably JSON or raw string. "
+                        f"Length: {len(embed_str)}"
+                    )
+    except Exception as e:
+        logger.error(f"Error checking embeddings: {str(e)}")
+        logger.error(f"Traceback: {__import__('traceback').format_exc()}")
+
 if __name__ == "__main__":
     logger.info("Starting database table check...")
     tables = check_db_tables()
+    
+    # Optionally check the 'factchecker_censusdataset.embedding' column
+    check_census_embeddings()
     
     # If command line arguments are provided, check specific tables
     if len(sys.argv) > 1:
