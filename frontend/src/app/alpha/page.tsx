@@ -32,6 +32,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Progress } from "@/components/ui/progress";
 import { AlertCircle, CheckCircle2, FileText, Database, ArrowRight, Download, FileCheck, Loader2 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
+import { streamSearchDatasets } from "@/lib/firebase";
 
 interface Resource {
   id: string;
@@ -264,364 +265,308 @@ export default function DatasetsPage() {
         }, 700);
       }, 800);
       
-      // Create fetch request to our streaming endpoint
-      const response = await fetch("/api/stream-search", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          query: queryText,
-          search_method: searchMethod === "hybrid" ? null : searchMethod,
-          similarity_threshold: similarityThreshold,
-        }),
-      });
+      // Call the Firebase callable function with the search parameters
+      const searchParams = {
+        query: queryText,
+        search_method: searchMethod === "hybrid" ? null : searchMethod,
+        similarity_threshold: similarityThreshold,
+        max_results: 15,
+        census_max_results: 5,
+        relevance_threshold: 0.4
+      };
       
-      if (!response.ok || !response.body) {
-        throw new Error(`Error starting search: ${response.status} ${response.statusText}`);
-      }
-      
-      // Create a reader for the streaming response
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      
-      // Process the stream chunks
-      let buffer = ''; // For handling partial JSON chunks
+      // Set up tracking variables
       let vectorSearchActive = false;
       let keywordSearchActive = false;
       
-      while (true) {
-        const { done, value } = await reader.read();
+      // Call the Firebase function with a callback to process chunks in real-time
+      await streamSearchDatasets(searchParams, (data) => {
+        console.log('Received chunk:', data);
         
-        if (done) {
-          console.log("Stream complete");
-          break;
-        }
-        
-        // Decode the chunk and add to buffer
-        const chunk = decoder.decode(value, { stream: true });
-        buffer += chunk;
-        
-        // Process complete JSON objects in the buffer
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || ''; // Keep the last potentially incomplete line in the buffer
-        
-        for (const line of lines) {
-          if (!line.trim()) continue; // Skip empty lines
-          
-          try {
-            const data = JSON.parse(line);
+        try {
+          // Handle status messages to track search stages
+          if (data.type === 'status') {
+            const message = data.message.toLowerCase();
             
-            // Handle status messages to track search stages
-            if (data.type === 'status') {
-              const message = data.message.toLowerCase();
-              
-              if (message.includes('government database') && !vectorSearchActive) {
-                vectorSearchActive = true;
-                // Update vector search stage
-                setSearchStages(prev => {
-                  const updated = [...prev];
-                  updated[2] = { ...updated[2], startTime: Date.now() };
-                  return updated;
-                });
-              } else if (message.includes('additional government data') && !keywordSearchActive) {
-                keywordSearchActive = true;
-                // Mark vector search as complete
-                setSearchStages(prev => {
-                  const updated = [...prev];
+            if (message.includes('government database') && !vectorSearchActive) {
+              vectorSearchActive = true;
+              // Update vector search stage
+              setSearchStages(prev => {
+                const updated = [...prev];
+                updated[2] = { ...updated[2], startTime: Date.now() };
+                return updated;
+              });
+            } else if (message.includes('additional government data') && !keywordSearchActive) {
+              keywordSearchActive = true;
+              // Mark vector search as complete
+              setSearchStages(prev => {
+                const updated = [...prev];
+                updated[2] = { ...updated[2], complete: true, endTime: Date.now() };
+                updated[3] = { ...updated[3], startTime: Date.now() };
+                return updated;
+              });
+            } else if (message.includes('search complete')) {
+              // Mark remaining stages as complete
+              setSearchStages(prev => {
+                const updated = [...prev];
+                if (!updated[2].complete) {
                   updated[2] = { ...updated[2], complete: true, endTime: Date.now() };
-                  updated[3] = { ...updated[3], startTime: Date.now() };
-                  return updated;
+                }
+                if (!updated[3].complete) {
+                  updated[3] = { ...updated[3], complete: true, endTime: Date.now() };
+                }
+                updated[4] = { ...updated[4], complete: true, startTime: Date.now() - 300, endTime: Date.now() };
+                return updated;
+              });
+            }
+          }
+          
+          // Process different message types
+          switch (data.type) {
+            case 'status':
+              // Add new status message
+              const statusMessage: StatusMessage = {
+                id: Math.random().toString(36).substring(2, 9),
+                message: data.message,
+                timestamp: data.timestamp,
+                type: 'status'
+              };
+              setStatusMessages(prev => [...prev, statusMessage]);
+              break;
+              
+            case 'discovery':
+              // Add new discovery message
+              const discoveryMessage: StatusMessage = {
+                id: Math.random().toString(36).substring(2, 9),
+                message: data.message,
+                timestamp: data.timestamp,
+                type: 'discovery',
+                count: data.count
+              };
+              setDiscoveryMessages(prev => [...prev, discoveryMessage]);
+              setDatasetCount(data.count || discoveryMessages.length + 1);
+              break;
+              
+            case 'dataset':
+              // Add new dataset
+              setDatasets(prev => {
+                // Check if dataset already exists
+                const exists = prev.some(d => d.id === data.data.id);
+                if (exists) return prev;
+                
+                // Add file count based on resources if available
+                const datasetWithFileCount = {
+                  ...data.data,
+                  file_count: data.data.resources?.length || 0
+                };
+                
+                // Sort datasets by similarity
+                const newDatasets = [...prev, datasetWithFileCount].sort(
+                  (a, b) => (b.similarity || 0) - (a.similarity || 0)
+                );
+                return newDatasets;
+              });
+              break;
+              
+            case 'dataset_update':
+              setDatasets(prev => {
+                const datasetIndex = prev.findIndex(d => d.id === data.data.id);
+                
+                // If dataset exists, update it but don't remove non-relevant datasets
+                if (datasetIndex !== -1) {
+                  const updatedDatasets = [...prev];
+                  updatedDatasets[datasetIndex] = {
+                    ...updatedDatasets[datasetIndex],
+                    ...data.data
+                  };
+                  return updatedDatasets;
+                }
+                
+                return prev;
+              });
+              break;
+              
+            case 'complete':
+              // Search is complete
+              setSearchComplete(true);
+              setLoading(false);
+              setExecutionTime(data.data.execution_time);
+              
+              // Sort datasets by relevance score when search is complete
+              setDatasets(prev => {
+                return [...prev].sort((a, b) => {
+                  const scoreA = a.relevance?.relevance_score || a.similarity || 0;
+                  const scoreB = b.relevance?.relevance_score || b.similarity || 0;
+                  return scoreB - scoreA; // Sort in descending order
                 });
-              } else if (message.includes('search complete')) {
-                // Mark remaining stages as complete
+              });
+              
+              // Add the completion message to status messages
+              if (data.message) {
+                const completeMessage: StatusMessage = {
+                  id: Math.random().toString(36).substring(2, 9),
+                  message: data.message,
+                  timestamp: data.data.execution_time,
+                  type: 'status'
+                };
+                setStatusMessages(prev => [...prev, completeMessage]);
+              }
+              break;
+              
+            case 'error':
+              // Show error message
+              setError(data.message);
+              setLoading(false);
+              
+              // Add to status messages too
+              const errorMessage: StatusMessage = {
+                id: Math.random().toString(36).substring(2, 9),
+                message: `Error: ${data.message}`,
+                timestamp: data.timestamp,
+                type: 'error'
+              };
+              setStatusMessages(prev => [...prev, errorMessage]);
+              break;
+              
+            case 'phase_complete':
+              // A major phase like search is complete
+              if (data.phase === 'search') {
+                // Mark all search-related stages as complete
                 setSearchStages(prev => {
                   const updated = [...prev];
-                  if (!updated[2].complete) {
-                    updated[2] = { ...updated[2], complete: true, endTime: Date.now() };
+                  // Ensure all search stages are complete
+                  for (let i = 0; i < updated.length; i++) {
+                    if (!updated[i].complete) {
+                      updated[i] = { ...updated[i], complete: true, endTime: Date.now() };
+                    }
                   }
-                  if (!updated[3].complete) {
-                    updated[3] = { ...updated[3], complete: true, endTime: Date.now() };
-                  }
-                  updated[4] = { ...updated[4], complete: true, startTime: Date.now() - 300, endTime: Date.now() };
+                  // Add processing stage
+                  updated.push({ 
+                    stage: "Processing datasets", 
+                    complete: false, 
+                    startTime: Date.now() 
+                  });
                   return updated;
                 });
+                
+                const searchCompleteMessage: StatusMessage = {
+                  id: Math.random().toString(36).substring(2, 9),
+                  message: data.message,
+                  timestamp: data.data.execution_time,
+                  type: 'status'
+                };
+                setStatusMessages(prev => [...prev, searchCompleteMessage]);
               }
-            }
+              break;
             
-            // Process different message types
-            switch (data.type) {
-              case 'status':
-                // Add new status message
-                const statusMessage: StatusMessage = {
-                  id: Math.random().toString(36).substring(2, 9),
-                  message: data.message,
-                  timestamp: data.timestamp,
-                  type: 'status'
-                };
-                setStatusMessages(prev => [...prev, statusMessage]);
-                break;
-                
-              case 'discovery':
-                // Add new discovery message
-                const discoveryMessage: StatusMessage = {
-                  id: Math.random().toString(36).substring(2, 9),
-                  message: data.message,
-                  timestamp: data.timestamp,
-                  type: 'discovery',
-                  count: data.count
-                };
-                setDiscoveryMessages(prev => [...prev, discoveryMessage]);
-                setDatasetCount(data.count || discoveryMessages.length + 1);
-                break;
-                
-              case 'dataset':
-                // Add new dataset
-                setDatasets(prev => {
-                  // Check if dataset already exists
-                  const exists = prev.some(d => d.id === data.data.id);
-                  if (exists) return prev;
-                  
-                  // Add file count based on resources if available
-                  const datasetWithFileCount = {
-                    ...data.data,
-                    file_count: data.data.resources?.length || 0
-                  };
-                  
-                  // Sort datasets by similarity
-                  const newDatasets = [...prev, datasetWithFileCount].sort(
-                    (a, b) => (b.similarity || 0) - (a.similarity || 0)
-                  );
-                  return newDatasets;
-                });
-                break;
-                
-              case 'dataset_update':
-                setDatasets(prev => {
-                  const datasetIndex = prev.findIndex(d => d.id === data.data.id);
-                  
-                  // If dataset exists and is marked as not relevant in the pre-assessment
-                  if (datasetIndex !== -1 && 
-                      data.data.status === 'not_relevant') {
-                    
-                    // First mark it for removal (this will trigger the animation)
-                    const updatedDatasets = [...prev];
-                    updatedDatasets[datasetIndex] = {
-                      ...updatedDatasets[datasetIndex],
-                      ...data.data,
-                      isRemoving: true  // Add flag to trigger removal animation
+            case 'processing_start':
+              // Starting to process a specific dataset
+              setDatasets(prev => {
+                return prev.map(d => {
+                  if (d.id === data.dataset_id) {
+                    return {
+                      ...d,
+                      status: 'starting'
                     };
-                    
-                    // Set a timeout to actually remove it after animation completes
-                    setTimeout(() => {
-                      setDatasets(prev => 
-                        prev.filter(d => d.id !== data.data.id)
-                      );
-                    }, 500); // Match this duration to your CSS transition
-                    
-                    return updatedDatasets;
                   }
-                  
-                  // Normal update for relevant datasets
-                  return prev.map(dataset => {
-                    if (dataset.id === data.data.id) {
-                      const updatedData = { ...dataset, ...data.data };
-                      // Update file_count if not already set but resources are available
-                      if (!updatedData.file_count && updatedData.resources?.length) {
-                        updatedData.file_count = updatedData.resources.length;
-                      }
-                      return updatedData;
-                    }
-                    return dataset;
-                  });
+                  return d;
                 });
-                break;
-                
-              case 'complete':
-                // Search is complete
-                setSearchComplete(true);
-                setLoading(false);
-                setExecutionTime(data.data.execution_time);
-                
-                // Sort datasets by relevance score when search is complete
-                setDatasets(prev => {
-                  return [...prev].sort((a, b) => {
-                    const scoreA = a.relevance?.relevance_score || a.similarity || 0;
-                    const scoreB = b.relevance?.relevance_score || b.similarity || 0;
-                    return scoreB - scoreA; // Sort in descending order
-                  });
-                });
-                
-                // Add the completion message to status messages
-                if (data.message) {
-                  const completeMessage: StatusMessage = {
-                    id: Math.random().toString(36).substring(2, 9),
-                    message: data.message,
-                    timestamp: data.data.execution_time,
-                    type: 'status'
-                  };
-                  setStatusMessages(prev => [...prev, completeMessage]);
-                }
-                break;
-                
-              case 'error':
-                // Show error message
-                setError(data.message);
-                setLoading(false);
-                
-                // Add to status messages too
-                const errorMessage: StatusMessage = {
-                  id: Math.random().toString(36).substring(2, 9),
-                  message: `Error: ${data.message}`,
-                  timestamp: data.timestamp,
-                  type: 'error'
-                };
-                setStatusMessages(prev => [...prev, errorMessage]);
-                break;
-                
-              case 'phase_complete':
-                // A major phase like search is complete
-                if (data.phase === 'search') {
-                  // Mark all search-related stages as complete
-                  setSearchStages(prev => {
-                    const updated = [...prev];
-                    // Ensure all search stages are complete
-                    for (let i = 0; i < updated.length; i++) {
-                      if (!updated[i].complete) {
-                        updated[i] = { ...updated[i], complete: true, endTime: Date.now() };
-                      }
-                    }
-                    // Add processing stage
-                    updated.push({ 
-                      stage: "Processing datasets", 
-                      complete: false, 
-                      startTime: Date.now() 
-                    });
-                    return updated;
-                  });
-                  
-                  const searchCompleteMessage: StatusMessage = {
-                    id: Math.random().toString(36).substring(2, 9),
-                    message: data.message,
-                    timestamp: data.data.execution_time,
-                    type: 'status'
-                  };
-                  setStatusMessages(prev => [...prev, searchCompleteMessage]);
-                }
-                break;
+              });
               
-              case 'processing_start':
-                // Starting to process a specific dataset
-                setDatasets(prev => {
-                  return prev.map(d => {
-                    if (d.id === data.dataset_id) {
-                      return {
-                        ...d,
-                        status: 'starting'
-                      };
-                    }
-                    return d;
-                  });
-                });
-                
-                const processingStartMessage: StatusMessage = {
-                  id: Math.random().toString(36).substring(2, 9),
-                  message: data.message,
-                  timestamp: data.timestamp,
-                  type: 'status'
-                };
-                setStatusMessages(prev => [...prev, processingStartMessage]);
-                break;
-              
-              case 'pre_assessment':
-                // Pre-download relevance assessment result
-                setDatasets(prev => {
-                  return prev.map(d => {
-                    if (d.id === data.dataset_id) {
-                      return {
-                        ...d,
-                        pre_assessment: {
-                          is_relevant: data.is_relevant,
-                          relevance_score: data.relevance_score,
-                          reasoning: data.reasoning
-                        }
-                      };
-                    }
-                    return d;
-                  });
-                });
-                break;
-              
-              case 'download_complete':
-                // Dataset files have been downloaded
-                const downloadMessage: StatusMessage = {
-                  id: Math.random().toString(36).substring(2, 9),
-                  message: `Downloaded ${data.file_count} files for dataset`,
-                  timestamp: data.timestamp,
-                  type: 'status'
-                };
-                setStatusMessages(prev => [...prev, downloadMessage]);
-                break;
-              
-              case 'file_analysis':
-                // Analysis of multiple files in a dataset
-                console.log("File analysis:", data);
-                break;
-              
-              case 'dataset_preview':
-                // Dataset preview information
-                setDatasets(prev => {
-                  return prev.map(d => {
-                    if (d.id === data.dataset_id) {
-                      return {
-                        ...d,
-                        preview: data.preview
-                      };
-                    }
-                    return d;
-                  });
-                });
-                break;
-              
-              case 'relevance_assessment':
-                // Final relevance assessment after analyzing the actual data
-                setDatasets(prev => {
-                  return prev.map(d => {
-                    if (d.id === data.dataset_id) {
-                      return {
-                        ...d,
-                        relevance: {
-                          is_relevant: data.is_relevant,
-                          relevance_score: data.relevance_score,
-                          reasoning: data.reasoning
-                        }
-                      };
-                    }
-                    return d;
-                  });
-                });
-                
-                const assessmentMessage: StatusMessage = {
-                  id: Math.random().toString(36).substring(2, 9),
-                  message: `Dataset assessed with relevance score: ${data.relevance_score.toFixed(2)}`,
-                  timestamp: data.timestamp,
-                  type: 'status'
-                };
-                setStatusMessages(prev => [...prev, assessmentMessage]);
-                break;
-                
-              default:
-                console.log(`Unknown message type: ${data.type}`, data);
-            }
-          } catch (err) {
-            console.error("Error parsing JSON from stream:", err);
-            console.error("Problematic line:", line);
+              const processingStartMessage: StatusMessage = {
+                id: Math.random().toString(36).substring(2, 9),
+                message: data.message,
+                timestamp: data.timestamp,
+                type: 'status'
+              };
+              setStatusMessages(prev => [...prev, processingStartMessage]);
+              break;
             
-            // Continue processing other lines instead of breaking
-            continue;
+            case 'pre_assessment':
+              // Pre-download relevance assessment result
+              setDatasets(prev => {
+                return prev.map(d => {
+                  if (d.id === data.dataset_id) {
+                    return {
+                      ...d,
+                      pre_assessment: {
+                        is_relevant: data.is_relevant,
+                        relevance_score: data.relevance_score,
+                        reasoning: data.reasoning
+                      }
+                    };
+                  }
+                  return d;
+                });
+              });
+              break;
+            
+            case 'download_complete':
+              // Dataset files have been downloaded
+              const downloadMessage: StatusMessage = {
+                id: Math.random().toString(36).substring(2, 9),
+                message: `Downloaded ${data.file_count} files for dataset`,
+                timestamp: data.timestamp,
+                type: 'status'
+              };
+              setStatusMessages(prev => [...prev, downloadMessage]);
+              break;
+            
+            case 'file_analysis':
+              // Analysis of multiple files in a dataset
+              console.log("File analysis:", data);
+              break;
+            
+            case 'dataset_preview':
+              // Dataset preview information
+              setDatasets(prev => {
+                return prev.map(d => {
+                  if (d.id === data.dataset_id) {
+                    return {
+                      ...d,
+                      preview: data.preview
+                    };
+                  }
+                  return d;
+                });
+              });
+              break;
+            
+            case 'relevance_assessment':
+              // Final relevance assessment after analyzing the actual data
+              setDatasets(prev => {
+                return prev.map(d => {
+                  if (d.id === data.dataset_id) {
+                    return {
+                      ...d,
+                      relevance: {
+                        is_relevant: data.is_relevant,
+                        relevance_score: data.relevance_score,
+                        reasoning: data.reasoning
+                      }
+                    };
+                  }
+                  return d;
+                });
+              });
+              
+              const assessmentMessage: StatusMessage = {
+                id: Math.random().toString(36).substring(2, 9),
+                message: `Dataset assessed with relevance score: ${data.relevance_score.toFixed(2)}`,
+                timestamp: data.timestamp,
+                type: 'status'
+              };
+              setStatusMessages(prev => [...prev, assessmentMessage]);
+              break;
+            
+            default:
+              console.log(`Unknown message type: ${data.type}`, data);
           }
+        } catch (err) {
+          console.error("Error processing chunk:", err);
+          console.error("Problematic chunk:", data);
         }
-      }
+      });
       
       // If we got here without errors, but search isn't marked complete
       if (!searchComplete) {
@@ -1504,27 +1449,23 @@ export default function DatasetsPage() {
         
         .animate-fadeIn {
           opacity: 0;
-          animation: fadeIn 1s ease-in-out forwards;
+          animation: fadeIn 0.5s ease-out forwards;
           animation-delay: var(--animation-delay, 0ms);
         }
         
-        /* Custom scrollbar styles */
-        .space-y-1.max-h-[200px], .space-y-1.max-h-[300px] {
-          scrollbar-width: thin;
-          scrollbar-color: rgba(156, 163, 175, 0.3) transparent;
+        /* Smooth transition for dataset cards */
+        .dataset-card {
+          transition: opacity 0.5s ease, transform 0.5s ease, max-height 0.5s ease, margin 0.5s ease, padding 0.5s ease;
+          opacity: 1;
+          transform: scale(1);
+          max-height: 500px;
+          overflow: hidden;
         }
         
-        .space-y-1.max-h-[200px]::-webkit-scrollbar, .space-y-1.max-h-[300px]::-webkit-scrollbar {
-          width: 6px;
-        }
-        
-        .space-y-1.max-h-[200px]::-webkit-scrollbar-track, .space-y-1.max-h-[300px]::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        
-        .space-y-1.max-h-[200px]::-webkit-scrollbar-thumb, .space-y-1.max-h-[300px]::-webkit-scrollbar-thumb {
-          background-color: rgba(156, 163, 175, 0.3);
-          border-radius: 20px;
+        .dataset-card.removing {
+          opacity: 0;
+          transform: scale(0.95);
+          max-height: 0;
         }
       `}</style>
 
