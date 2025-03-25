@@ -31,9 +31,12 @@ The flowchart can be viewed in several ways:
 ### Prerequisites
 
 - Python 3.12+ (advanced f string support)
-- Django 5.1+
 - Data.gov API key
 - OpenAI API key
+- Firebase CLI
+
+1. Firebase CLI Install:
+`npm install -g firebase-tools`
 
 ### Installation
 
@@ -43,7 +46,11 @@ The flowchart can be viewed in several ways:
    cd crystal
    ```
 
-2. Create and activate a virtual environment:
+1. Auth to firebase and select the Crystal project:
+`firebase login`
+`firebase init`
+
+2. Create and activate a virtual environment in `functions/`:
    ```
    python -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
@@ -54,13 +61,14 @@ The flowchart can be viewed in several ways:
    pip install -r requirements.txt
    ```
 
-4. Create a `.env` file in the project root:
+4. Create a `.env` file in `functions/`:
    ```
    cp .env.example .env
    ```
    Then edit the `.env` file to add your API keys:
    - Get a Data.gov API key from [https://api.data.gov/signup/](https://api.data.gov/signup/)
    - Get an OpenAI API key from [https://platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+   - Etc. etc.
 
 5. Database setup:
    - Run migrations: `python manage.py migrate`
