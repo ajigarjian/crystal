@@ -1,0 +1,168 @@
+Pinecone Search Results
+Generated on: 2025-03-24 19:59:38
+================================================================================
+
+Query 1: "air quality in greenwich village"
+--------------------------------------------------------------------------------
+
+WITHOUT VARIATIONS: 10 results in 4.7802 seconds
+
+  1. Village Green Project station data - March 2015
+     Similarity: 0.4841
+     ID: a00f65cb-1f37-44ae-ba0b-8695cba9615c
+
+  2. Air Quality
+     Similarity: 0.4720
+     ID: 29aa21ae-b135-4227-9db6-6dd283715900
+
+  3. EnviroAtlas - New York, NY - Estimated Percent Green Space Along Walkable Roads
+     Similarity: 0.4344
+     ID: 232f1656-8f1e-493e-8ade-2eee47896ad1
+
+  4. Google Street View Air Quality Data: Oakland CA NO2 2015-2016
+     Similarity: 0.4184
+     ID: fc149c9d-fe2f-4603-8278-420a71bfa049
+
+  5. Mechanical Ventilation and Indoor Air Quality in Recently Constructed U.S. Homes in Marine and Cold-Dry Climates Data from Building America Project
+     Similarity: 0.4153
+     ID: 3de2668a-7521-4c8d-b873-bf206c062359
+
+
+----------------------------------------
+
+QUERY VARIATIONS:
+  0. "air quality in greenwich village"
+  1. "air quality data Greenwich Village"
+  2. "Greenwich Village pollution levels"
+  3. "air quality index NYC"
+  4. "environmental data Greenwich Village"
+  5. "New York City air quality statistics"
+
+WITH VARIATIONS: 20 results in 4.1543 seconds
+
+  1. Air Quality
+     Similarity: 0.6911
+     ID: 29aa21ae-b135-4227-9db6-6dd283715900
+     From query: "New York City air quality"
+
+  2. NYCCAS Air Pollution Rasters
+     Similarity: 0.6331
+     ID: 26348aff-a58b-4f11-b159-84151f0978e7
+     From query: "New York City air quality"
+
+  3. NYC Climate Budgeting Report: Avoided Health Events By NTA
+     Similarity: 0.5644
+     ID: 41ae82d4-6363-40d9-89c2-e535a2d45efb
+     From query: "New York City air quality"
+
+  4. EnviroAtlas - New York City, NY - BenMAP Results by Block Group
+     Similarity: 0.5621
+     ID: 5ffb4965-2dec-471a-9350-225a1a5bebaa
+     From query: "New York City air quality"
+
+  5. Local Air Quality
+     Similarity: 0.5609
+     ID: 6c266e69-f49f-4c8a-9d18-78b4da471c17
+     From query: "Greenwich Village air quality data"
+
+
+COMPARISON:
+  Results only in variations search: 14
+  Unique datasets found with variations:
+    - ARCHIVE - Greenstreets (from: "environmental data Greenwich Village")
+    - NYC Climate Budgeting Report: Avoided Health Events By NTA (from: "New York City air quality")
+    - Local Air Quality CHPL 211297 (from: "Greenwich Village air quality data")
+    - Air Quality History (from: "Greenwich Village air quality data")
+    - Local Air Quality (from: "Greenwich Village air quality data")
+    - volatile organic compounds measurements (from: "Greenwich Village air quality data")
+    - NYCCAS Air Pollution Rasters (from: "New York City air quality")
+    - EnviroAtlas - New York, NY - Near Road Block Group Summary (from: "New York City air quality")
+    - EnviroAtlas - New York City, NY - BenMAP Results by Block Group (from: "New York City air quality")
+    - Air Quality Realtime (from: "Greenwich Village air quality data")
+    - Local Air Quality CHPL 211297 (from: "Greenwich Village air quality data")
+    - GreenThumb Garden Info (from: "environmental data Greenwich Village")
+    - Transportation emissions scenarios for New York City under different carbon intensities of electricity and electric vehicle adoption rates (from: "New York City air quality")
+    - Data for Declines and peaks in NO2 pollution during the multiple waves of the COVID-19 pandemic in the New York metropolitan area (from: "New York City air quality")
+
+================================================================================
+
+Query 2: "electric vehicle adoption rates by state"
+--------------------------------------------------------------------------------
+
+WITHOUT VARIATIONS: 10 results in 1.0598 seconds
+
+  1. Electric Vehicle Population Size History
+     Similarity: 0.5826
+     ID: 95a4aa73-6a97-41f8-a949-970dee5dd706
+
+  2. Electric Vehicle Population Size History By County
+     Similarity: 0.5743
+     ID: 49227ac1-3484-4dff-91f9-cee23909ce98
+
+  3. Electric Vehicle Population Data
+     Similarity: 0.5592
+     ID: 844dbad1-ee1e-44b8-9799-34cb7ed24640
+
+  4. MDOT/MVA Electric and Plug-in Hybrid Vehicle Registrations by County as of each month end from July 2020 to January 2025
+     Similarity: 0.5473
+     ID: eb7193c2-53c3-47f9-a683-0a9eacdf0040
+
+  5. MDOT/MVA Electric Vehicle Registrations by Classification as of Each Month End
+     Similarity: 0.5334
+     ID: 4ff1f296-3d9c-4cd8-84b9-0a383667908d
+
+
+----------------------------------------
+
+QUERY VARIATIONS:
+  0. "electric vehicle adoption rates by state"
+  1. "electric vehicle sales by state"
+  2. "EV adoption statistics by region"
+  3. "statewise electric vehicle usage"
+  4. "electric car market share by state"
+  5. "electric vehicle registration data by state"
+
+WITH VARIATIONS: 13 results in 5.0934 seconds
+
+  1. NYSERDA Electric Vehicle Drive Clean Rebate Data: Beginning 2017
+     Similarity: 0.6137
+     ID: 6cadae8a-0138-4c88-ba7c-75ad2de67fac
+     From query: "state-level electric vehicle data"
+
+  2. Electric Vehicle Population Size History By County
+     Similarity: 0.5935
+     ID: 49227ac1-3484-4dff-91f9-cee23909ce98
+     From query: "electric vehicle penetration by state"
+
+  3. Electric Vehicle Population Size History
+     Similarity: 0.5934
+     ID: 95a4aa73-6a97-41f8-a949-970dee5dd706
+     From query: "electric vehicle penetration by state"
+
+  4. Modeled Electricity Demand Profiles for Federal, State, and Municipal Electric Vehicle Fleets in the United States
+     Similarity: 0.5868
+     ID: dbe728eb-31b7-4c1a-8183-cd05cd5e5e26
+     From query: "state-level electric vehicle data"
+
+  5. MD MDOT/MVA Electric and Plug-in Hybrid Vehicle Registrations by Zip Code as of Each Month End from July 2020 to January 2025
+     Similarity: 0.5759
+     ID: 41bc9445-b42d-489d-9cbf-c92201a1d227
+     From query: "electric vehicle penetration by state"
+
+
+COMPARISON:
+  Results only in variations search: 4
+  Unique datasets found with variations:
+    - Modeled Electricity Demand Profiles for Federal, State, and Municipal Electric Vehicle Fleets in the United States (from: "state-level electric vehicle data")
+    - Electric Technology Adoption and Energy Consumption (from: "EV adoption trends by state")
+    - California's National Electric Vehicle Infrastructure Funding Program Map (from: "electric vehicle penetration by state")
+    - MVA Vehicle Sales Counts by Month for Calendar Year 2002 through November 2024 (from: "electric vehicle sales by state")
+
+================================================================================
+
+SUMMARY
+--------------------------------------------------------------------------------
+
+Total queries tested: 2
+Each query was tested both with and without variations.
+See individual query results for details on performance and result differences.

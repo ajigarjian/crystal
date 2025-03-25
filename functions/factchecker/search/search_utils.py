@@ -257,8 +257,8 @@ def parallel_search(query: str, search_function: Callable, similarity_threshold:
     # Sort by similarity score
     deduplicated_results.sort(key=lambda x: x.get('similarity', 0), reverse=True)
     
-    # Limit to max_results * 2
-    final_results = deduplicated_results[:int(max_results * 2)]
+    # Limit to max_results
+    final_results = deduplicated_results[:max_results]
 
     # Print a simple summary
     print(f"Search results by variation:")

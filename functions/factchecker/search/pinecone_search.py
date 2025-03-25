@@ -16,13 +16,16 @@ import threading
 from typing import List, Dict, Any, Optional
 import logging
 import sys
+import traceback
+from factchecker.sqlalchemy_models import DatasetCatalog, DatasetResource
+import time
 
 # Import database utilities from shared helper module
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from helpers.db_utils import execute_query, get_usable_resources
+from helpers.db_utils import execute_query, get_usable_resources, get_usable_resources_batch
 
 # Import pinecone
-import pinecone
+from pinecone import Pinecone, Index, ServerlessSpec  # Updated import
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -63,34 +66,40 @@ class PineconeSearcher:
                  environment: Optional[str] = None,
                  index_name: str = "dataset-embeddings"):
         """
-        Initialize the Pinecone searcher
+        Initialize the Pinecone searcher using the new Pinecone client interface.
         
         Args:
             api_key: Pinecone API key (defaults to PINECONE_API_KEY env var)
             environment: Pinecone environment (defaults to PINECONE_ENVIRONMENT env var)
             index_name: Name of the Pinecone index to use
         """
-        # Get API key and environment from environment variables
+        # Get API key and environment from environment variables if not provided
         self.api_key = api_key or os.environ.get("PINECONE_API_KEY")
         self.environment = environment or os.environ.get("PINECONE_ENVIRONMENT")
         
-        if not self.api_key or not self.environment:
-            raise ValueError(
-                "Pinecone API key and environment must be provided either as parameters "
-                "or as environment variables."
-            )
+        if not self.api_key:
+            raise ValueError("Pinecone API key must be provided or set via PINECONE_API_KEY env var.")
         
-        # Initialize Pinecone
-        pinecone.init(api_key=self.api_key, environment=self.environment)
+        # Create Pinecone client
+        self.pc = Pinecone(api_key=self.api_key)
         
-        # Connect to the index
+        # If you have a serverless region specification, set it here. Example:
+        # if self.environment:
+        #     self.pc.create_index(
+        #         name=index_name,
+        #         dimension=1536,
+        #         metric='cosine',
+        #         spec=ServerlessSpec(cloud='aws', region=self.environment),
+        #         overwrite=False
+        #     )
+        #
+        # For now, we simply check if the index exists:
+        existing_indexes = [i.name for i in self.pc.list_indexes()]
         self.index_name = index_name
-        if self.index_name not in pinecone.list_indexes():
-            raise ValueError(
-                f"Pinecone index '{self.index_name}' not found."
-            )
+        if self.index_name not in existing_indexes:
+            raise ValueError(f"Pinecone index '{self.index_name}' not found.")
         
-        self.index = pinecone.Index(self.index_name)
+        self.index = self.pc.Index(self.index_name)
     
     def search(self, query: str, k: int = 10) -> List[Dict[str, Any]]:
         """
@@ -147,7 +156,7 @@ class PineconeSearcher:
             try:
                 # Query the database for dataset information
                 dataset_query = """
-                SELECT dataset_id, title, notes, organization_title
+                SELECT dataset_id, title, notes, organization_title, image_url
                 FROM factchecker_datasetcatalog
                 WHERE dataset_id = %s
                 """
@@ -168,7 +177,8 @@ class PineconeSearcher:
                         "organization": dataset["organization_title"],
                         "similarity": result['score'],
                         "resources": resources,
-                        "search_source": "vector"
+                        "search_source": "vector",
+                        "image_url": dataset.get("image_url", "")
                     })
             except Exception as e:
                 logger.error(f"Error processing dataset {result['dataset_id']}: {e}")
@@ -190,190 +200,193 @@ def get_pinecone_client():
         with _PINECONE_CLIENT_LOCK:
             # Double-check after acquiring the lock
             if _GLOBAL_PINECONE_CLIENT is None:
-                logger.info("Initializing Pinecone client (one-time operation)")
+                logger.info("Initializing new Pinecone client (one-time operation)")
                 
                 # Get API key from environment variables
                 api_key = os.environ.get("PINECONE_API_KEY")
                 
                 if not api_key:
-                    raise ValueError(
-                        "Pinecone API key must be provided as environment variable."
-                    )
+                    raise ValueError("Pinecone API key must be provided as an environment variable.")
                 
                 # Create Pinecone client
-                from pinecone import Pinecone
                 _GLOBAL_PINECONE_CLIENT = Pinecone(api_key=api_key)
     
     return _GLOBAL_PINECONE_CLIENT
 
 def vector_search_datasets_pinecone(
-    query: str, 
+    query: str,
+    pinecone_api_key: Optional[str] = None,
+    pinecone_environment: Optional[str] = None,
+    index_name: str = "dataset-embeddings",
     similarity_threshold: float = 0.3,
     top_k: int = 100,
+    max_results: Optional[int] = None,
     verbose: bool = False,
-    max_results: int = None
-) -> List[Dict]:
+) -> List[Dict[str, Any]]:
     """
-    Search for datasets using vector similarity with Pinecone.
+    Search for datasets using vector similarity with Pinecone, 
+    retrieving dataset info directly via SQL queries.
     
     Args:
-        query: Natural language query
-        similarity_threshold: Minimum similarity score (0-1) for including results
-        top_k: Maximum number of results to return
-        verbose: Whether to print verbose output
-        max_results: Maximum number of results to return (overrides top_k if provided)
-        
+        query: The search query string.
+        pinecone_api_key: Pinecone API key; if None, read from env var PINECONE_API_KEY.
+        pinecone_environment: Pinecone environment (e.g., 'us-east-1-gcp'); if None, read from env var PINECONE_ENVIRONMENT.
+        index_name: Name of the Pinecone index to query.
+        similarity_threshold: Only return matches with this score or higher.
+        top_k: Maximum number of results to return (default 100).
+        max_results: If provided, overrides top_k.
+        verbose: If True, prints debug info to stdout.
+
     Returns:
-        List of dataset dictionaries with similarity scores
+        A list of dataset dicts. Each dict contains:
+            - "id": dataset_id
+            - "title": dataset title
+            - "description": dataset notes
+            - "organization": organization title
+            - "similarity": float match score
+            - "resources": list of resource dicts
+            - "search_source": "vector"
     """
     try:
-        # Use max_results if provided, otherwise use top_k
+        import time  # Add import at the top of the file
+        
+        # Override top_k if max_results is given
         if max_results is not None:
             top_k = max_results
-            
-        if verbose:
-            logger.info("Starting Pinecone vector search process...")
-            
-        # Create embeddings for the query
+
+        # Pull Pinecone credentials from function args or environment
+        api_key = pinecone_api_key or os.environ.get("PINECONE_API_KEY")
+        env = pinecone_environment or os.environ.get("PINECONE_ENVIRONMENT")
+        if not api_key:
+            if verbose:
+                print("Pinecone credentials not provided - returning no results.")
+            return []
+
+        # Create embedding with your chosen embedding function
+        from factchecker.utils.openai_client import create_embeddings
         query_embedding = create_embeddings(query)
+
+        if verbose:
+            print(f"Initializing Pinecone client (index='{index_name}')...")
+
+        # Create a new Pinecone client object
+        pc = Pinecone(api_key=api_key)
         
-        # Get the global Pinecone client (initialized only once)
-        pc = get_pinecone_client()
-        
-        # Get index name from environment or use default
-        index_name = os.environ.get("PINECONE_INDEX_NAME", "dataset-embeddings")
-        
-        # Check if index exists
-        existing_indexes = [index.name for index in pc.list_indexes()]
+        # Ensure index exists
+        existing_indexes = [i.name for i in pc.list_indexes()]
         if index_name not in existing_indexes:
             if verbose:
-                logger.warning(f"Pinecone index '{index_name}' not found.")
+                print(f"Index '{index_name}' not found in Pinecone.")
             return []
-        
-        # Connect to the index
+
+        # Query index
         index = pc.Index(index_name)
         
-        if verbose:
-            logger.info(f"Searching for top {top_k} matches with similarity threshold {similarity_threshold}...")
-        
-        # Ensure vector is normalized for cosine similarity
-        query_embedding = query_embedding / np.linalg.norm(query_embedding)
-        
-        # Query Pinecone - request more than we need to account for filtering
+        # Check if query_embedding is already a list or needs conversion
+        if isinstance(query_embedding, np.ndarray):
+            query_vector = query_embedding.tolist()
+        else:
+            # If it's already a list, use it directly
+            query_vector = query_embedding
+            
         results = index.query(
-            vector=query_embedding.tolist(),
-            top_k=top_k * 3,
-            include_metadata=True
+            vector=query_vector,
+            top_k=top_k * 3,  # over-fetch so we can threshold
+            include_metadata=False
         )
-        
-        # Filter results by threshold
-        filtered_matches = [match for match in results.matches if match.score >= similarity_threshold]
-        
+
         if verbose:
-            logger.info(f"Found {len(filtered_matches)} raw matches with similarity >= {similarity_threshold}")
-            logger.info("Checking for usable resources...")
-        
-        # Get dataset IDs for batch database query
+            print(f"Retrieved {len(results.matches)} matches from Pinecone before filtering.")
+
+        # Filter by similarity threshold
+        filtered_matches = [
+            match for match in results.matches if match.score >= similarity_threshold
+        ]
+        if verbose:
+            print(f"{len(filtered_matches)} matches remain after threshold = {similarity_threshold}")
+
+        # Collect dataset IDs
         dataset_ids = [match.id for match in filtered_matches]
-        
-        # Check if we have any dataset IDs before querying the database
+
         if not dataset_ids:
             if verbose:
-                logger.info("No datasets found with similarity above threshold.")
+                print("No matches above threshold, returning empty list.")
             return []
-        
-        # Get all datasets in one query
-        datasets_query = """
-        SELECT dataset_id, title, notes, organization_title
-        FROM factchecker_datasetcatalog
-        WHERE dataset_id IN %s
+
+        # Add timing for database operations
+        if verbose:
+            print(f"Fetching dataset info for {len(dataset_ids)} datasets...")
+            start_time = time.time()
+
+        # Fetch dataset info via direct SQL (no SQLAlchemy)
+        query_sql = """
+            SELECT dataset_id, title, notes, organization_title, image_url
+            FROM factchecker_datasetcatalog
+            WHERE dataset_id = ANY(%s)
         """
+        ds_rows = execute_query(query_sql, params=(dataset_ids,))
+
+        if verbose:
+            print(f"Database query for datasets completed in {time.time() - start_time:.2f} seconds")
+            
+        # Fetch all resources in a single batch query
+        if verbose:
+            print(f"Fetching resources for all datasets in a single query...")
+            start_time = time.time()
+            
+        # Import the new batch function
+        resources_by_dataset = get_usable_resources_batch(dataset_ids)
         
-        # Execute the query with a tuple of dataset IDs
-        datasets_result = execute_query(datasets_query, (tuple(dataset_ids),))
-        
-        # Convert to a dictionary for easy lookup
-        datasets = {d["dataset_id"]: d for d in datasets_result}
-        
-        # Format results and check resources
-        formatted_results = []
+        if verbose:
+            print(f"Resources batch query completed in {time.time() - start_time:.2f} seconds")
+            print(f"Found resources for {len(resources_by_dataset)} datasets")
+
+        # Build a map for quick lookup
+        ds_map = {str(row["dataset_id"]): row for row in ds_rows}
+
+        final_results = []
+        if verbose:
+            print(f"Processing {len(filtered_matches)} matches...")
+            start_time = time.time()
+
         for match in filtered_matches:
-            # Stop once we have enough results
-            if len(formatted_results) >= top_k:
+            if len(final_results) >= top_k:
                 break
-                
-            dataset_id = match.id
-            similarity = match.score
-            
-            # Skip if dataset doesn't exist in database
-            if dataset_id not in datasets:
+
+            ds_id_str = str(match.id)
+            if ds_id_str not in ds_map:
+                # Dataset doesn't exist or wasn't found in DB
                 continue
-                
-            dataset = datasets[dataset_id]
+
+            ds_row = ds_map[ds_id_str]
             
-            # Get usable resources
-            resources = get_usable_resources(dataset_id)
+            # Get resources from our batch results
+            resources = resources_by_dataset.get(ds_id_str, [])
             
-            # Only include datasets with usable resources
-            if resources:
-                formatted_results.append({
-                    "id": dataset_id,
-                    "title": dataset["title"],
-                    "description": dataset["notes"] if dataset["notes"] else "",
-                    "organization": dataset["organization_title"],
-                    "similarity": similarity,
-                    "resources": resources,
-                    "search_source": "vector"
-                })
-        
+            if not resources:
+                # Skip datasets with no usable resources
+                continue
+
+            final_results.append({
+                "id": ds_id_str,
+                "title": ds_row.get("title", ""),
+                "description": ds_row.get("notes", "") or "",
+                "organization": ds_row.get("organization_title", ""),
+                "similarity": float(match.score),
+                "resources": resources,
+                "search_source": "vector",
+                "image_url": ds_row.get("image_url", "")
+            })
+
         if verbose:
-            logger.info(f"Found {len(formatted_results)} datasets with usable resources (limited to top {top_k})")
-        
-        # If we have results above threshold, return them
-        if formatted_results:
-            return formatted_results
-            
-        # If no datasets meet the threshold, try to find at least one with a lower threshold
-        if not formatted_results and similarity_threshold > 0.1:
-            if verbose:
-                logger.info("No datasets meet the threshold. Trying with lower threshold...")
-            
-            # Try with lower threshold
-            lower_threshold = 0.1
-            
-            # Re-filter results with lower threshold
-            lower_matches = [match for match in results.matches if match.score >= lower_threshold]
-            
-            # Check each one until we find one with usable resources
-            for match in lower_matches:
-                dataset_id = match.id
-                
-                # Skip if dataset doesn't exist in database
-                if dataset_id not in datasets:
-                    continue
-                    
-                dataset = datasets[dataset_id]
-                resources = get_usable_resources(dataset_id)
-                
-                if resources:
-                    formatted_result = {
-                        "id": dataset_id,
-                        "title": dataset["title"],
-                        "description": dataset["notes"] if dataset["notes"] else "",
-                        "organization": dataset["organization_title"],
-                        "similarity": match.score,
-                        "resources": resources,
-                        "search_source": "vector"
-                    }
-                    if verbose:
-                        logger.info(f"Found top dataset with similarity {match.score:.4f}: {dataset['title']}")
-                    return [formatted_result]
-                
-        # If we get here, no datasets have usable resources
-        if verbose:
-            logger.info("No datasets with usable resources found.")
-        return []
-        
+            print(f"Processing matches completed in {time.time() - start_time:.2f} seconds")
+            print(f"Returning {len(final_results)} final results with resources...")
+
+        return final_results
+
     except Exception as e:
-        logger.error(f"Error searching with query '{query}': {e}")
+        if verbose:
+            print(f"Error in vector_search_datasets_pinecone: {e}")
+            if verbose > 1:  # Add more detailed error info for deeper debugging
+                print(f"Traceback: {traceback.format_exc()}")
         return []

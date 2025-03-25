@@ -14,7 +14,7 @@ from threading import Lock
 
 # Factchecker imports
 from factchecker.search.census_search import process_query as process_census_query
-from factchecker.search.search_utils import single_search
+from factchecker.search.search_utils import parallel_search, single_search
 from factchecker.search import search_datasets
 from factchecker.search.pinecone_search import vector_search_datasets_pinecone as vector_search_datasets
 from factchecker.search.census_search import vector_search as census_vector_search
@@ -85,90 +85,94 @@ def process_and_yield_dataset(dataset, source, all_datasets_count, start_time):
         'timestamp': time.time() - start_time
     }, cls=NumpyEncoder) + '\n'
 
-def search_census_data(query, similarity_threshold, census_max_results, start_time):
-    """Search Census data sources and yield results"""
-    # Extract structured info from query for Census search
-    query_info = process_census_query(query)
-    
-    # Start Census search
-    yield create_status_message('I\'m searching through Census databases...', start_time)
-    
-    census_datasets = []
+def search_census_data(query, similarity_threshold, max_results, start_time):
+    """Search Census data and yield status updates and results"""
+    yield create_status_message('I\'m checking Census datasets...', start_time)
     
     try:
-        # Perform Census search with error handling
-        try:
-            # Get results as a list from census_vector_search
-            census_results = census_vector_search(
-                query=query,
-                similarity_threshold=similarity_threshold,
-                year=query_info.get('year'),
-                tags=query_info.get('tags'),
-                geo_level=query_info.get('geo_level'),
-                location=query_info.get('location'),
-                max_results=census_max_results,
-                verbose=False
-            )
-            
-            # Convert CensusDataset objects to dictionaries before processing
-            if census_results:
-                census_results = [
-                    {
-                        'id': f"census-{i}",  # Ensure ID is a string with prefix
-                        'title': getattr(dataset, 'title', 'Census Dataset'),
-                        'description': getattr(dataset, 'description', ''),
-                        'organization': 'U.S. Census Bureau',
-                        'similarity': getattr(dataset, 'similarity', 0.8),
-                        'resources': getattr(dataset, 'resources', []),
-                        'search_source': 'census'
-                    } for i, dataset in enumerate(census_results)
-                ]
-            
-            # Ensure we have a list for processing
-            if not isinstance(census_results, list):
-                logger.info(f"Converting census_results from {type(census_results)} to list")
-                census_results = list(census_results) if census_results is not None else []
-            
-            # Process each dataset
-            all_datasets_count = len(census_results)
-            
-            # Store the datasets for later return
-            census_datasets = census_results
-            
-            # Stream each dataset to the client
-            for dataset in census_results:
-                for chunk in process_and_yield_dataset(dataset, 'census', all_datasets_count, start_time):
-                    yield chunk
-                    
-        except Exception as e:
-            logger.error(f"Error in Census search: {str(e)}")
-            logger.error(traceback.format_exc())
-            census_datasets = []
-    
-    except Exception as e:
-        logger.error(f"Error in search_census_data: {str(e)}")
-        logger.error(traceback.format_exc())
-        yield create_error_message(
-            "I encountered an error while searching Census data. I'll continue with other sources.",
-            details=str(e),
-            start_time=start_time
+        # Get census search results
+        census_results = census_vector_search(
+            query=query,
+            similarity_threshold=similarity_threshold,
+            max_results=max_results,
+            verbose=False
         )
-    
-    # Return the list of datasets (not a generator)
-    # This is used by the calling function to aggregate results
-    return census_datasets
+        
+        # Ensure we have a list
+        if hasattr(census_results, '__iter__') and not isinstance(census_results, list):
+            census_results = list(census_results)
+        elif not isinstance(census_results, list):
+            census_results = []
+        
+        # Check if we got any results
+        if census_results:
+            # Yield discovery message
+            yield json.dumps({
+                'type': 'discovery',
+                'message': f'I\'ve found {len(census_results)} Census datasets that might be relevant.',
+                'count': len(census_results),
+                'timestamp': time.time() - start_time
+            }, cls=NumpyEncoder) + '\n'
+            
+            # Process and yield each Census dataset
+            for i, dataset in enumerate(census_results):
+                # Extract proper fields from the Census dataset
+                dataset_id = dataset.get('id', f'census-{i}')
+                dataset_title = dataset.get('title', 'Census Dataset')
+                dataset_description = dataset.get('description', '')
+                dataset_vintage = dataset.get('vintage', '')
+                dataset_path = dataset.get('dataset_path', '')
+                dataset_similarity = dataset.get('similarity', 0.8)
+                
+                # Create a properly formatted dataset object
+                formatted_dataset = {
+                    'id': dataset_id,
+                    'title': dataset_title,
+                    'description': dataset_description,
+                    'organization': 'U.S. Census Bureau',
+                    'similarity': dataset_similarity,
+                    'resources': [],
+                    'search_source': 'census',
+                    'vintage': dataset_vintage,
+                    'dataset_path': dataset_path
+                }
+                
+                # Yield discovery message for this dataset
+                yield json.dumps({
+                    'type': 'discovery',
+                    'message': f'I\'ve found a dataset: {dataset_title}',
+                    'count': len(census_results),
+                    'timestamp': time.time() - start_time
+                }, cls=NumpyEncoder) + '\n'
+                
+                # Yield the dataset
+                yield json.dumps({
+                    'type': 'dataset',
+                    'data': formatted_dataset,
+                    'timestamp': time.time() - start_time
+                }, cls=NumpyEncoder) + '\n'
+        else:
+            yield create_status_message('No relevant Census datasets found.', start_time)
+            
+    except Exception as e:
+        logger.error(f"Error in Census search: {e}")
+        yield create_status_message(
+            "I encountered an issue with Census data. Continuing with other sources...",
+            start_time
+        )
 
 def search_vector_datasets(query, similarity_threshold, max_results, start_time):
     """Search datasets using vector search and yield results"""
     yield create_status_message('I\'m searching through data.gov datasets...', start_time)
     
     try:
-        # Perform single search
-        results = single_search(
+        # Perform parallel search
+        results = parallel_search(
             query,
             search_function=vector_search_datasets,
             similarity_threshold=similarity_threshold,
             max_results=max_results,
+            use_variations=True,
             verbose=False
         )
         
@@ -268,8 +272,91 @@ def assess_dataset_relevance(query, dataset, relevance_threshold, start_time, da
         
         return dataset
 
+# Add this new function for concurrent assessment
+def assess_datasets_concurrently(query, datasets, relevance_threshold, start_time, max_workers=3):
+    """Assess multiple datasets concurrently and yield status updates"""
+    total_datasets = len(datasets)
+    processed_datasets = []
+    
+    # Create batches of datasets to process concurrently
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all tasks
+        future_to_dataset = {
+            executor.submit(
+                assess_datafile_relevance_predownload,
+                query, 
+                dataset,
+                relevance_threshold=relevance_threshold
+            ): (dataset, i) 
+            for i, dataset in enumerate(datasets)
+        }
+        
+        # Process completed tasks as they finish
+        for future in concurrent.futures.as_completed(future_to_dataset):
+            dataset, dataset_index = future_to_dataset[future]
+            dataset_id = dataset.get('id', 'unknown')
+            dataset_title = dataset.get('title', 'Unnamed Dataset')
+            
+            try:
+                # Get the result from the completed task
+                assessment_result = future.result()
+                
+                # Extract values from the result dictionary
+                is_relevant = assessment_result["is_relevant"]
+                relevance_score = assessment_result["relevance_score"]
+                reasoning = assessment_result["reasoning"]
+                
+                # Store the relevance information in the dataset
+                dataset['relevance'] = {
+                    'is_relevant': is_relevant,
+                    'relevance_score': relevance_score,
+                    'reasoning': reasoning
+                }
+                
+                # If resource_url is in the assessment result, add it to the dataset
+                if "resource_url" in assessment_result:
+                    dataset['resource_url'] = assessment_result["resource_url"]
+                
+                # Yield dataset update with relevance information
+                yield json.dumps({
+                    'type': 'dataset_update',
+                    'data': {
+                        'id': dataset_id,
+                        'relevance': dataset['relevance']
+                    },
+                    'message': f'{"✓" if is_relevant else "✗"} Dataset {dataset_title} is {"likely relevant" if is_relevant else "not relevant"} (Score: {relevance_score:.2f})',
+                    'timestamp': time.time() - start_time
+                }, cls=NumpyEncoder) + '\n'
+                
+                processed_datasets.append(dataset)
+                
+            except Exception as e:
+                logger.error(f"Error assessing relevance: {str(e)}")
+                # Store error information in the dataset
+                dataset['relevance'] = {
+                    'is_relevant': False,
+                    'relevance_score': 0.0,
+                    'reasoning': f"Error during assessment: {str(e)}",
+                    'error': str(e)
+                }
+                
+                # Yield error update
+                yield json.dumps({
+                    'type': 'dataset_update',
+                    'data': {
+                        'id': dataset_id,
+                        'relevance': dataset['relevance']
+                    },
+                    'message': f'Error assessing dataset {dataset_title}: {str(e)}',
+                    'timestamp': time.time() - start_time
+                }, cls=NumpyEncoder) + '\n'
+                
+                processed_datasets.append(dataset)
+    
+    return processed_datasets
+
 def stream_search_datasets_helper(query, similarity_threshold=0.3, search_method=None, 
-                                 max_results=15, census_max_results=5, relevance_threshold=0.4):
+                                 max_results=15, census_max_results=5, relevance_threshold=0.35):
     """
     Helper function that generates the streaming search results
     """
@@ -282,6 +369,11 @@ def stream_search_datasets_helper(query, similarity_threshold=0.3, search_method
             f'I\'m starting my search for relevant datasets about "{query}"...',
             start_time
         )
+
+        # Reject requests where max_results exceeds 15
+        if max_results > 15:
+            print("ERROR! Max results may not exceed 15. Capping at 15.")
+            max_results = 15
         
         # Initialize API key for Data.gov
         gov_api_key = os.environ.get('DATA_GOV_API_KEY', '')
@@ -366,6 +458,14 @@ def stream_search_datasets_helper(query, similarity_threshold=0.3, search_method
                         else:
                             # This is the actual results list
                             vector_results = item
+                            
+                            # Get the query variations used and yield them as a status message
+                            if isinstance(vector_results, list) and len(vector_results) > 0 and 'query_variation' in vector_results[0]:
+                                query_variations = list(set(result['query_variation'] for result in vector_results))
+                                yield create_status_message(
+                                    f"Trying related search terms: {', '.join(query_variations)}",
+                                    start_time
+                                )
                             
                             # Process and yield each result
                             seen_vector_ids = set()
@@ -500,39 +600,28 @@ def stream_search_datasets_helper(query, similarity_threshold=0.3, search_method
             start_time
         )
         
-        # For each dataset, perform pre-download relevance assessment
-        relevant_datasets = []
-        for dataset_index, dataset in enumerate(all_datasets):
-            try:
-                is_relevant = None
-                for chunk in assess_dataset_relevance(
-                    query, 
-                    dataset, 
-                    relevance_threshold, 
-                    start_time, 
-                    dataset_index, 
-                    len(all_datasets)
-                ):
-                    yield chunk
-                    # Try to extract the relevance information from the yielded chunks
-                    try:
-                        chunk_data = json.loads(chunk.strip())
-                        if chunk_data.get('type') == 'dataset_update' and 'data' in chunk_data:
-                            if 'relevance' in chunk_data['data']:
-                                is_relevant = chunk_data['data']['relevance'].get('is_relevant', False)
-                    except:
-                        pass
-                
-                # If we couldn't determine relevance from chunks, use a default
-                if is_relevant is None:
-                    is_relevant = dataset.get('relevance', {}).get('is_relevant', False)
-                
-                # Skip if not relevant
-                if is_relevant:
-                    relevant_datasets.append(dataset)
-            except Exception as e:
-                logger.error(f"Error assessing dataset {dataset.get('id', 'unknown')}: {str(e)}")
-                continue
+        # Use concurrent assessment instead of sequential
+        try:
+            # Process datasets concurrently in batches of 3
+            relevant_datasets = []
+            for chunk in assess_datasets_concurrently(
+                query, 
+                all_datasets, 
+                relevance_threshold, 
+                start_time, 
+                max_workers=3
+            ):
+                yield chunk
+            
+            # Filter relevant datasets
+            relevant_datasets = [d for d in all_datasets if d.get('relevance', {}).get('is_relevant', False)]
+        except Exception as e:
+            logger.error(f"Error in concurrent dataset assessment: {str(e)}")
+            yield create_error_message(
+                "I encountered an issue while assessing datasets. Some results may be incomplete.",
+                details=str(e),
+                start_time=start_time
+            )
         
         # Final execution time
         final_execution_time = time.time() - start_time

@@ -372,13 +372,24 @@ export default function DatasetsPage() {
               setDatasets(prev => {
                 const datasetIndex = prev.findIndex(d => d.id === data.data.id);
                 
-                // If dataset exists, update it but don't remove non-relevant datasets
+                // If dataset exists, update it
                 if (datasetIndex !== -1) {
                   const updatedDatasets = [...prev];
                   updatedDatasets[datasetIndex] = {
                     ...updatedDatasets[datasetIndex],
                     ...data.data
                   };
+                  
+                  // If the dataset has been assessed as not relevant, mark it for removal
+                  if (data.data.relevance && data.data.relevance.is_relevant === false) {
+                    updatedDatasets[datasetIndex].isRemoving = true;
+                    
+                    // Remove the dataset after animation completes
+                    setTimeout(() => {
+                      setDatasets(current => current.filter(d => d.id !== data.data.id));
+                    }, 500); // Match this with your CSS transition duration
+                  }
+                  
                   return updatedDatasets;
                 }
                 
@@ -393,12 +404,15 @@ export default function DatasetsPage() {
               setExecutionTime(data.data.execution_time);
               
               // Sort datasets by relevance score when search is complete
+              // AND filter out any datasets that were marked as not relevant
               setDatasets(prev => {
-                return [...prev].sort((a, b) => {
-                  const scoreA = a.relevance?.relevance_score || a.similarity || 0;
-                  const scoreB = b.relevance?.relevance_score || b.similarity || 0;
-                  return scoreB - scoreA; // Sort in descending order
-                });
+                return [...prev]
+                  .filter(dataset => !dataset.relevance || dataset.relevance.is_relevant !== false)
+                  .sort((a, b) => {
+                    const scoreA = a.relevance?.relevance_score || a.similarity || 0;
+                    const scoreB = b.relevance?.relevance_score || b.similarity || 0;
+                    return scoreB - scoreA; // Sort in descending order
+                  });
               });
               
               // Add the completion message to status messages
@@ -535,7 +549,7 @@ export default function DatasetsPage() {
             case 'relevance_assessment':
               // Final relevance assessment after analyzing the actual data
               setDatasets(prev => {
-                return prev.map(d => {
+                const updatedDatasets = prev.map(d => {
                   if (d.id === data.dataset_id) {
                     return {
                       ...d,
@@ -548,6 +562,21 @@ export default function DatasetsPage() {
                   }
                   return d;
                 });
+                
+                // If the dataset is not relevant, mark it for removal with animation
+                if (!data.is_relevant) {
+                  const datasetIndex = updatedDatasets.findIndex(d => d.id === data.dataset_id);
+                  if (datasetIndex !== -1) {
+                    updatedDatasets[datasetIndex].isRemoving = true;
+                    
+                    // Remove the dataset after animation completes
+                    setTimeout(() => {
+                      setDatasets(current => current.filter(d => d.id !== data.dataset_id));
+                    }, 500); // Match this with your CSS transition duration
+                  }
+                }
+                
+                return updatedDatasets;
               });
               
               const assessmentMessage: StatusMessage = {
@@ -609,21 +638,38 @@ export default function DatasetsPage() {
     if (dataset.image_url) return dataset.image_url;
     
     // Then check if organization has an image_url
-    if (dataset.organization && dataset.organization.image_url) 
+    if (dataset.organization && typeof dataset.organization === 'object' && dataset.organization.image_url) 
       return dataset.organization.image_url;
     
     // Get organization name from either structure
-    const orgName = dataset.organization?.title || 
-                   dataset.organization?.name || 
-                   dataset.organization_title || 
-                   dataset.organization_name || 
-                   "";
+    let orgName = "";
+    if (dataset.organization) {
+      if (typeof dataset.organization === 'object') {
+        orgName = dataset.organization.title || dataset.organization.name || "";
+      } else {
+        orgName = dataset.organization; // Handle case where organization is a string
+      }
+    } else {
+      orgName = dataset.organization_title || dataset.organization_name || "";
+    }
     
     const firstLetter = orgName ? orgName.charAt(0).toUpperCase() : "D";
     const colors = ["4F46E5", "10B981", "EF4444", "F59E0B", "6366F1"];
     const randomColor = colors[Math.floor(Math.random() * colors.length)];
     
     return `https://placehold.co/32x32/${randomColor}/ffffff?text=${firstLetter}`;
+  };
+
+  // Helper function to get organization name
+  const getOrganizationName = (dataset: Dataset) => {
+    if (dataset.organization) {
+      if (typeof dataset.organization === 'object') {
+        return dataset.organization.title || dataset.organization.name || 'Unknown source';
+      } else {
+        return dataset.organization; // Handle case where organization is a string
+      }
+    }
+    return dataset.organization_title || dataset.organization_name || 'Unknown source';
   };
 
   // Handle keydown in the input field
@@ -1046,12 +1092,8 @@ export default function DatasetsPage() {
                             </div>
                             <div className="flex-1 min-w-0">
                               <h3 className="text-sm font-medium leading-tight line-clamp-2 mb-0.5">{dataset.title}</h3>
-                              <p className="text-xs text-neutral-500 truncate">
-                                {dataset.organization?.title || 
-                                 dataset.organization_title || 
-                                 dataset.organization?.name || 
-                                 dataset.organization_name || 
-                                 'Unknown source'}
+                              <p className="text-xs text-neutral-500 truncate" title={getOrganizationName(dataset)}>
+                                {getOrganizationName(dataset)}
                               </p>
                               <div className="mt-1 flex flex-wrap gap-1.5">
                                 <Badge variant="outline" className="text-xs">
@@ -1350,7 +1392,7 @@ export default function DatasetsPage() {
                                 <div className="h-8 w-8 rounded overflow-hidden bg-neutral-200 flex-shrink-0">
                                   <img 
                                     src={getImageUrl(dataset)} 
-                                    alt={`${dataset.organization?.title || 'Dataset'} logo`}
+                                    alt={`${getOrganizationName(dataset)} logo`}
                                     className="w-full h-full object-cover"
                                     onError={(e) => {
                                       const target = e.target as HTMLImageElement;
@@ -1362,16 +1404,8 @@ export default function DatasetsPage() {
                               <TableCell className="py-2 max-w-[250px] w-[250px]" onClick={() => handleDatasetSelect(dataset)}>
                                 <div className="overflow-hidden">
                                   <p className="font-medium text-sm truncate" title={dataset.title}>{dataset.title}</p>
-                                  <p className="text-xs text-neutral-500 truncate" title={dataset.organization?.title || 
-                                     dataset.organization_title || 
-                                     dataset.organization?.name || 
-                                     dataset.organization_name || 
-                                     'Unknown source'}>
-                                    {dataset.organization?.title || 
-                                     dataset.organization_title || 
-                                     dataset.organization?.name || 
-                                     dataset.organization_name || 
-                                     'Unknown source'}
+                                  <p className="text-xs text-neutral-500 truncate" title={getOrganizationName(dataset)}>
+                                    {getOrganizationName(dataset)}
                                   </p>
                                 </div>
                               </TableCell>

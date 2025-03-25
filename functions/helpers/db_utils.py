@@ -24,7 +24,7 @@ def get_db_connection():
         if os.getenv('FUNCTIONS_EMULATOR'):
             # Local development - connect via local Cloud SQL Proxy
             conn = psycopg2.connect(
-                host=os.environ.get('DB_HOST', 'localhost'),
+                host=os.environ.get('DB_HOST', '0.0.0.0'),
                 database=os.environ.get('DB_NAME'),
                 user=os.environ.get('DB_USER'),
                 password=os.environ.get('DB_PASSWORD'),
@@ -144,7 +144,7 @@ def get_usable_resources(dataset_id):
     try:
         # Query the database for resources
         query = """
-        SELECT id, name, url, description, format
+        SELECT resource_id, name, url, description, format
         FROM factchecker_datasetresource
         WHERE dataset_id = %s AND url IS NOT NULL
         """
@@ -154,7 +154,7 @@ def get_usable_resources(dataset_id):
         formatted_resources = []
         for resource in resources:
             formatted_resources.append({
-                "id": resource["id"],
+                "id": resource["resource_id"],
                 "name": resource["name"],
                 "url": resource["url"],
                 "description": resource["description"],
@@ -164,4 +164,50 @@ def get_usable_resources(dataset_id):
         return formatted_resources
     except Exception as e:
         logger.error(f"Error getting resources for dataset {dataset_id}: {e}")
-        return [] 
+        return []
+
+def get_usable_resources_batch(dataset_ids):
+    """
+    Get usable resources for multiple datasets in a single query.
+    
+    Args:
+        dataset_ids: List of dataset IDs
+        
+    Returns:
+        Dictionary mapping dataset_ids to lists of resource dictionaries
+    """
+    try:
+        if not dataset_ids:
+            return {}
+            
+        # Convert all dataset_ids to strings for consistent keys
+        dataset_ids = [str(ds_id) for ds_id in dataset_ids]
+            
+        # Use a more efficient query with JOIN if you need to filter by other conditions
+        query = """
+        SELECT r.resource_id, r.dataset_id, r.name, r.url, r.description, r.format
+        FROM factchecker_datasetresource r
+        WHERE r.dataset_id = ANY(%s) AND r.url IS NOT NULL
+        """
+        
+        # Use the pooled connection for better performance
+        resources = execute_query(query, (dataset_ids,))
+        
+        # Pre-allocate the result dictionary with empty lists
+        result = {ds_id: [] for ds_id in dataset_ids}
+        
+        # Group resources by dataset_id
+        for resource in resources:
+            ds_id = str(resource["dataset_id"])
+            result[ds_id].append({
+                "id": resource["resource_id"],
+                "name": resource["name"],
+                "url": resource["url"],
+                "description": resource["description"],
+                "format": resource["format"]
+            })
+        
+        return result
+    except Exception as e:
+        logger.error(f"Error getting batch resources for datasets: {e}")
+        return {} 

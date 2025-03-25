@@ -10,38 +10,33 @@ import time
 import os
 import sys
 import datetime
+from dotenv import load_dotenv
+# This line will add the project's root folder to sys.path
+sys.path.append(
+    os.path.join(os.path.dirname(__file__), "../../")
+)
 
-# Add the parent directory to sys.path so Python can find your Django project
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-# Initialize Django
-import django
-django.setup()
-
+# Import the search functions
 from factchecker.search.pinecone_search import vector_search_datasets_pinecone
 from factchecker.search.search_utils import generate_similar_queries, parallel_search, single_search
 
+load_dotenv()
+# Set emulator flag for local testing
+os.environ["FUNCTIONS_EMULATOR"] = "True"
+
+# Set up local database connection for testing
+os.environ["DB_HOST"] = os.getenv("DB_HOST", "localhost")
+os.environ["DB_PORT"] = os.getenv("DB_PORT", "1234")
+os.environ["DB_USER"] = os.getenv("DB_USER", "postgres")
+os.environ["DB_PASSWORD"] = os.getenv("DB_PASSWORD", "")
+os.environ["DB_NAME"] = os.getenv("DB_NAME", "crystal")
+# Unset Cloud SQL connection if it exists
+if "INSTANCE_CONNECTION_NAME" in os.environ:
+    del os.environ["INSTANCE_CONNECTION_NAME"]
+
 # List of 20 diverse queries to test
 QUERIES = [
-    "air quality in greenwich village",
-    "electric vehicle adoption rates by state",
-    "gun murder rates in the southwest since 2015",
-    "climate change impact on coastal communities",
-    "public school funding disparities",
-    "healthcare access in rural areas",
-    "renewable energy production by state",
-    "income inequality trends 2010-2020",
-    "opioid crisis statistics by county",
-    "water quality in the great lakes",
-    "affordable housing availability in major cities",
-    "broadband internet access in underserved communities",
-    "vaccination rates by demographic groups",
-    "food deserts in urban areas",
-    "public transportation usage trends",
-    "small business growth after covid-19",
-    "forest fire frequency and severity",
-    "student loan debt distribution by age",
-    "maternal mortality rates by state",
-    "solar panel adoption in residential areas"
+    "How has median housing price changed in San Francisco since 2010?"
 ]
 
 def run_pinecone_test(output_file="pinecone_search_results.txt"):
@@ -51,7 +46,9 @@ def run_pinecone_test(output_file="pinecone_search_results.txt"):
     
     # Create output file path
     if not os.path.isabs(output_file):
-        output_file = os.path.join(settings.BASE_DIR, output_file)
+        # Use the current directory or specify another base directory
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        output_file = os.path.join(base_dir, output_file)
     
     with open(output_file, 'w') as f:
         f.write(f"Pinecone Search Results\n")

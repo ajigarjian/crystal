@@ -140,7 +140,7 @@ def stream_search_datasets(request):
     search_method = request_json.get('search_method', None)  # 'vector', 'keyword', or None for hybrid
     max_results = int(request_json.get('max_results', 15))
     census_max_results = int(request_json.get('census_max_results', 5))
-    relevance_threshold = float(request_json.get('relevance_threshold', 0.4))
+    relevance_threshold = 0.35 #hardcoded for now #float(request_json.get('relevance_threshold', 0.3)) 
     
     logger.info(f"Streaming search parameters: method={search_method}, threshold={similarity_threshold}, max_results={max_results}")
     

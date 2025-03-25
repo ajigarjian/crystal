@@ -340,7 +340,7 @@ class VectorSearcher:
             embedding = create_embeddings(text)
             
             # Debug the embedding type and shape
-            print(f"Embedding type: {type(embedding)}")
+            #print(f"Embedding type: {type(embedding)}")
             if hasattr(embedding, 'shape'):
                 print(f"Embedding shape: {embedding.shape}")
             elif isinstance(embedding, list):
@@ -520,7 +520,7 @@ class VectorSearcher:
                             continue
                             
                         # Debug the embedding
-                        print(f"Dataset {dataset.id} embedding type: {type(dataset.embedding)}")
+                        #print(f"Dataset {dataset.id} embedding type: {type(dataset.embedding)}")
                         if isinstance(dataset.embedding, bytes):
                             print(f"Dataset {dataset.id} embedding is bytes, length: {len(dataset.embedding)}")
                         
@@ -554,7 +554,7 @@ class VectorSearcher:
                         
                         # Calculate similarity
                         similarity = self._cosine_similarity(query_embedding, dataset_embedding)
-                        print(f"Dataset {dataset.id} similarity: {similarity}")
+                        #print(f"Dataset {dataset.id} similarity: {similarity}")
                         
                         # Add to results if above threshold
                         if similarity >= similarity_threshold:
