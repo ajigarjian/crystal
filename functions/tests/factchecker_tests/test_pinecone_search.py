@@ -1,5 +1,5 @@
 """
-Optimized script to test Pinecone search with 20 diverse queries.
+Optimized script to test Pinecone search function directly with 20 diverse queries.
 This version connects to Pinecone once for all queries.
 
 Usage:
