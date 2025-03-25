@@ -9,6 +9,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, scoped_session
+import psycopg2.pool
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -17,53 +18,117 @@ logger = logging.getLogger(__name__)
 _engine = None
 _Session = None
 
-def get_db_connection():
-    """Create and return a connection to the PostgreSQL database"""
-    try:
-        # Check if running in production or local environment
-        if os.getenv('FUNCTIONS_EMULATOR'):
-            # Local development - connect via local Cloud SQL Proxy
-            conn = psycopg2.connect(
-                host=os.environ.get('DB_HOST', '0.0.0.0'),
-                database=os.environ.get('DB_NAME'),
-                user=os.environ.get('DB_USER'),
-                password=os.environ.get('DB_PASSWORD'),
-                port=os.environ.get('DB_PORT', 1234)
-            )
-        else:
-            # Production environment - use Unix socket or public IP
-            db_instance = os.environ.get('DB_INSTANCE', 'crystal-2f87e:us-east4:crystal-sql')
-            db_name = os.environ.get('DB_NAME')
-            db_user = os.environ.get('DB_USER')
-            db_password = os.environ.get('DB_PASSWORD')
-            
-            # Try connecting via Unix socket first
-            try:
-                # Unix socket path for Cloud SQL
-                socket_dir = os.environ.get('DB_SOCKET_DIR', '/cloudsql')
-                unix_socket = f'{socket_dir}/{db_instance}'
+# Global connection pool
+_pool = None
+
+def get_connection_pool(min_conn=1, max_conn=5):
+    """Create or get the connection pool"""
+    global _pool
+    
+    if _pool is None:
+        try:
+            # Check if running in production or local environment
+            if os.getenv('FUNCTIONS_EMULATOR'):
+                # Local development pool
+                _pool = psycopg2.pool.ThreadedConnectionPool(
+                    min_conn, max_conn,
+                    host=os.environ.get('DB_HOST', '0.0.0.0'),
+                    database=os.environ.get('DB_NAME'),
+                    user=os.environ.get('DB_USER'),
+                    password=os.environ.get('DB_PASSWORD'),
+                    port=os.environ.get('DB_PORT', 1234)
+                )
+            else:
+                # Production environment - use Unix socket or public IP
+                db_instance = os.environ.get('DB_INSTANCE', 'crystal-2f87e:us-east4:crystal-sql')
+                db_name = os.environ.get('DB_NAME')
+                db_user = os.environ.get('DB_USER')
+                db_password = os.environ.get('DB_PASSWORD')
                 
-                conn = psycopg2.connect(
-                    dbname=db_name,
-                    user=db_user,
-                    password=db_password,
-                    host=unix_socket  # Use Unix socket in production
-                )
-            except Exception as socket_error:
-                logger.warning(f"Socket connection failed, trying public IP: {socket_error}")
-                # Fall back to public IP connection
-                conn = psycopg2.connect(
-                    dbname=db_name,
-                    user=db_user,
-                    password=db_password,
-                    host='34.48.13.135',  # Public IP address
-                    port=5432
-                )
-        
-        return conn
+                # Try connecting via Unix socket first
+                try:
+                    socket_dir = os.environ.get('DB_SOCKET_DIR', '/cloudsql')
+                    unix_socket = f'{socket_dir}/{db_instance}'
+                    
+                    _pool = psycopg2.pool.ThreadedConnectionPool(
+                        min_conn, max_conn,
+                        dbname=db_name,
+                        user=db_user,
+                        password=db_password,
+                        host=unix_socket
+                    )
+                except Exception as socket_error:
+                    logger.warning(f"Socket pool creation failed, trying public IP: {socket_error}")
+                    # Fall back to public IP connection
+                    _pool = psycopg2.pool.ThreadedConnectionPool(
+                        min_conn, max_conn,
+                        dbname=db_name,
+                        user=db_user,
+                        password=db_password,
+                        host='34.48.13.135',
+                        port=5432
+                    )
+            
+            logger.info("Connection pool created successfully")
+        except Exception as e:
+            logger.error(f"Failed to create connection pool: {e}")
+            raise
+    
+    return _pool
+
+def get_db_connection():
+    """Get a connection from the pool or create a new one if pool not available"""
+    pool = get_connection_pool()
+    try:
+        return pool.getconn()
     except Exception as e:
-        logger.error(f"Database connection error: {e}")
-        raise
+        logger.error(f"Error getting connection from pool: {e}")
+        # Fall back to creating a new connection if pool fails
+        try:
+            # Check if running in production or local environment
+            if os.getenv('FUNCTIONS_EMULATOR'):
+                # Local development - connect via local Cloud SQL Proxy
+                conn = psycopg2.connect(
+                    host=os.environ.get('DB_HOST', '0.0.0.0'),
+                    database=os.environ.get('DB_NAME'),
+                    user=os.environ.get('DB_USER'),
+                    password=os.environ.get('DB_PASSWORD'),
+                    port=os.environ.get('DB_PORT', 1234)
+                )
+            else:
+                # Production environment - use Unix socket or public IP
+                db_instance = os.environ.get('DB_INSTANCE', 'crystal-2f87e:us-east4:crystal-sql')
+                db_name = os.environ.get('DB_NAME')
+                db_user = os.environ.get('DB_USER')
+                db_password = os.environ.get('DB_PASSWORD')
+                
+                # Try connecting via Unix socket first
+                try:
+                    # Unix socket path for Cloud SQL
+                    socket_dir = os.environ.get('DB_SOCKET_DIR', '/cloudsql')
+                    unix_socket = f'{socket_dir}/{db_instance}'
+                    
+                    conn = psycopg2.connect(
+                        dbname=db_name,
+                        user=db_user,
+                        password=db_password,
+                        host=unix_socket  # Use Unix socket in production
+                    )
+                except Exception as socket_error:
+                    logger.warning(f"Socket connection failed, trying public IP: {socket_error}")
+                    # Fall back to public IP connection
+                    conn = psycopg2.connect(
+                        dbname=db_name,
+                        user=db_user,
+                        password=db_password,
+                        host='34.48.13.135',  # Public IP address
+                        port=5432
+                    )
+            
+            return conn
+        except Exception as e:
+            logger.error(f"Database connection error: {e}")
+            raise
 
 def get_sqlalchemy_engine():
     """Get or create a SQLAlchemy engine"""
