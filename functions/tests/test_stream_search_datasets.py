@@ -137,12 +137,12 @@ def run_local_search():
     """
     # Example request data
     request_data = {
-        "query": "EV",
+        "query": "Philly crime stats",
         "similarity_threshold": 0.3,
         "search_method": None,  # None for hybrid search
         "max_results": 15,
         "census_max_results": 5,
-        "relevance_threshold": 0.4
+        "relevance_threshold": 0.35
     }
     
     print(f"Running search with query: {request_data['query']}")

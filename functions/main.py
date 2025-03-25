@@ -176,7 +176,7 @@ def stream_search_datasets(request):
                 db = firestore.client()
                 
                 # Create a document with the search results
-                search_ref = db.collection('searches').document()
+                search_ref = db.collection('queries').document()
                 
                 # Add the search data
                 search_ref.set({

@@ -116,17 +116,26 @@ def get_usable_resources(dataset_id: str, verbose: bool = False) -> List[Dict]:
 def generate_similar_queries(original_query: str, num_variations: int = 5) -> List[str]:
     """
     Generate similar queries to the original query using LLM.
+    Also creates a shortened version of long or specific queries.
     
     Args:
         original_query: The original search query
-        num_variations: Number of variations to generate (default: 2)
+        num_variations: Number of variations to generate (default: 5)
         
     Returns:
         List of queries including the original plus variations
     """
     try:
         # Prepare the prompt for the LLM
-        prompt = f"""You are looking for datasets on the web. Generate {num_variations} simple similar search queries for locating related datasets. Format the response as a JSON array of strings.
+        prompt = f"""You are looking for datasets on the web. Generate {num_variations} simple similar search queries for locating related datasets. 
+
+Additionally, if the original query is long or very specific, include a shortened, more general version.
+For example:
+- "Rodent population on the east coast over the past 5 years" → "rodents"
+- "Average household income in rural counties of Texas 2010-2020" → "Texas income"
+- "COVID-19 vaccination rates by demographic groups in California" → "vaccination demographics"
+
+Format the response as a JSON array of strings.
 
 Original query: "{original_query}"
 
@@ -134,17 +143,17 @@ EXAMPLES:
 User Query 1: Real estate prices in San Francisco since 2020
 
 Example response format:
-["San Franscio housing prices", "real estate San Francisco", "California Pandemic Home Pricing", "SF real estate"]
+["San Francisco housing prices", "real estate San Francisco", "California Pandemic Home Pricing", "SF real estate", "housing market"]
 
 User Query 2: vaccination rates by demographic groups
 
 Example response format:
-["Immunizations", "vaccines", "immunized"]
+["Immunizations", "vaccines", "immunized", "vaccination demographics", "vaccine uptake"]
 
 User Query 3: how has the high school graduation rate in Philadelphia changed over time?
 
 Example response format:
-["Philly schools", "Philadelphia schools", "School performance PA", "School performance Philadelphia", "High Schools PA"]
+["Philly schools", "Philadelphia schools", "School performance PA", "School performance Philadelphia", "graduation rates"]
 
 Your response (JSON array only):"""
 

@@ -62,7 +62,7 @@ def validate_extraction_results(
     
     # Create prompt for OpenAI
     prompt = f"""
-You are validating the results of a data extraction operation.
+You are validating the results of a data extraction operation. It is the year 2025.
 
 USER QUERY: "{query}"
 
@@ -147,6 +147,7 @@ def evaluate_query_answer_quality(
     # Create prompt for OpenAI to evaluate answer quality
     prompt = f"""
 You are evaluating how well the extracted data answers the user's query. Your goal is to ensure the data provides the most relevant and complete answer possible from this dataset.
+It is the year 2025.
 
 USER QUERY: "{query}"
 
