@@ -13,7 +13,7 @@ import concurrent.futures
 from threading import Lock
 import random
 
-from helpers.db_utils import execute_query, get_db_connection, get_db_session
+from helpers.db_utils import execute_query, get_db_connection, get_connection_pool
 from helpers.stream_search_datasets import stream_search_datasets_helper
 
 from dotenv import load_dotenv
@@ -57,6 +57,15 @@ def stream_search_datasets(request):
         return https_fn.Response(
             json.dumps({"error": "No JSON data provided"}),
             status=400,
+            headers={"Content-Type": "application/json"}
+        )
+    
+        # Handle warming requests quickly
+    if request_json.get('warming'):
+        logger.info("Warming request received for stream_search_datasets")
+        return https_fn.Response(
+            json.dumps({"status": "warmed"}),
+            status=200,
             headers={"Content-Type": "application/json"}
         )
     
@@ -157,7 +166,6 @@ def register_waitlist(request):
             data = json.loads(request.data)
         else:
             data = {}
-        logger.info(f"Request data: {request.data}")
     except json.JSONDecodeError:
         logger.error("Invalid JSON data")
         return https_fn.Response(
@@ -166,6 +174,15 @@ def register_waitlist(request):
             headers={"Content-Type": "application/json"}
         )
 
+    # Handle warming requests quickly
+    if data.get('warming'):
+        logger.info("Warming request received for register_waitlist")
+        return https_fn.Response(
+            json.dumps({"status": "warmed"}),
+            status=200,
+            headers={"Content-Type": "application/json"}
+        )
+    
     if not data:
         logger.error("No data provided")
         return https_fn.Response(
@@ -187,9 +204,13 @@ def register_waitlist(request):
         )
 
     try:
-        conn = get_db_connection()
+        # Get connection from pool
+        pool = get_connection_pool()
+        conn = pool.getconn()
+        
         try:
             with conn.cursor() as cursor:
+                # Use a prepared statement for better performance
                 cursor.execute("SELECT id FROM factchecker_waitlistentry WHERE email = %s", (email,))
                 existing = cursor.fetchone()
                 
@@ -227,7 +248,8 @@ def register_waitlist(request):
             conn.rollback()
             raise
         finally:
-            conn.close()
+            # Return connection to the pool instead of closing it
+            pool.putconn(conn)
     except Exception as e:
         logger.error(f"Error registering for waitlist: {e}")
         logger.error(traceback.format_exc())

@@ -221,4 +221,46 @@ export const processDatasetChunks = (chunks: any[]) => {
     finalStatus,
     statusMessages
   };
+};
+
+// Add this new function to warm up Firebase Functions
+export const warmFunctions = async () => {
+  if (process.env.NODE_ENV === 'development') {
+    console.log('Skipping function warming in development mode');
+    return;
+  }
+  
+  try {
+    // Get the region and project ID
+    const region = functions.region || 'us-central1';
+    const projectId = firebaseConfig.projectId;
+    const baseUrl = `https://${region}-${projectId}.cloudfunctions.net`;
+    
+    // List of functions to warm
+    const functionsToWarm = [
+      'register_waitlist',
+      'stream_search_datasets'
+    ];
+    
+    // Warm each function with a minimal payload
+    functionsToWarm.forEach(async (functionName) => {
+      const url = `${baseUrl}/${functionName}`;
+      
+      try {
+        await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ warming: true }),
+        });
+        console.log(`Warmed function: ${functionName}`);
+      } catch (e) {
+        // Silently ignore errors during warming
+      }
+    });
+  } catch (error) {
+    // Don't let warming errors affect the user experience
+    console.log('Function warming failed silently');
+  }
 }; 

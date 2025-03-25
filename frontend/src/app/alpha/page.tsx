@@ -32,7 +32,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Progress } from "@/components/ui/progress";
 import { AlertCircle, CheckCircle2, FileText, Database, ArrowRight, Download, FileCheck, Loader2 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
-import { streamSearchDatasets } from "@/lib/firebase";
+import { streamSearchDatasets, warmFunctions } from "@/lib/firebase";
 
 interface Resource {
   id: string;
@@ -792,6 +792,11 @@ export default function DatasetsPage() {
       padding: 0,
     }
   };
+
+  // Add this effect to warm functions when the page loads
+  useEffect(() => {
+    warmFunctions();
+  }, []);
 
   return (
     <>

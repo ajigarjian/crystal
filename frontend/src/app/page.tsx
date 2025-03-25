@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { useEffect, useRef, useState } from "react";
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
+import { warmFunctions } from "@/lib/firebase";
 
 // Pre-generate the data text outside the component
 const DATA_TEXTS = generateDataTexts(150);
@@ -203,6 +204,11 @@ export default function Home() {
         container.removeEventListener('mousemove', handleMouseMove);
       }
     };
+  }, []);
+
+  // Add this effect to warm functions when the page loads
+  useEffect(() => {
+    warmFunctions();
   }, []);
 
   return (
