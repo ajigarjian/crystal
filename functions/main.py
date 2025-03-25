@@ -34,7 +34,12 @@ firebase_admin.initialize_app()
 
 @https_fn.on_request(
     cors=options.CorsOptions(
-        cors_origins=["*"],
+        cors_origins=[
+        "https://crystal-2f87e.web.app",
+        "https://askcrystal.info",
+        "http://localhost:3000",
+        "http://localhost:5173",
+        ],
         cors_methods=["get", "post"],
     ),
     memory=options.MemoryOption.MB_512
@@ -135,6 +140,7 @@ def stream_search_datasets(request):
     cors=options.CorsOptions(
         cors_origins=[
             "https://crystal-2f87e.web.app",
+            "https://askcrystal.info",
             "http://localhost:3000",
             "http://localhost:5173",
         ],
