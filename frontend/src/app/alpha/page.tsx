@@ -84,6 +84,22 @@ interface Dataset {
   primary_file?: string;
   preview?: DatasetPreview;
   isRemoving?: boolean;
+  
+  // Add these new fields
+  census_metadata?: {
+    geo_level?: string;
+    location?: string;
+    api_endpoint?: string;
+    dataset_id?: string;
+    dataset_path?: string;
+    query_context?: {
+      core_query?: string;
+      filters?: Record<string, string>;
+    };
+    vintage?: number;
+  };
+  vintage?: number;
+  geographic_levels?: string[];
 }
 
 interface DatasetPreview {
@@ -880,6 +896,17 @@ export default function DatasetsPage() {
     
     setProcessingDatasets(initialProcessingState);
     
+    // Collect census metadata for selected datasets
+    const censusMetadata = {};
+    datasets.forEach(dataset => {
+      if (selectedDatasets[dataset.id] && dataset.census_metadata) {
+        censusMetadata[dataset.id] = dataset.census_metadata;
+      }
+    });
+    
+    // Debug log
+    console.log("Census metadata being sent to analysis:", censusMetadata);
+    
     try {
       // Use the correct API route in Next.js
       const response = await fetch('/api/stream-analyze', {
@@ -890,6 +917,7 @@ export default function DatasetsPage() {
         body: JSON.stringify({
           query: query,
           dataset_ids: datasetIds,
+          census_metadata: censusMetadata // Add this line
         }),
       });
       
@@ -1522,7 +1550,8 @@ export default function DatasetsPage() {
                         key={dataset.id}
                         className={`overflow-hidden hover:shadow-md transition-shadow cursor-pointer 
                                    hover:border-green-200 flex flex-col border-neutral-200 
-                                   ${dataset.isRemoving ? 'removing' : 'animate-fadeIn'}`}
+                                   ${dataset.isRemoving ? 'removing' : 'animate-fadeIn'}
+                                   relative`}
                         onClick={() => handleDatasetSelect(dataset)}
                         style={style}
                       >
@@ -1809,7 +1838,6 @@ export default function DatasetsPage() {
                           <TableHead className="w-[80px] text-center">Files</TableHead>
                           <TableHead className="w-[100px] text-center">Relevance</TableHead>
                           <TableHead className="w-[150px] text-center">Status</TableHead>
-                          <TableHead className="w-[60px] text-center">Download</TableHead>
                           <TableHead className="w-[100px] text-center">Include in Analysis</TableHead>
                         </TableRow>
                       </TableHeader>
@@ -1840,7 +1868,7 @@ export default function DatasetsPage() {
                                   />
                                 </div>
                               </TableCell>
-                              <TableCell className="py-2 max-w-[250px] w-[250px]" onClick={() => handleDatasetSelect(dataset)}>
+                              <TableCell className="py-2 max-w-[350px] w-[350px]" onClick={() => handleDatasetSelect(dataset)}>
                                 <div className="overflow-hidden">
                                   <p className="font-medium text-sm truncate" title={dataset.title}>{dataset.title}</p>
                                   <p className="text-xs text-neutral-500 truncate" title={dataset.organization?.title || 
@@ -1897,21 +1925,6 @@ export default function DatasetsPage() {
                                 )}
                               </TableCell>
                               
-                              <TableCell className="text-center">
-                                <Button 
-                                  variant="ghost" 
-                                  size="sm" 
-                                  className="h-7 w-7 p-0 rounded-full"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    // Implementation for download functionality would go here
-                                    console.log(`Download dataset ${dataset.id}`);
-                                  }}
-                                  title="Download Dataset"
-                                >
-                                  <Download className="h-3.5 w-3.5" />
-                                </Button>
-                              </TableCell>
                               <TableCell className="text-center">
                                 <Checkbox
                                   defaultChecked={selectedDatasets[dataset.id] || false}

@@ -8,6 +8,7 @@ import os
 import time
 import uuid
 import datetime
+import re
 
 from factchecker.models import DatasetCatalog
 from factchecker.processing.analysis.dataset_analyzer import ExtendedJSONEncoder
@@ -405,23 +406,113 @@ def summarize_findings_structured(
     # If we have usable data, generate a proper summary
     print(f"[DEBUG] Generating citations-included summary and key findings for {len(usable_datasets)} usable datasets")
     
-    # Now create a prompt for the LLM that requests numeric citations in the summary
+    # Create a detailed data summary for each source
+    source_data_summaries = []
+    for source in key_sources:
+        source_id = source["citation_id"]
+        source_title = source["title"]
+        dataset_id = source["id"]
+        
+        # Get the source's data from source_details
+        source_data = source_details[dataset_id]["data"]
+        
+        # Start building the summary
+        data_summary = f"[{source_id}] {source_title} ({source['organization']})\n"
+        
+        # Add dataset metadata and description
+        data_summary += "\nDATASET INFORMATION:\n"
+        data_summary += f"ID: {dataset_id}\n"
+        if dataset_analyses:
+            for analysis in dataset_analyses:
+                if analysis.get('dataset_id') == dataset_id:
+                    # Add row and column counts
+                    if 'row_count' in analysis and 'column_count' in analysis:
+                        data_summary += f"Size: {analysis['row_count']} rows, {analysis['column_count']} columns\n"
+                    
+                    # Add temporal scope
+                    if 'temporal_scope' in analysis and analysis['temporal_scope']:
+                        data_summary += f"Time Range: {analysis['temporal_scope']}\n"
+                    
+                    # Add geographic scope
+                    if 'geographic_scope' in analysis and analysis['geographic_scope']:
+                        geo_info = [f"{k}: {v}" for k, v in analysis['geographic_scope'].items()]
+                        data_summary += f"Geographic Scope: {'; '.join(geo_info)}\n"
+                    
+                    # Add analysis if available
+                    if 'analysis' in analysis:
+                        data_summary += f"\nANALYSIS:\n{analysis['analysis']}\n"
+        
+        # Add the natural language description of numerical data
+        if isinstance(source_data, dict) and "description" in source_data:
+            data_summary += f"\nNUMERICAL DATA SUMMARY:\n{source_data['description']}\n"
+        
+        # Add any specific data points we found
+        source_data_points = [dp for dp in key_data_points if dp["dataset_title"] == source_title]
+        if source_data_points:
+            data_summary += "\nSPECIFIC METRICS:\n"
+            for dp in source_data_points:
+                value = dp["value"]
+                if isinstance(value, float):
+                    formatted_value = f"{value:,.2f}"
+                elif isinstance(value, (int, np.integer)):
+                    formatted_value = f"{value:,}"
+                else:
+                    formatted_value = str(value)
+                data_summary += f"  - {dp['metric_name']}: {formatted_value}\n"
+        
+        # Add sample data if available
+        for data in extracted_data_list:
+            if data.get('dataset_id') == dataset_id:
+                extracted = data.get('extracted_data')
+                extraction_explanation = data.get('explanation', '')
+                
+                if extraction_explanation:
+                    data_summary += f"\nEXTRACTION DETAILS:\n{extraction_explanation}\n"
+                
+                if isinstance(extracted, pd.DataFrame) and not extracted.empty:
+                    data_summary += "\nSAMPLE DATA:\n"
+                    sample_df = extracted.head(5)
+                    for idx, row in sample_df.iterrows():
+                        data_summary += f"- {', '.join([f'{col}: {val}' for col, val in row.items() if pd.notna(val)])}\n"
+                    
+                    # Add summary statistics for numeric columns
+                    numeric_cols = sample_df.select_dtypes(include=[np.number]).columns
+                    if len(numeric_cols) > 0:
+                        data_summary += "\nSTATISTICAL SUMMARY:\n"
+                        for col in numeric_cols:
+                            if "unemploy" in col.lower():
+                                data_summary += f"- {col}: min={extracted[col].min()}, max={extracted[col].max()}, avg={extracted[col].mean():.2f}\n"
+        
+        # Add raw numerical findings if available
+        if isinstance(source_data, dict) and "numerical_findings" in source_data:
+            data_summary += "\nALL NUMERICAL DATA POINTS:\n"
+            for finding in source_data["numerical_findings"]:
+                data_summary += f"  - {finding}\n"
+        
+        source_data_summaries.append(data_summary)
+    
+    # Now create a prompt for the LLM that includes both the sources and their data
     citation_prompt = f"""
         You are analyzing data to answer: "{query}"
 
         Your task is to write two sections:
-        1. A detailed SUMMARY of the findings (250-400 words). Do not include a word count in your output.
-        2. 3-5 KEY FINDINGS (1-2 sentences each)
+        1. A detailed SUMMARY of the findings (250-400 words) that incorporates the specific numerical data provided below.
+        2. 3-5 KEY FINDINGS (1-2 sentences each) that highlight the most important numerical insights. Put a newline between each finding.
 
-        IMPORTANT: For both sections, you MUST cite the source of each claim using the citation format [N] where N is the source number.
+        IMPORTANT: For both sections:
+        - You MUST cite the source of each claim using the citation format [N] where N is the source number
+        - You MUST incorporate the actual numerical data provided below
+        - Use the dataset context, descriptions, and specific metrics provided
+        - Consider both the statistical summaries and sample data when relevant
+        - Do not make claims without supporting data
+        - If multiple sources support a claim, you can list them like [1, 2]
 
-        Available sources to cite:
-        {chr(10).join([f'[{s["citation_id"]}] {s["title"]} ({s["organization"]})' for s in key_sources])}
+        Available sources and their data:
+        {chr(10).join(source_data_summaries)}
 
-        For example: "Vaccination rates increased by 30% since 2018 [1]. However, some neighborhoods still experience lower coverage [2]."
-
-        Make sure EVERY factual claim has a citation based on the dataset description or extracted data. Do not make up citations. If multiple sources support a claim, you can list them like [1, 2].
-        Be specific with numbers and data points.
+        Make sure EVERY factual claim has a citation and includes specific numbers from the data provided.
+        Focus on presenting the numerical insights in a clear, meaningful way.
+        Use the dataset context and descriptions to provide proper framing for the statistics.
         """
     
     # Get citations-included summary and key findings using reasoning_completion
@@ -449,8 +540,8 @@ def summarize_findings_structured(
     # Try to split content into summary and key findings
     if "SUMMARY" in cited_content and "KEY FINDINGS" in cited_content:
         parts = cited_content.split("KEY FINDINGS")
-        summary_with_citations = parts[0].replace("SUMMARY", "").strip()
-        findings_part = parts[1].strip()
+        summary_with_citations = parts[0].replace("SUMMARY", "").strip(": ").strip()
+        findings_part = parts[1].strip(": ").strip()
     else:
         # If we can't split cleanly, use the whole text as summary
         summary_with_citations = cited_content.strip()
@@ -459,17 +550,21 @@ def summarize_findings_structured(
     # Parse findings with flexible format handling
     if findings_part:
         # Try multiple pattern matching approaches
-        import re
-        numbered_findings = re.findall(r'\d+\.[\s\:]+(.*?)(?=\d+\.|$)', findings_part, re.DOTALL)
+        # Adjust the regex to account for newlines between findings
+        numbered_findings = re.findall(r'\d+\.\s+(.*?)(?=\n\d+\.|\Z)', findings_part, re.DOTALL)
         if numbered_findings and all(finding.strip() for finding in numbered_findings):
             findings_with_citations = [finding.strip() for finding in numbered_findings]
         elif '•' in findings_part:
-            bullet_findings = re.findall(r'•\s+(.*?)(?=•|\Z)', findings_part, re.DOTALL)
+            bullet_findings = re.findall(r'•\s+(.*?)(?=\n•|\Z)', findings_part, re.DOTALL)
             if bullet_findings:
                 findings_with_citations = [finding.strip() for finding in bullet_findings]
         else:
             findings_with_citations = [line.strip() for line in findings_part.split('\n') 
                                       if line.strip() and not line.strip().startswith(('KEY', 'FINDINGS'))]
+    
+        # After generating the summary and key findings
+    summary_with_citations = format_numbers(summary_with_citations)
+    findings_with_citations = [format_numbers(finding) for finding in findings_with_citations]
     
     # Format the sources for the final output - fetch organization from the database
     from factchecker.models import DatasetCatalog
@@ -520,64 +615,71 @@ def format_citation(organization, year, title, source):
 
 def extract_usable_data(data_structure, dataset_title):
     """
-    Recursively search through any data structure to find usable data.
-    Returns the first DataFrame, non-empty list, or meaningful dictionary found.
+    Recursively search through any data structure and generate a plain English
+    description of all numerical data found.
     """
     print(f"[DEBUG] Examining data structure: {type(data_structure)}")
     
-    # Base case: If we have a DataFrame, use it
-    if isinstance(data_structure, pd.DataFrame):
-        if not data_structure.empty:
-            print(f"[DEBUG] Found usable DataFrame with shape {data_structure.shape}")
-            return data_structure
-        else:
-            print(f"[DEBUG] Found empty DataFrame, continuing search")
-            return None
-    
-    # If we have a list with content, use it
-    elif isinstance(data_structure, list):
-        if len(data_structure) > 0:
-            print(f"[DEBUG] Found usable list with {len(data_structure)} items")
-            return data_structure
-        else:
-            print(f"[DEBUG] Found empty list, continuing search")
-            return None
-    
-    # If we have a dictionary, recursively search its values
-    elif isinstance(data_structure, dict):
-        print(f"[DEBUG] Searching dictionary with keys: {list(data_structure.keys())}")
+    # Helper function to collect all numerical data with its path
+    def collect_numerical_data(structure, path=""):
+        findings = []
         
-        # First, look for DataFrames
-        for key, value in data_structure.items():
-            if isinstance(value, pd.DataFrame) and not value.empty:
-                print(f"[DEBUG] Found DataFrame in key '{key}' with shape {value.shape}")
-                return value
+        if isinstance(structure, dict):
+            for key, value in structure.items():
+                current_path = f"{path}.{key}" if path else key
+                if isinstance(value, (int, float)):
+                    findings.append(f"{current_path}: {value}")
+                elif isinstance(value, dict):
+                    findings.extend(collect_numerical_data(value, current_path))
+                elif isinstance(value, list) and len(value) > 0:
+                    findings.append(f"{current_path}: list with {len(value)} items")
         
-        # Next, look for non-empty lists
-        for key, value in data_structure.items():
-            if isinstance(value, list) and len(value) > 0:
-                print(f"[DEBUG] Found non-empty list in key '{key}' with {len(value)} items")
-                return value
-        
-        # Then, recursively search nested dictionaries
-        for key, value in data_structure.items():
-            if isinstance(value, dict):
-                nested_result = extract_usable_data(value, dataset_title)
-                if nested_result is not None:
-                    print(f"[DEBUG] Found usable data in nested key '{key}'")
-                    return nested_result
-        
-        # If dictionary has content but no nested structures, it might be usable itself
-        if len(data_structure) > 0:
-            print(f"[DEBUG] Using dictionary itself as data")
-            return data_structure
+        return findings
+
+    # Collect all numerical data
+    all_findings = collect_numerical_data(data_structure)
     
-    # Check other types that might be directly usable
-    elif isinstance(data_structure, pd.Series):
-        if not data_structure.empty:
-            print(f"[DEBUG] Found usable Series with length {len(data_structure)}")
-            return data_structure
-    
-    # If nothing usable found
-    print(f"[WARNING] No usable data found in this structure for dataset {dataset_title}")
-    return None
+    if not all_findings:
+        print(f"[WARNING] No numerical data found in this structure for dataset {dataset_title}")
+        return None
+
+    # Create prompt for OpenAI to summarize the data
+    prompt = f"""
+You are analyzing data from a dataset titled: "{dataset_title}"
+
+The following numerical data points were found:
+{chr(10).join(all_findings)}
+
+Please provide a clear, concise description of this data in 2-3 sentences.
+Focus on the actual numbers and their relationships.
+Be specific and include the most important numerical values.
+Do not make general statements - use the exact numbers provided.
+"""
+
+    # Get plain English description using chat_completion
+    try:
+        from factchecker.utils.openai_client import chat_completion
+        description = chat_completion(
+            prompt=prompt,
+            system_message="You are a data analyst who specializes in describing numerical data clearly and concisely.",
+            temperature=0.1  # Keep it very factual
+        )
+        
+        # Return both the original data and the plain English description
+        return {
+            "data": data_structure,
+            "description": description,
+            "numerical_findings": all_findings
+        }
+        
+    except Exception as e:
+        print(f"[WARNING] Error generating description: {e}")
+        return {
+            "data": data_structure,
+            "description": "Error generating description",
+            "numerical_findings": all_findings
+        }
+
+def format_numbers(text):
+    # Regex to find numbers with decimals
+    return re.sub(r'(\d+\.\d{2})\d*', r'\1', text)

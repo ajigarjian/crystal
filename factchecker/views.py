@@ -477,8 +477,8 @@ def stream_search_datasets(request):
     # Get optional parameters with defaults
     similarity_threshold = float(request.data.get('similarity_threshold', 0.3))
     search_method = request.data.get('search_method', None)  # 'vector', 'keyword', or None for hybrid
-    max_results = int(request.data.get('max_results', 1))
-    census_max_results = int(request.data.get('census_max_results', 0))  # New parameter with default of 5
+    max_results = int(request.data.get('max_results', 15))
+    census_max_results = int(request.data.get('census_max_results', 5))  # New parameter with default of 5
     relevance_threshold = float(request.data.get('relevance_threshold', 0.4))
     
     print(f"Parameters: method={search_method}, threshold={similarity_threshold}, max_results={max_results}, census_max_results={census_max_results}")
@@ -616,18 +616,31 @@ def stream_search_datasets(request):
                 for result in census_results:
                     # Format the Census dataset to match our frontend structure
                     census_dataset = {
-                        'id': f"census-{result['id']}",  # Prefix with 'census-' to avoid ID collisions
+                        'id': f"census-{result['id']}",
                         'title': result['title'],
                         'description': result['description'],
                         'similarity': result['score'],
                         'relevance_score': result['score'],
                         'organization_name': 'U.S. Census Bureau',
                         'organization_title': 'United States Census Bureau',
-                        'resources': [],  # Will be populated with API endpoints
+                        'resources': [],
                         'search_source': 'census',
                         'vintage': result['vintage'],
                         'geographic_levels': result.get('geographic_levels', []),
-                        'image_url': '/images/census_logo.png',  # Add Census logo path
+                        'image_url': '/images/census_logo.png',
+                        
+                        # Add context needed for the API request - just the core info
+                        'census_metadata': {
+                            'geo_level': query_info.get('geo_level'),
+                            'location': query_info.get('location'),
+                            'api_endpoint': result['dataset'].api_endpoint,
+                            'dataset_id': result['id'],  # Original database ID (not prefixed)
+                            'dataset_path': result.get('path'),  # e.g. "acs/acs5"
+                            'query_context': {  # Save useful context about query
+                                'core_query': query_info.get('core_query'),
+                                'filters': query_info.get('filters', {})
+                            }
+                        }
                     }
                     
                     # Get and add tags from the dataset
@@ -978,6 +991,9 @@ def stream_analyze_datasets(request):
     # Get the query parameter and selected dataset IDs
     query = request.data.get('query', '')
     dataset_ids = request.data.get('dataset_ids', [])
+
+    # Get census metadata
+    census_metadata = request.data.get('census_metadata', {})
     
     if not query:
         print("No query provided")
@@ -989,9 +1005,10 @@ def stream_analyze_datasets(request):
     
     # Get optional parameters with defaults
     relevance_threshold = float(request.data.get('relevance_threshold', 0.4))
-    max_download_time = float(request.data.get('max_download_time', 60))
+    max_download_time = float(request.data.get('max_download_time', 120))  # Increased timeout to 120 seconds
     
     print(f"Parameters: query={query}, dataset_ids={dataset_ids}, relevance_threshold={relevance_threshold}")
+    print(f"Census metadata: {census_metadata}")
     logger.info(f"[API] Received analyze datasets request: '{query}' with {len(dataset_ids)} datasets")
     
     # Create a generator function that yields analysis results as they come in
@@ -1009,127 +1026,220 @@ def stream_analyze_datasets(request):
                 'timestamp': time.time() - start_time
             }, cls=NumpyEncoder) + '\n'
             
-            # Create temporary directory for downloads
-            import tempfile
-            with tempfile.TemporaryDirectory() as temp_dir:
-                output_dir = temp_dir
-                
-                # Process each dataset in sequence
-                results = []
-                dataset_analyses = []
-                extracted_data_list = []
-                
-                for idx, dataset_id in enumerate(dataset_ids):
+            # Create a fixed output directory at project root
+            import os
+            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            output_dir = os.path.join(project_root, 'downloads')
+            os.makedirs(output_dir, exist_ok=True)
+            logger.info(f"Using downloads directory: {output_dir}")
+            
+            # Process each dataset in sequence
+            results = []
+            dataset_analyses = []
+            extracted_data_list = []
+            
+            for idx, dataset_id in enumerate(dataset_ids):
+                try:
+                    current_dataset_number = idx + 1
+                    
+                    # Check if it's a Census dataset
+                    is_census = dataset_id.startswith('census-')
+                    
+                    # Get dataset metadata and download file if necessary
                     try:
-                        current_dataset_number = idx + 1
-                        
-                        # Check if it's a Census dataset
-                        is_census = dataset_id.startswith('census-')
-                        
-                        # Get dataset metadata
-                        try:
-                            if is_census:
-                                # For Census datasets, we need to handle them differently
-                                # Extract the actual ID from the "census-{id}" format
-                                census_id = dataset_id.replace('census-', '')
-                                
-                                # In a real implementation, we would get census dataset info from database
-                                # For now, create a minimal dataset info
-                                dataset = {
-                                    'id': dataset_id,
-                                    'title': f"Census Dataset {census_id}",
-                                    'description': "Census data",
-                                    'is_census': True,
-                                    'census_id': census_id
-                                }
-                                
-                                logger.info(f"Processing Census dataset: {dataset_id}")
+                        if is_census:
+                            # CENSUS DATASET PROCESSING
+                            import os
+                            import requests
+                            from factchecker.processing.analysis.extraction.census_dataset_extracter import recommend_census_variables, fetch_census_data
+                            from factchecker.models import CensusDataset, CensusVariable
+                            
+                            # Extract original dataset ID (without 'census-' prefix)
+                            original_dataset_id = dataset_id.replace('census-', '')
+                            
+                            # Get the dataset-specific metadata
+                            dataset_metadata = census_metadata.get(dataset_id, {})
+                            
+                            # Extract metadata for API request
+                            api_endpoint = dataset_metadata.get('api_endpoint')
+                            geo_level = dataset_metadata.get('geo_level')
+                            location = dataset_metadata.get('location')
+                            vintage = dataset_metadata.get('vintage')
+                            dataset_path = dataset_metadata.get('dataset_path')
+                            query_context = dataset_metadata.get('query_context', {})
+                            
+                            # Try to get a title for this Census dataset
+                            census_title = f"Census Dataset {original_dataset_id}"
+                            census_dataset = None
+                            
+                            try:
+                                census_dataset = CensusDataset.objects.get(id=original_dataset_id)
+                                census_title = census_dataset.title
+                            except CensusDataset.DoesNotExist:
+                                logger.error(f"Census dataset with ID {original_dataset_id} not found in database")
+                                yield json.dumps({
+                                    'type': 'status',
+                                    'message': f"Census dataset with ID {original_dataset_id} not found in database. Using generic title.",
+                                    'timestamp': time.time() - start_time
+                                }, cls=NumpyEncoder) + '\n'
+                            
+                            # Initial status update
+                            yield json.dumps({
+                                'type': 'status',
+                                'message': f"Processing dataset {current_dataset_number}/{len(dataset_ids)}: {census_title}",
+                                'timestamp': time.time() - start_time
+                            }, cls=NumpyEncoder) + '\n'
+                            
+                            # Update dataset status to downloading
+                            yield json.dumps({
+                                'type': 'dataset_processing',
+                                'dataset_id': dataset_id,
+                                'status': 'downloading',
+                                'progress': 0,
+                                'timestamp': time.time() - start_time
+                            }, cls=NumpyEncoder) + '\n'
+                            
+                            # Check if we need to download the file or if it already exists
+                            output_filename = f"{dataset_id}.json"
+                            output_path = os.path.join(output_dir, output_filename)
+                            
+                            if os.path.exists(output_path):
+                                # File already exists, skip download
+                                yield json.dumps({
+                                    'type': 'status',
+                                    'message': f"Using existing file: {output_path}",
+                                    'timestamp': time.time() - start_time
+                                }, cls=NumpyEncoder) + '\n'
                             else:
-                                # For Data.gov datasets, get from our database
-                                db_dataset = DatasetCatalog.objects.get(dataset_id=dataset_id)
+                                # File doesn't exist, need to download
+                                yield json.dumps({
+                                    'type': 'status',
+                                    'message': f"Finding relevant Census variables for {geo_level} in {location}...",
+                                    'timestamp': time.time() - start_time
+                                }, cls=NumpyEncoder) + '\n'
                                 
-                                # Get resources for this dataset
-                                resources = DatasetResource.objects.filter(dataset=db_dataset)
-                                
-                                if not resources:
+                                recommended_variables = {}
+                                if census_dataset:
+                                    # Get all variables for this dataset
+                                    variables = list(CensusVariable.objects.filter(dataset=census_dataset).values('id', 'variable_name', 'label', 'concept', 'group_name'))
+                                    
                                     yield json.dumps({
-                                        'type': 'error',
-                                        'message': f"No resources found for dataset: {db_dataset.title}",
+                                        'type': 'status',
+                                        'message': f"Found {len(variables)} variables for the Census dataset.",
+                                        'timestamp': time.time() - start_time
+                                    }, cls=NumpyEncoder) + '\n'
+                                    
+                                    # Get LLM recommendations for relevant variables
+                                    recommended_variables = recommend_census_variables(
+                                        query=query,
+                                        dataset=census_dataset,
+                                        available_variables=variables,
+                                        max_recommendations=4
+                                    )
+                                
+                                if recommended_variables:
+                                    yield json.dumps({
+                                        'type': 'status',
+                                        'message': f"Identified {len(recommended_variables)} relevant Census variables for your query: {', '.join(list(recommended_variables.keys())[:3])}{'...' if len(recommended_variables) > 3 else ''}",
+                                        'timestamp': time.time() - start_time
+                                    }, cls=NumpyEncoder) + '\n'
+                                    
+                                    # Extract variable names from the recommendations
+                                    variable_names = list(recommended_variables.keys())
+                                    
+                                    yield json.dumps({
+                                        'type': 'status',
+                                        'message': f"Fetching Census data from API for {geo_level} {location}...",
+                                        'timestamp': time.time() - start_time
+                                    }, cls=NumpyEncoder) + '\n'
+                                    
+                                    # Make the actual API call to fetch the data as JSON
+                                    output_path = fetch_census_data(
+                                        api_endpoint=api_endpoint,
+                                        variables=variable_names,
+                                        geo_level=geo_level,
+                                        output_dir=output_dir,
+                                        filename=output_filename,
+                                        location=location,
+                                        vintage=vintage,
+                                        dataset_path=dataset_path
+                                    )
+                                    
+                                    if output_path:
+                                        yield json.dumps({
+                                            'type': 'status',
+                                            'message': f"Successfully downloaded Census data to {output_path}",
+                                            'timestamp': time.time() - start_time
+                                        }, cls=NumpyEncoder) + '\n'
+                                        
+                                        # Save explanations for why each variable was selected
+                                        explanations = "\n".join([f"{var}: {reason}" for var, reason in recommended_variables.items()])
+                                        explanation_path = os.path.join(output_dir, f"{dataset_id}_explanations.txt")
+                                        with open(explanation_path, "w") as f:
+                                            f.write(f"Query: {query}\n\n")
+                                            f.write(f"Selected variables and reasons:\n{explanations}")
+                                    else:
+                                        # If API call failed, skip this dataset
+                                        yield json.dumps({
+                                            'type': 'status',
+                                            'message': f"Could not retrieve data from Census API. Skipping dataset.",
+                                            'timestamp': time.time() - start_time
+                                        }, cls=NumpyEncoder) + '\n'
+                                        continue
+                                else:
+                                    # If no recommended variables, skip this dataset
+                                    yield json.dumps({
+                                        'type': 'status',
+                                        'message': f"No specific variables identified. Skipping dataset.",
                                         'timestamp': time.time() - start_time
                                     }, cls=NumpyEncoder) + '\n'
                                     continue
-                                
-                                # Create dataset info dictionary from database
-                                dataset = {
-                                    'id': db_dataset.dataset_id,
-                                    'title': db_dataset.title,
-                                    'description': db_dataset.notes or "",
-                                    'organization_name': db_dataset.organization_name,
-                                    'organization_title': db_dataset.organization_title,
-                                    'resources': [
-                                        {
-                                            'id': resource.resource_id,
-                                            'name': resource.name,
-                                            'url': resource.url,
-                                            'description': resource.description,
-                                            'format': resource.format
-                                        }
-                                        for resource in resources
-                                    ],
-                                    'is_census': False
-                                }
-                                
-                                logger.info(f"Processing Data.gov dataset: {dataset['title']}")
                             
-                        except DatasetCatalog.DoesNotExist:
+                            # Mark download as complete
                             yield json.dumps({
-                                'type': 'error',
-                                'message': f"Dataset {dataset_id} not found in database",
+                                'type': 'dataset_processing',
+                                'dataset_id': dataset_id,
+                                'status': 'downloaded',
+                                'progress': 100,
                                 'timestamp': time.time() - start_time
                             }, cls=NumpyEncoder) + '\n'
-                            continue
-                        
-                        # Initial status update
-                        yield json.dumps({
-                            'type': 'status',
-                            'message': f"Processing dataset {current_dataset_number}/{len(dataset_ids)}: {dataset['title']}",
-                            'timestamp': time.time() - start_time
-                        }, cls=NumpyEncoder) + '\n'
-                        
-                        # Update dataset status to downloading
-                        yield json.dumps({
-                            'type': 'dataset_processing',
-                            'dataset_id': dataset_id,
-                            'status': 'downloading',
-                            'progress': 0,
-                            'timestamp': time.time() - start_time
-                        }, cls=NumpyEncoder) + '\n'
-                        
-                        # 1. DOWNLOAD: Get the resource
-                        if is_census:
-                            # Handle Census data differently
-                            # For now, we'll create a placeholder CSV with some sample data
-                            import pandas as pd
-                            import os
                             
-                            # Create a sample DataFrame for Census data
-                            df = pd.DataFrame({
-                                'Year': [2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020],
-                                'Value': [100, 105, 110, 115, 120, 125, 130, 135, 140, 145, 150],
-                                'Location': ['San Francisco'] * 11
-                            })
-                            
-                            # Save to temporary file
-                            output_path = os.path.join(output_dir, f"{dataset_id}.csv")
-                            df.to_csv(output_path, index=False)
-                            
-                            logger.info(f"Created Census sample data: {output_path}")
-                            
-                            # Set output paths
+                            # Set output paths list to include the downloaded or fallback JSON
                             output_paths = [output_path]
                             
+                            # Create a placeholder for dataset info to be populated later
+                            dataset = {
+                                'id': dataset_id,
+                                'title': census_title,
+                                'description': f"Census data for {query}"
+                            }
+                            
                         else:
-                            # For Data.gov datasets, find suitable resources
+                            # REGULAR DATASET PROCESSING
+                            # First fetch the dataset from database
+                            db_dataset = DatasetCatalog.objects.get(dataset_id=dataset_id)
+                            
+                            # Create dataset dictionary with necessary fields
+                            dataset = {
+                                'id': db_dataset.dataset_id,
+                                'title': db_dataset.title,
+                                'description': db_dataset.notes,
+                                'resources': []
+                            }
+                            
+                            # Get resources for this dataset
+                            resources = DatasetResource.objects.filter(dataset=db_dataset)
+                            dataset['resources'] = [
+                                {
+                                    'id': res.resource_id,
+                                    'name': res.name,
+                                    'url': res.url,
+                                    'description': res.description,
+                                    'format': res.format
+                                }
+                                for res in resources
+                            ]
+                            
                             # Find the first CSV/XLSX resource
                             resource = None
                             for res in dataset['resources']:
@@ -1145,546 +1255,609 @@ def stream_analyze_datasets(request):
                                 }, cls=NumpyEncoder) + '\n'
                                 continue
                             
+                            # Initial status update
+                            yield json.dumps({
+                                'type': 'status',
+                                'message': f"Processing dataset {current_dataset_number}/{len(dataset_ids)}: {dataset['title']}",
+                                'timestamp': time.time() - start_time
+                            }, cls=NumpyEncoder) + '\n'
+                            
+                            # Update dataset status to downloading
+                            yield json.dumps({
+                                'type': 'dataset_processing',
+                                'dataset_id': dataset_id,
+                                'status': 'downloading',
+                                'progress': 0,
+                                'timestamp': time.time() - start_time
+                            }, cls=NumpyEncoder) + '\n'
+                            
                             yield json.dumps({
                                 'type': 'status',
                                 'message': f"Downloading resource: {resource['name']}",
                                 'timestamp': time.time() - start_time
                             }, cls=NumpyEncoder) + '\n'
                             
-                            # Download the resource
-                            try:
-                                output_path = download_resource(
-                                    resource['url'], 
-                                    output_dir, 
-                                    filename=dataset['id'],
-                                    max_download_time=max_download_time
-                                )
-                                
-                                if not output_path:
+                            # Check if we already have the file
+                            potential_output_path = os.path.join(output_dir, f"{dataset['id']}")
+                            existing_files = [
+                                f for f in os.listdir(output_dir) 
+                                if f.startswith(dataset['id']) and 
+                                os.path.isfile(os.path.join(output_dir, f))
+                            ]
+                            
+                            if existing_files:
+                                # Use the existing file
+                                output_path = os.path.join(output_dir, existing_files[0])
+                                yield json.dumps({
+                                    'type': 'status',
+                                    'message': f"Using existing file: {output_path}",
+                                    'timestamp': time.time() - start_time
+                                }, cls=NumpyEncoder) + '\n'
+                            else:
+                                # Download the resource
+                                try:
+                                    output_path = download_resource(
+                                        resource['url'], 
+                                        output_dir, 
+                                        filename=dataset['id'],
+                                        max_download_time=max_download_time
+                                    )
+                                    
+                                    if not output_path:
+                                        yield json.dumps({
+                                            'type': 'error',
+                                            'message': f"Failed to download resource for dataset: {dataset['title']}",
+                                            'timestamp': time.time() - start_time
+                                        }, cls=NumpyEncoder) + '\n'
+                                        continue
+                                    
+                                except Exception as e:
                                     yield json.dumps({
                                         'type': 'error',
-                                        'message': f"Failed to download resource for dataset: {dataset['title']}",
+                                        'message': f"Error downloading resource: {str(e)}",
                                         'timestamp': time.time() - start_time
                                     }, cls=NumpyEncoder) + '\n'
                                     continue
-                                
-                                # Set output paths 
-                                output_paths = [output_path]
-                                
-                            except Exception as e:
-                                yield json.dumps({
-                                    'type': 'error',
-                                    'message': f"Error downloading resource: {str(e)}",
-                                    'timestamp': time.time() - start_time
-                                }, cls=NumpyEncoder) + '\n'
-                                continue
-                        
-                        yield json.dumps({
-                            'type': 'status',
-                            'message': f"Downloaded dataset: {dataset['title']}",
-                            'timestamp': time.time() - start_time
-                        }, cls=NumpyEncoder) + '\n'
-                        
-                        # Send download progress updates periodically
-                        # This would be integrated into your download_resource function
-                        # For now, we'll simulate it with a simple progress update
-                        yield json.dumps({
-                            'type': 'dataset_processing',
-                            'dataset_id': dataset_id,
-                            'status': 'downloading',
-                            'progress': 50,  # This would be the actual percentage
-                            'downloaded_size': 5000000,  # Sample size in bytes
-                            'file_size': 10000000,  # Sample total size
-                            'timestamp': time.time() - start_time
-                        }, cls=NumpyEncoder) + '\n'
-                        
-                        # Mark download as complete
-                        yield json.dumps({
-                            'type': 'dataset_processing',
-                            'dataset_id': dataset_id,
-                            'status': 'downloaded',
-                            'progress': 100,
-                            'timestamp': time.time() - start_time
-                        }, cls=NumpyEncoder) + '\n'
-                        
-                        # Update to loading state
-                        yield json.dumps({
-                            'type': 'dataset_processing',
-                            'dataset_id': dataset_id,
-                            'status': 'loading',
-                            'timestamp': time.time() - start_time
-                        }, cls=NumpyEncoder) + '\n'
-                        
-                        # 2. LOAD: Load the datafile 
-                        yield json.dumps({
-                            'type': 'status',
-                            'message': f"Loading data from file...",
-                            'timestamp': time.time() - start_time
-                        }, cls=NumpyEncoder) + '\n'
-                        
-                        try:
-                            datafile_content = load_datafile(output_paths[0])
-                        except Exception as e:
+                            
+                            # Set output paths 
+                            output_paths = [output_path]
+                            
+                            # Mark download as complete
                             yield json.dumps({
-                                'type': 'error',
-                                'message': f"Error loading datafile: {str(e)}",
+                                'type': 'dataset_processing',
+                                'dataset_id': dataset_id,
+                                'status': 'downloaded',
+                                'progress': 100,
                                 'timestamp': time.time() - start_time
                             }, cls=NumpyEncoder) + '\n'
-                            continue
-                        
-                        # Update dataset_info based on the content type
-                        is_pdf = isinstance(datafile_content, dict) and datafile_content.get('type') == 'pdf'
-                        
-                        if is_pdf:
-                            dataset_info = {
-                                "id": dataset['id'],
-                                "title": dataset['title'],
-                                "description": dataset.get('description', ''),
-                                "similarity": 1.0,  # Since these are pre-selected, set similarity to 1.0
-                                "file_path": output_paths[0],
-                                "all_file_paths": output_paths,
-                                "is_census": is_census
-                            }
-                            
-                            dataset_info.update({
-                                "document_type": "pdf",
-                                "num_pages": datafile_content.get("num_pages", 0),
-                                "text_sample": datafile_content.get("text_sample", "")[:200] + "..."
-                            })
                             
                             yield json.dumps({
                                 'type': 'status',
-                                'message': f"Loaded PDF document with {datafile_content.get('num_pages', 0)} pages",
+                                'message': f"Downloaded dataset: {dataset['title']}",
                                 'timestamp': time.time() - start_time
                             }, cls=NumpyEncoder) + '\n'
-                        else:
-                            dataset_info = {
-                                "id": dataset['id'],
-                                "title": dataset['title'],
-                                "description": dataset.get('description', ''),
-                                "similarity": 1.0,  # Since these are pre-selected, set similarity to 1.0
-                                "file_path": output_paths[0],
-                                "all_file_paths": output_paths,
-                                "is_census": is_census
-                            }
                             
-                            dataset_info.update({
-                                "row_count": len(datafile_content),
-                                "column_count": len(datafile_content.columns),
-                                "columns": list(datafile_content.columns)
-                            })
-                            
-                            yield json.dumps({
-                                'type': 'status',
-                                'message': f"Loaded tabular data with {len(datafile_content)} rows and {len(datafile_content.columns)} columns",
-                                'timestamp': time.time() - start_time
-                            }, cls=NumpyEncoder) + '\n'
-                        
-                        # 3. ASSESS: Since we're analyzing pre-selected datasets, we'll assume they're relevant
-                        # But we can still calculate a relevance score for information
+                    except DatasetCatalog.DoesNotExist:
                         yield json.dumps({
-                            'type': 'dataset_processing',
-                            'dataset_id': dataset_id,
-                            'status': 'assessing',
+                            'type': 'error',
+                            'message': f"Dataset {dataset_id} not found in database",
                             'timestamp': time.time() - start_time
                         }, cls=NumpyEncoder) + '\n'
-                        
+                        continue
+                    
+                    # Update to loading state
+                    yield json.dumps({
+                        'type': 'dataset_processing',
+                        'dataset_id': dataset_id,
+                        'status': 'loading',
+                        'timestamp': time.time() - start_time
+                    }, cls=NumpyEncoder) + '\n'
+                    
+                    # 2. LOAD: Load the datafile 
+                    yield json.dumps({
+                        'type': 'status',
+                        'message': f"Loading data from file...",
+                        'timestamp': time.time() - start_time
+                    }, cls=NumpyEncoder) + '\n'
+                    
+                    try:
+                        datafile_content = load_datafile(output_paths[0])
+                    except Exception as e:
                         yield json.dumps({
-                            'type': 'status',
-                            'message': f"Assessing dataset relevance...",
+                            'type': 'error',
+                            'message': f"Error loading datafile: {str(e)}",
                             'timestamp': time.time() - start_time
                         }, cls=NumpyEncoder) + '\n'
-                        
-                        is_relevant, relevance_score, reasoning = assess_datafile_relevance(
-                            datafile_content, 
-                            query, 
-                            dataset_info,
-                            relevance_threshold
-                        )
-                        
-                        dataset_info["relevance_score"] = relevance_score
-                        dataset_info["relevance_reasoning"] = reasoning
-                        dataset_info["is_relevant"] = is_relevant
-                        
-                        yield json.dumps({
-                            'type': 'status',
-                            'message': f"Relevance assessment: Score {relevance_score:.2f}\nReasoning: {reasoning}",
-                            'timestamp': time.time() - start_time
-                        }, cls=NumpyEncoder) + '\n'
-                        
-                        # 4. EXTRACT: Extract relevant data
-                        yield json.dumps({
-                            'type': 'dataset_processing',
-                            'dataset_id': dataset_id,
-                            'status': 'extracting',
-                            'timestamp': time.time() - start_time
-                        }, cls=NumpyEncoder) + '\n'
-                        
-                        yield json.dumps({
-                            'type': 'status',
-                            'message': f"Extracting relevant data...",
-                            'timestamp': time.time() - start_time
-                        }, cls=NumpyEncoder) + '\n'
-                        
-                        try:
-                            # Extract relevant data
-                            from factchecker.processing.analysis.extraction.execution import execute_relevant_data
-                            
-                            relevant_data = extract_relevant_data(
-                                datafile_content, 
-                                query, 
-                                dataset_info
-                            )
-                            
-                            # Execute the data extraction
-                            extracted_data = execute_relevant_data(relevant_data)
-                            
-                            # Add dataset source information to the extracted data
-                            if extracted_data:
-                                extracted_data["dataset_title"] = dataset_info["title"]
-                                extracted_data["dataset_source"] = dataset_info.get("description", "Data.gov dataset")
-                                extracted_data["dataset_id"] = dataset_info["id"]
-                                extracted_data["file_path"] = dataset_info["file_path"]
-                                extracted_data["all_file_paths"] = dataset_info["all_file_paths"]
-                                
-                                # Check if this dataset is already in the list
-                                existing_ids = [data.get('dataset_id') for data in extracted_data_list]
-                                print(f"[DEBUG] Current extracted_data_list contains {len(extracted_data_list)} datasets with IDs: {existing_ids}")
-                                
-                                current_id = extracted_data.get('dataset_id')
-                                if current_id in existing_ids:
-                                    print(f"[DUPLICATE WARNING] Dataset {current_id} is already in the extraction list!")
-                                
-                                print(f"[DEBUG] Dataset {current_id} will be added to extracted_data_list after conversion")
-                        except Exception as e:
-                            logger.error(f"Error extracting data: {str(e)}")
-                            yield json.dumps({
-                                'type': 'error',
-                                'message': f"Error extracting data: {str(e)}",
-                                'timestamp': time.time() - start_time
-                            }, cls=NumpyEncoder) + '\n'
-                            # Continue with analysis even if extraction fails
-                        
-                        # 5. ANALYZE: Generate dataset overview analysis
-                        yield json.dumps({
-                            'type': 'dataset_processing',
-                            'dataset_id': dataset_id,
-                            'status': 'analyzing',
-                            'timestamp': time.time() - start_time
-                        }, cls=NumpyEncoder) + '\n'
-                        
-                        yield json.dumps({
-                            'type': 'status',
-                            'message': f"Analyzing dataset overview...",
-                            'timestamp': time.time() - start_time
-                        }, cls=NumpyEncoder) + '\n'
-                        
-                        try:
-                            dataset_analysis = analyze_dataset_overview(
-                                datafile_content, 
-                                query, 
-                                dataset_info, 
-                                extracted_data=extracted_data if 'extracted_data' in locals() else None
-                            )
-                            
-                            # Add dataset analysis to dataset_info
-                            dataset_info["dataset_analysis"] = dataset_analysis["analysis"]
-                            
-                            # Add to dataset_analyses list for summary
-                            dataset_analyses.append(dataset_analysis)
-                            
-                            yield json.dumps({
-                                'type': 'status',
-                                'message': f"Analysis complete",
-                                'timestamp': time.time() - start_time
-                            }, cls=NumpyEncoder) + '\n'
-                        except Exception as e:
-                            logger.error(f"Error analyzing dataset: {str(e)}")
-                            yield json.dumps({
-                                'type': 'error',
-                                'message': f"Error analyzing dataset: {str(e)}",
-                                'timestamp': time.time() - start_time
-                            }, cls=NumpyEncoder) + '\n'
-                            continue
-                        
-                        # Add dataset_info to results
-                        results.append(dataset_info)
-                        
-                        # Update dataset card with results
-                        update_data = {
-                            'id': dataset_id,
-                            'status': 'analyzed',
-                            'processing_complete': True,
-                            'relevance': {
-                                'is_relevant': dataset_info["is_relevant"],
-                                'relevance_score': dataset_info["relevance_score"],
-                                'reasoning': dataset_info["relevance_reasoning"]
-                            }
+                        continue
+                    
+                    # Update dataset_info based on the content type
+                    is_pdf = isinstance(datafile_content, dict) and datafile_content.get('type') == 'pdf'
+                    
+                    if is_pdf:
+                        dataset_info = {
+                            "id": dataset['id'],
+                            "title": dataset['title'],
+                            "description": dataset['description'],
+                            "similarity": 1.0,  # Since these are pre-selected, set similarity to 1.0
+                            "file_path": output_paths[0],
+                            "all_file_paths": output_paths,
+                            "is_census": is_census
                         }
                         
-                        # Add dataset analysis if available
-                        if "dataset_analysis" in dataset_info:
-                            update_data['dataset_analysis'] = dataset_info["dataset_analysis"]
-                        
-                        # Add extracted data preview if available
-                        if 'extracted_data' in locals() and extracted_data:
-                            # Enhanced debugging for extracted data
-                            print(f"\n[DEBUG] Extracted data from dataset {dataset_id}:")
-                            print(f"  - Dataset title: {extracted_data.get('dataset_title', 'Unknown')}")
-                            
-                            # Log the results_dict structure (not the full data)
-                            if 'results_dict' in extracted_data:
-                                results_dict = extracted_data['results_dict']
-                                if isinstance(results_dict, pd.DataFrame):
-                                    print(f"  - Results type: DataFrame with shape {results_dict.shape}")
-                                    print(f"  - Columns: {list(results_dict.columns)}")
-                                    print(f"  - Sample data (first 2 rows):")
-                                    print(results_dict.head(2))
-                                elif isinstance(results_dict, dict):
-                                    print(f"  - Results type: Dictionary with {len(results_dict)} keys")
-                                    print(f"  - Keys: {list(results_dict.keys())}")
-                                elif isinstance(results_dict, list):
-                                    print(f"  - Results type: List with {len(results_dict)} items")
-                                else:
-                                    print(f"  - Results type: {type(results_dict)}")
-                            
-                            # Ensure we don't have DataFrame objects in the extracted_data
-                            print("[DEBUG] Converting any DataFrame objects to serializable form...")
-                            if 'results_dict' in extracted_data and isinstance(extracted_data['results_dict'], pd.DataFrame):
-                                print("  - Converting results_dict DataFrame to records")
-                                extracted_data['results_dict'] = extracted_data['results_dict'].to_dict(orient='records')
-                            
-                            # Add to the list for summary generation
-                            print(f"  - Adding extracted data to summary generation list")
-                            extracted_data_list.append(extracted_data)
+                        dataset_info.update({
+                            "document_type": "pdf",
+                            "num_pages": datafile_content.get("num_pages", 0),
+                            "text_sample": datafile_content.get("text_sample", "")[:200] + "..."
+                        })
                         
                         yield json.dumps({
-                            'type': 'dataset_processing',
-                            'dataset_id': dataset_id,
-                            'status': 'analyzed',
+                            'type': 'status',
+                            'message': f"Loaded PDF document with {datafile_content.get('num_pages', 0)} pages",
                             'timestamp': time.time() - start_time
                         }, cls=NumpyEncoder) + '\n'
-                            
-                    except Exception as e:
-                        logger.error(f"Error processing dataset {dataset_id}: {str(e)}")
-                        logger.error(traceback.format_exc())
-                        print(f"[ERROR] Failed to process dataset {dataset_id}: {str(e)}")
-                        print(traceback.format_exc())
-                        # Continue with next dataset
-                
-                # 6. SUMMARIZE: Generate summary of findings
-                print(f"\n[DEBUG] Starting summary generation with {len(extracted_data_list)} datasets")
-                print(f"  - Dataset titles included in summary:")
-                for data in extracted_data_list:
-                    print(f"    * {data.get('dataset_title', 'Unknown')}")
-                
-                # NEW CODE: Detailed logging of data being passed to the summary function
-                print("\n======= DATA BEING PASSED TO SUMMARY FUNCTION =======")
-                print(f"QUERY: {query}")
-                
-                print("\nEXTRACTED_DATA_LIST DETAILS:")
-                for i, data in enumerate(extracted_data_list, 1):
-                    print(f"\n--- DATASET #{i}: {data.get('dataset_title', 'Unknown')} ---")
-                    
-                    # Dataset identifiers
-                    print(f"  dataset_id: {data.get('dataset_id', 'None')}")
-                    print(f"  organization: {data.get('organization', 'None')}")
-                    print(f"  dataset_source: {data.get('dataset_source', 'None')}")
-                    
-                    # DataFrame info
-                    if 'results_dict' in data:
-                        results_dict = data['results_dict']
-                        if isinstance(results_dict, pd.DataFrame):
-                            print(f"  results_dict: DataFrame with {len(results_dict)} rows, {len(results_dict.columns)} columns")
-                            print(f"  columns: {list(results_dict.columns)}")
-                            if not results_dict.empty:
-                                print("  sample (first row):")
-                                print(f"    {results_dict.iloc[0].to_dict()}")
-                        elif isinstance(results_dict, dict):
-                            print(f"  results_dict: Dictionary with {len(results_dict)} keys")
-                            print(f"  keys: {list(results_dict.keys())}")
-                            # If there's a 'subset_df' key containing a DataFrame, print details about it
-                            if 'subset_df' in results_dict and isinstance(results_dict['subset_df'], pd.DataFrame):
-                                subset_df = results_dict['subset_df']
-                                print(f"  subset_df: DataFrame with {len(subset_df)} rows, {len(subset_df.columns)} columns")
-                                print(f"  subset_df columns: {list(subset_df.columns)}")
-                                if not subset_df.empty:
-                                    print("  subset_df sample (first row):")
-                                    print(f"    {subset_df.iloc[0].to_dict()}")
-                        elif isinstance(results_dict, list):
-                            print(f"  results_dict: List with {len(results_dict)} items")
-                        else:
-                            print(f"  results_dict: {type(results_dict)}")
                     else:
-                        print(f"  results_dict: Not found")
+                        dataset_info = {
+                            "id": dataset['id'],
+                            "title": dataset['title'],
+                            "description": dataset['description'],
+                            "similarity": 1.0,  # Since these are pre-selected, set similarity to 1.0
+                            "file_path": output_paths[0],
+                            "all_file_paths": output_paths,
+                            "is_census": is_census
+                        }
+                        
+                        dataset_info.update({
+                            "row_count": len(datafile_content),
+                            "column_count": len(datafile_content.columns),
+                            "columns": list(datafile_content.columns)
+                        })
+                        
+                        yield json.dumps({
+                            'type': 'status',
+                            'message': f"Loaded tabular data with {len(datafile_content)} rows and {len(datafile_content.columns)} columns",
+                            'timestamp': time.time() - start_time
+                        }, cls=NumpyEncoder) + '\n'
                     
-                    # Check for explanation field
-                    if 'explanation' in data:
-                        explanation = data['explanation']
-                        print(f"  explanation: {explanation[:100]}..." if len(explanation) > 100 else explanation)
+                    # The rest of the function continues as before...
+                    # 3. ASSESS: Relevance assessment
+                    yield json.dumps({
+                        'type': 'dataset_processing',
+                        'dataset_id': dataset_id,
+                        'status': 'assessing',
+                        'timestamp': time.time() - start_time
+                    }, cls=NumpyEncoder) + '\n'
+                    
+                    yield json.dumps({
+                        'type': 'status',
+                        'message': f"Assessing dataset relevance...",
+                        'timestamp': time.time() - start_time
+                    }, cls=NumpyEncoder) + '\n'
+                    
+                    is_relevant, relevance_score, reasoning = assess_datafile_relevance(
+                        datafile_content, 
+                        query, 
+                        dataset_info,
+                        relevance_threshold
+                    )
+                    
+                    dataset_info["relevance_score"] = relevance_score
+                    dataset_info["relevance_reasoning"] = reasoning
+                    dataset_info["is_relevant"] = is_relevant
+                    
+                    yield json.dumps({
+                        'type': 'status',
+                        'message': f"Relevance assessment: Score {relevance_score:.2f}\nReasoning: {reasoning}",
+                        'timestamp': time.time() - start_time
+                    }, cls=NumpyEncoder) + '\n'
+                    
+                    # 4. EXTRACT: Extract relevant data
+                    yield json.dumps({
+                        'type': 'dataset_processing',
+                        'dataset_id': dataset_id,
+                        'status': 'extracting',
+                        'timestamp': time.time() - start_time
+                    }, cls=NumpyEncoder) + '\n'
+                    
+                    yield json.dumps({
+                        'type': 'status',
+                        'message': f"Extracting relevant data...",
+                        'timestamp': time.time() - start_time
+                    }, cls=NumpyEncoder) + '\n'
+                    
+                    try:
+                        # Extract relevant data
+                        from factchecker.processing.analysis.extraction.execution import execute_relevant_data
+                        
+                        relevant_data = extract_relevant_data(
+                            datafile_content, 
+                            query, 
+                            dataset_info
+                        )
+                        
+                        # Execute the data extraction
+                        extracted_data = execute_relevant_data(relevant_data)
+                        
+                        # Add dataset source information to the extracted data
+                        if extracted_data:
+                            extracted_data["dataset_title"] = dataset_info["title"]
+                            extracted_data["dataset_source"] = dataset_info.get("description", "Data.gov dataset")
+                            extracted_data["dataset_id"] = dataset_info["id"]
+                            extracted_data["file_path"] = dataset_info["file_path"]
+                            extracted_data["all_file_paths"] = dataset_info["all_file_paths"]
+                            
+                            # Check if this dataset is already in the list
+                            existing_ids = [data.get('dataset_id') for data in extracted_data_list]
+                            print(f"[DEBUG] Current extracted_data_list contains {len(extracted_data_list)} datasets with IDs: {existing_ids}")
+                            
+                            current_id = extracted_data.get('dataset_id')
+                            if current_id in existing_ids:
+                                print(f"[DUPLICATE WARNING] Dataset {current_id} is already in the extraction list!")
+                            
+                            print(f"[DEBUG] Dataset {current_id} will be added to extracted_data_list after conversion")
+                    except Exception as e:
+                        logger.error(f"Error extracting data: {str(e)}")
+                        yield json.dumps({
+                            'type': 'error',
+                            'message': f"Error extracting data: {str(e)}",
+                            'timestamp': time.time() - start_time
+                        }, cls=NumpyEncoder) + '\n'
+                        # Continue with analysis even if extraction fails
+                    
+                    # 5. ANALYZE: Generate dataset overview analysis
+                    yield json.dumps({
+                        'type': 'dataset_processing',
+                        'dataset_id': dataset_id,
+                        'status': 'analyzing',
+                        'timestamp': time.time() - start_time
+                    }, cls=NumpyEncoder) + '\n'
+                    
+                    yield json.dumps({
+                        'type': 'status',
+                        'message': f"Analyzing dataset overview...",
+                        'timestamp': time.time() - start_time
+                    }, cls=NumpyEncoder) + '\n'
+                    
+                    try:
+                        dataset_analysis = analyze_dataset_overview(
+                            datafile_content, 
+                            query, 
+                            dataset_info, 
+                            extracted_data=extracted_data if 'extracted_data' in locals() else None
+                        )
+                        
+                        # Add dataset analysis to dataset_info
+                        dataset_info["dataset_analysis"] = dataset_analysis["analysis"]
+                        
+                        # Add to dataset_analyses list for summary
+                        dataset_analyses.append(dataset_analysis)
+                        
+                        print(f"[DEBUG] Adding analysis to dataset_analyses:")
+                        print(f"  - Dataset: {dataset_analysis.get('dataset_title')}")
+                        print(f"  - Analysis keys: {list(dataset_analysis.keys())}")
+                        print(f"  - Temporal scope: {dataset_analysis.get('temporal_scope')}")
+                        print(f"  - Geographic scope: {dataset_analysis.get('geographic_scope')}")
+                        
+                        yield json.dumps({
+                            'type': 'status',
+                            'message': f"Analysis complete",
+                            'timestamp': time.time() - start_time
+                        }, cls=NumpyEncoder) + '\n'
+                    except Exception as e:
+                        logger.error(f"Error analyzing dataset: {str(e)}")
+                        yield json.dumps({
+                            'type': 'error',
+                            'message': f"Error analyzing dataset: {str(e)}",
+                            'timestamp': time.time() - start_time
+                        }, cls=NumpyEncoder) + '\n'
+                        continue
+                    
+                    # Add dataset_info to results
+                    results.append(dataset_info)
+                    
+                    # Update dataset card with results
+                    update_data = {
+                        'id': dataset_id,
+                        'status': 'analyzed',
+                        'processing_complete': True,
+                        'relevance': {
+                            'is_relevant': dataset_info["is_relevant"],
+                            'relevance_score': dataset_info["relevance_score"],
+                            'reasoning': dataset_info["relevance_reasoning"]
+                        }
+                    }
+                    
+                    # Add dataset analysis if available
+                    if "dataset_analysis" in dataset_info:
+                        update_data['dataset_analysis'] = dataset_info["dataset_analysis"]
+                    
+                    # Add extracted data preview if available
+                    if 'extracted_data' in locals() and extracted_data:
+                        # Enhanced debugging for extracted data
+                        print(f"\n[DEBUG] Extracted data from dataset {dataset_id}:")
+                        print(f"  - Dataset title: {extracted_data.get('dataset_title', 'Unknown')}")
+                        
+                        # Log the results_dict structure (not the full data)
+                        if 'results_dict' in extracted_data:
+                            results_dict = extracted_data['results_dict']
+                            if isinstance(results_dict, pd.DataFrame):
+                                print(f"  - Results type: DataFrame with shape {results_dict.shape}")
+                                print(f"  - Columns: {list(results_dict.columns)}")
+                                print(f"  - Sample data (first 2 rows):")
+                                print(results_dict.head(2))
+                            elif isinstance(results_dict, dict):
+                                print(f"  - Results type: Dictionary with {len(results_dict)} keys")
+                                print(f"  - Keys: {list(results_dict.keys())}")
+                            elif isinstance(results_dict, list):
+                                print(f"  - Results type: List with {len(results_dict)} items")
+                            else:
+                                print(f"  - Results type: {type(results_dict)}")
+                        
+                        # Ensure we don't have DataFrame objects in the extracted_data
+                        print("[DEBUG] Converting any DataFrame objects to serializable form...")
+                        if 'results_dict' in extracted_data and isinstance(extracted_data['results_dict'], pd.DataFrame):
+                            print("  - Converting results_dict DataFrame to records")
+                            extracted_data['results_dict'] = extracted_data['results_dict'].to_dict(orient='records')
+                        
+                        # Add to the list for summary generation
+                        print(f"\n[DEBUG] Adding data to extracted_data_list for {dataset_info['title']}")
+                        extracted_data_entry = {
+                            "dataset_id": dataset_info.get("id", ""),
+                            "dataset_title": dataset_info.get("title", ""),
+                            "dataset_source": dataset_info.get("description", ""),
+                            "file_path": dataset_info.get("file_path", ""),
+                            "all_file_paths": dataset_info.get("all_file_paths", []),
+                            "results_dict": extracted_data.get("results_dict", {}),
+                            "extraction_strategy": extracted_data.get("extraction_strategy", ""),
+                            "explanation": extracted_data.get("explanation", ""),
+                            "extracted_data": extracted_data  # Include the full extraction results
+                        }
+                        
+                        # Add analysis results if available
+                        if dataset_analysis:
+                            extracted_data_entry["analysis"] = dataset_analysis
+                        
+                        extracted_data_list.append(extracted_data_entry)
+                        print(f"[DEBUG] Added data with keys: {list(extracted_data_entry.keys())}")
+                    
+                    yield json.dumps({
+                        'type': 'dataset_processing',
+                        'dataset_id': dataset_id,
+                        'status': 'analyzed',
+                        'timestamp': time.time() - start_time
+                    }, cls=NumpyEncoder) + '\n'
+                            
+                except Exception as e:
+                    logger.error(f"Error processing dataset {dataset_id}: {str(e)}")
+                    logger.error(traceback.format_exc())
+                    print(f"[ERROR] Failed to process dataset {dataset_id}: {str(e)}")
+                    print(traceback.format_exc())
+                    # Continue with next dataset
                 
-                print("\nDATASET_ANALYSES DETAILS:")
-                if dataset_analyses:
-                    for i, analysis in enumerate(dataset_analyses, 1):
-                        print(f"\n--- ANALYSIS #{i}: {analysis.get('dataset_title', 'Unknown')} ---")
-                        print(f"  dataset_id: {analysis.get('dataset_id', 'None')}")
-                        if 'geographic_scope' in analysis:
-                            print(f"  geographic_scope: {analysis.get('geographic_scope', {})}")
-                        if 'temporal_scope' in analysis:
-                            print(f"  temporal_scope: {analysis.get('temporal_scope', {})}")
+            # AFTER all datasets are processed, generate summary ONCE
+            print(f"\n[DEBUG] Starting summary generation with {len(extracted_data_list)} datasets")
+            print(f"  - Dataset titles included in summary:")
+            for data in extracted_data_list:
+                print(f"    * {data.get('dataset_title', 'Unknown')}")
+            
+            # NEW CODE: Detailed logging of data being passed to the summary function
+            print("\n======= DATA BEING PASSED TO SUMMARY FUNCTION =======")
+            print(f"QUERY: {query}")
+            
+            print("\nEXTRACTED_DATA_LIST DETAILS:")
+            for i, data in enumerate(extracted_data_list, 1):
+                print(f"\n--- DATASET #{i}: {data.get('dataset_title', 'Unknown')} ---")
+                
+                # Dataset identifiers
+                print(f"  dataset_id: {data.get('dataset_id', 'None')}")
+                print(f"  organization: {data.get('organization', 'None')}")
+                print(f"  dataset_source: {data.get('dataset_source', 'None')}")
+                
+                # DataFrame info
+                if 'results_dict' in data:
+                    results_dict = data['results_dict']
+                    if isinstance(results_dict, pd.DataFrame):
+                        print(f"  results_dict: DataFrame with {len(results_dict)} rows, {len(results_dict.columns)} columns")
+                        print(f"  columns: {list(results_dict.columns)}")
+                        if not results_dict.empty:
+                            print("  sample (first row):")
+                            print(f"    {results_dict.iloc[0].to_dict()}")
+                    elif isinstance(results_dict, dict):
+                        print(f"  results_dict: Dictionary with {len(results_dict)} keys")
+                        print(f"  keys: {list(results_dict.keys())}")
+                        # If there's a 'subset_df' key containing a DataFrame, print details about it
+                        if 'subset_df' in results_dict and isinstance(results_dict['subset_df'], pd.DataFrame):
+                            subset_df = results_dict['subset_df']
+                            print(f"  subset_df: DataFrame with {len(subset_df)} rows, {len(subset_df.columns)} columns")
+                            print(f"  subset_df columns: {list(subset_df.columns)}")
+                            if not subset_df.empty:
+                                print("  subset_df sample (first row):")
+                                print(f"    {subset_df.iloc[0].to_dict()}")
+                    elif isinstance(results_dict, list):
+                        print(f"  results_dict: List with {len(results_dict)} items")
+                    else:
+                        print(f"  results_dict: {type(results_dict)}")
                 else:
-                    print("  No dataset analyses available")
-                print("=======================================================\n")
+                    print(f"  results_dict: Not found")
                 
+                # Check for explanation field
+                if 'explanation' in data:
+                    explanation = data['explanation']
+                    print(f"  explanation: {explanation[:100]}..." if len(explanation) > 100 else explanation)
+            
+            print("\nDATASET_ANALYSES DETAILS:")
+            if dataset_analyses:
+                for i, analysis in enumerate(dataset_analyses, 1):
+                    print(f"\n--- ANALYSIS #{i}: {analysis.get('dataset_title', 'Unknown')} ---")
+                    print(f"  dataset_id: {analysis.get('dataset_id', 'None')}")
+                    if 'geographic_scope' in analysis:
+                        print(f"  geographic_scope: {analysis.get('geographic_scope', {})}")
+                    if 'temporal_scope' in analysis:
+                        print(f"  temporal_scope: {analysis.get('temporal_scope', {})}")
+            else:
+                print("  No dataset analyses available")
+            print("=======================================================\n")
+            
+            yield json.dumps({
+                'type': 'status',
+                'message': f"Generating structured summary of findings from all datasets...",
+                'timestamp': time.time() - start_time
+            }, cls=NumpyEncoder) + '\n'
+            
+            try:
+                # Enhance extracted_data_list with organization info from datasets
+                for data in extracted_data_list:
+                    dataset_id = data.get('dataset_id')
+                    if not dataset_id:
+                        continue
+                        
+                    # For datasets that were processed through the full pipeline
+                    for dataset_info in results:
+                        if dataset_info.get('id') == dataset_id:
+                            # Copy organization info if available
+                            if 'organization' in dataset_info:
+                                data['organization'] = dataset_info['organization']
+                            break
+                        
+                        # If we didn't find organization data yet, check if this is a Data.gov dataset
+                        if 'organization' not in data and not dataset_id.startswith('census-'):
+                            try:
+                                # Get dataset from database
+                                db_dataset = DatasetCatalog.objects.get(dataset_id=dataset_id)
+                                data['organization'] = db_dataset.organization_title or db_dataset.organization_name
+                            except Exception as e:
+                                print(f"[WARNING] Could not get organization for {dataset_id}: {str(e)}")
+                
+                # Generate structured summary
+                print(f"[DEBUG] Calling summarize_findings_structured function...")
+                from factchecker.presentation.cli_tool_functions import summarize_findings_structured
+                
+                structured_summary = summarize_findings_structured(
+                    query, 
+                    extracted_data_list,
+                    dataset_analyses
+                )
+                
+                # Debug the key_findings structure
+                print("\n======= KEY FINDINGS STRUCTURE ANALYSIS =======")
+                if 'key_findings' in structured_summary:
+                    findings = structured_summary['key_findings']
+                    print(f"Number of findings: {len(findings)}")
+                    for i, finding in enumerate(findings):
+                        print(f"Finding #{i+1}:")
+                        print(f"  Type: {type(finding)}")
+                        print(f"  Length: {len(finding)}")
+                        print(f"  Content: '{finding}'")
+                        if finding.startswith('•') or finding.startswith('-'):
+                            print(f"  Note: Finding starts with bullet point character")
+                        if not finding.strip():
+                            print(f"  Warning: Empty finding")
+                        print()
+                else:
+                    print("No key_findings in structured_summary")
+                print("==============================================\n")
+                
+                # Print the summary info
+                print("\n======= GENERATED STRUCTURED SUMMARY =======")
+                print(f"Query: {structured_summary.get('query', 'N/A')}")
+
+                # Print actual summary text
+                print("\nSUMMARY:")
+                print(structured_summary.get('summary', 'No summary generated'))
+
+                # Print key findings with numbers
+                print("\nKEY FINDINGS:")
+                for i, finding in enumerate(structured_summary.get('key_findings', []), 1):
+                    print(f"{i}. {finding}")
+
+                # Print sources
+                print("\nSOURCES:")
+                for i, source in enumerate(structured_summary.get('sources', []), 1):
+                    print(f"{i}. [{source.get('citation_id', 'UNKNOWN')}] {source.get('title', 'Untitled')} ({source.get('organization', 'No organization')})")
+
+                print("=================================\n")
+                
+                # Add this debug logging right before creating the frontend_summary
+                print("\n======= STRUCTURED SUMMARY BEFORE FRONTEND FORMAT =======")
+                print(f"Summary text: {structured_summary.get('summary', '')}")
+                print(f"Key findings: {structured_summary.get('key_findings', [])}")
+                print("=================================================\n")
+
+                # Format the summary for the frontend
+                frontend_summary = {
+                    'query': query,
+                    'text': structured_summary.get('summary', ''),
+                    'key_findings': structured_summary.get('key_findings', []),
+                    'sources': [
+                        {
+                            'citation_id': source.get('citation_id', ''),
+                            'title': source.get('title', ''),
+                            'organization': source.get('organization', '')
+                        }
+                        for source in structured_summary.get('sources', [])
+                    ],
+                    'temporal_context': structured_summary.get('context', {}).get('temporal', {}),
+                    'geographic_context': structured_summary.get('context', {}).get('geographic', {}),
+                    'datasets_analyzed': [
+                        {
+                            'id': r.get('id', ''),
+                            'title': r.get('title', ''),
+                            'relevance_score': r.get('relevance_score', 0)
+                        }
+                        for r in results if r.get('id') and r.get('title')
+                    ]
+                }
+                
+                # Then after creating frontend_summary
+                print("\n======= FRONTEND SUMMARY FORMAT =======")
+                print(f"Summary text: {frontend_summary['text']}")
+                print(f"Key findings: {frontend_summary['key_findings']}")
+                print("=====================================\n")
+                
+                # Send status message about completion
                 yield json.dumps({
                     'type': 'status',
-                    'message': f"Generating structured summary of findings from all datasets...",
+                    'message': f"Summary generated with {len(structured_summary.get('key_findings', []))} key findings",
                     'timestamp': time.time() - start_time
                 }, cls=NumpyEncoder) + '\n'
                 
-                try:
-                    # Enhance extracted_data_list with organization info from datasets
-                    for data in extracted_data_list:
-                        dataset_id = data.get('dataset_id')
-                        if not dataset_id:
-                            continue
-                            
-                        # For datasets that were processed through the full pipeline
-                        for dataset_info in results:
-                            if dataset_info.get('id') == dataset_id:
-                                # Copy organization info if available
-                                if 'organization' in dataset_info:
-                                    data['organization'] = dataset_info['organization']
-                                break
-                            
-                            # If we didn't find organization data yet, check if this is a Data.gov dataset
-                            if 'organization' not in data and not dataset_id.startswith('census-'):
-                                try:
-                                    # Get dataset from database
-                                    db_dataset = DatasetCatalog.objects.get(dataset_id=dataset_id)
-                                    data['organization'] = db_dataset.organization_title or db_dataset.organization_name
-                                except Exception as e:
-                                    print(f"[WARNING] Could not get organization for {dataset_id}: {str(e)}")
-                    
-                    # Generate structured summary
-                    print(f"[DEBUG] Calling summarize_findings_structured function...")
-                    from factchecker.presentation.cli_tool_functions import summarize_findings_structured
-                    
-                    structured_summary = summarize_findings_structured(
-                        query, 
-                        extracted_data_list,
-                        dataset_analyses
-                    )
-                    
-                    # Debug the key_findings structure
-                    print("\n======= KEY FINDINGS STRUCTURE ANALYSIS =======")
-                    if 'key_findings' in structured_summary:
-                        findings = structured_summary['key_findings']
-                        print(f"Number of findings: {len(findings)}")
-                        for i, finding in enumerate(findings):
-                            print(f"Finding #{i+1}:")
-                            print(f"  Type: {type(finding)}")
-                            print(f"  Length: {len(finding)}")
-                            print(f"  Content: '{finding}'")
-                            if finding.startswith('•') or finding.startswith('-'):
-                                print(f"  Note: Finding starts with bullet point character")
-                            if not finding.strip():
-                                print(f"  Warning: Empty finding")
-                            print()
-                    else:
-                        print("No key_findings in structured_summary")
-                    print("==============================================\n")
-                    
-                    # Print the summary info
-                    print("\n======= GENERATED STRUCTURED SUMMARY =======")
-                    print(f"Query: {structured_summary.get('query', 'N/A')}")
-
-                    # Print actual summary text
-                    print("\nSUMMARY:")
-                    print(structured_summary.get('summary', 'No summary generated'))
-
-                    # Print key findings with numbers
-                    print("\nKEY FINDINGS:")
-                    for i, finding in enumerate(structured_summary.get('key_findings', []), 1):
-                        print(f"{i}. {finding}")
-
-                    # Print sources
-                    print("\nSOURCES:")
-                    for i, source in enumerate(structured_summary.get('sources', []), 1):
-                        print(f"{i}. [{source.get('citation_id', 'UNKNOWN')}] {source.get('title', 'Untitled')} ({source.get('organization', 'No organization')})")
-
-                    print("=================================\n")
-                    
-                    # Format the summary for the frontend
-                    frontend_summary = {
-                        'query': query,
+                # Send the structured summary
+                yield json.dumps({
+                    'type': 'structured_summary',
+                    'data': frontend_summary,
+                    'timestamp': time.time() - start_time
+                }, cls=NumpyEncoder) + '\n'
+                
+                # Also send the original summary format for backward compatibility
+                yield json.dumps({
+                    'type': 'summary',
+                    'data': {
                         'text': structured_summary.get('summary', ''),
-                        'key_findings': structured_summary.get('key_findings', []),
-                        'sources': [
-                            {
-                                'citation_id': source.get('citation_id', ''),
-                                'title': source.get('title', ''),
-                                'organization': source.get('organization', '')
-                            }
-                            for source in structured_summary.get('sources', [])
-                        ],
-                        'temporal_context': structured_summary.get('context', {}).get('temporal', {}),
-                        'geographic_context': structured_summary.get('context', {}).get('geographic', {}),
-                        'datasets_analyzed': [
-                            {
-                                'id': r.get('id', ''),
-                                'title': r.get('title', ''),
-                                'relevance_score': r.get('relevance_score', 0)
-                            }
-                            for r in results if r.get('id') and r.get('title')
-                        ]
-                    }
-                    
-                    # Send status message about completion
-                    yield json.dumps({
-                        'type': 'status',
-                        'message': f"Summary generated with {len(structured_summary.get('key_findings', []))} key findings",
-                        'timestamp': time.time() - start_time
-                    }, cls=NumpyEncoder) + '\n'
-                    
-                    # Send the structured summary
-                    yield json.dumps({
-                        'type': 'structured_summary',
-                        'data': frontend_summary,
-                        'timestamp': time.time() - start_time
-                    }, cls=NumpyEncoder) + '\n'
-                    
-                    # Also send the original summary format for backward compatibility
-                    yield json.dumps({
-                        'type': 'summary',
-                        'data': {
-                            'text': structured_summary.get('summary', ''),
-                            'confidence': structured_summary.get('confidence', {}).get('score', 0) / 5.0,  # Scale to 0-1
-                            'datasets_analyzed': frontend_summary['datasets_analyzed']
-                        },
-                        'timestamp': time.time() - start_time
-                    }, cls=NumpyEncoder) + '\n'
-                    
-                except Exception as e:
-                    error_msg = f"Error generating summary: {str(e)}"
-                    logger.error(error_msg)
-                    logger.error(traceback.format_exc())
-                    print(f"[ERROR] {error_msg}")
-                    print(traceback.format_exc())
-                    
-                    yield json.dumps({
-                        'type': 'error',
-                        'message': error_msg,
-                        'timestamp': time.time() - start_time
-                    }, cls=NumpyEncoder) + '\n'
-                else:
-                    no_data_msg = "No data could be extracted from any datasets. Unable to generate summary."
-                    print(f"[DEBUG] {no_data_msg}")
-                    yield json.dumps({
-                        'type': 'status',
-                        'message': no_data_msg,
-                        'timestamp': time.time() - start_time
-                    }, cls=NumpyEncoder) + '\n'
+                        'confidence': structured_summary.get('confidence', {}).get('score', 0) / 5.0,  # Scale to 0-1
+                        'datasets_analyzed': frontend_summary['datasets_analyzed']
+                    },
+                    'timestamp': time.time() - start_time
+                }, cls=NumpyEncoder) + '\n'
+                
+            except Exception as e:
+                error_msg = f"Error generating summary: {str(e)}"
+                logger.error(error_msg)
+                logger.error(traceback.format_exc())
+                print(f"[ERROR] {error_msg}")
+                print(traceback.format_exc())
+                
+                yield json.dumps({
+                    'type': 'error',
+                    'message': error_msg,
+                    'timestamp': time.time() - start_time
+                }, cls=NumpyEncoder) + '\n'
+            else:
+                no_data_msg = "No data could be extracted from any datasets. Unable to generate summary."
+                print(f"[DEBUG] {no_data_msg}")
+                yield json.dumps({
+                    'type': 'status',
+                    'message': no_data_msg,
+                    'timestamp': time.time() - start_time
+                }, cls=NumpyEncoder) + '\n'
             
             # Calculate final execution time
             final_execution_time = time.time() - start_time

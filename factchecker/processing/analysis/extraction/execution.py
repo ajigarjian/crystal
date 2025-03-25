@@ -88,6 +88,30 @@ def execute_relevant_data(relevant_data) -> Dict[str, Any]:
             # Execute the code and capture results
             execution_result, printed_output = execute_code(dataset_content, code)
             print(f"Code execution completed. Result type: {type(execution_result)}")
+            #  # Add detailed structure debugging
+            # print("\n=== EXECUTION RESULT STRUCTURE ===")
+            # if isinstance(execution_result, dict):
+            #     print("Dictionary structure:")
+            #     for key, value in execution_result.items():
+            #         print(f"• {key}: {type(value)}")
+            #         if isinstance(value, pd.DataFrame):
+            #             print(f"  - DataFrame shape: {value.shape}")
+            #             print(f"  - Columns: {list(value.columns)}")
+            #         elif isinstance(value, dict):
+            #             print(f"  - Nested dictionary keys: {list(value.keys())}")
+            #         elif isinstance(value, list):
+            #             print(f"  - List length: {len(value)}")
+            #             if value:
+            #                 print(f"  - First item type: {type(value[0])}")
+            # elif isinstance(execution_result, pd.DataFrame):
+            #     print("DataFrame structure:")
+            #     print(f"• Shape: {execution_result.shape}")
+            #     print(f"• Columns: {list(execution_result.columns)}")
+            # else:
+            #     print(f"Other type structure: {type(execution_result)}")
+            #     print(f"Content preview: {str(execution_result)[:200]}...")
+            # print("================================\n")
+
             print(f"Printed output: {printed_output[:200]}..." if len(printed_output) > 200 else f"Printed output: {printed_output}")
 
             # Check for an empty response before calling the validation LLM.
@@ -246,12 +270,10 @@ def execute_relevant_data(relevant_data) -> Dict[str, Any]:
             else:
                 # If this was the last attempt, record the error
                 result["error"] = error_msg
-                
-                # Fallback to a simple extraction
-                result["results_dict"] = dataset_content.head(10).to_dict(orient="records")
                 result["printed_output"] = f"Error occurred: {str(e)}"
-                result["extraction_strategy"] = "Fallback strategy: showing first 10 rows due to error"
+                result["extraction_strategy"] = "Failed to extract data after max attempts"
                 result["explanation"] = f"Original extraction failed with error: {str(e)}"
+                result["results_dict"] = None  # Return None instead of fallback data
     
     # If we've exhausted all attempts without success, use the last result
     if not success:

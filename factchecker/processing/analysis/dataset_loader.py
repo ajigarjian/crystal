@@ -195,40 +195,10 @@ def load_datafile(file_path: str) -> Union[pd.DataFrame, Dict[str, Any]]:
             except Exception as e:
                 logger.warning(f"Binary Excel reading approach failed: {str(e)}")
         
-        # If still no DataFrame, create placeholder
+        # If still no DataFrame, return None instead of creating placeholder
         if df is None:
-            logger.warning("All parsing attempts failed, creating placeholder DataFrame")
-            try:
-                # Create a simple single-row DataFrame with file info
-                df = pd.DataFrame({
-                    'file_path': [file_path],
-                    'parsing_status': ['failed - could not parse file'],
-                    'file_name': [os.path.basename(file_path)]
-                })
-                logger.info("Created placeholder DataFrame for failed file")
-                
-                # Try to include a sample of the file content if possible
-                try:
-                    # Use binary mode for reading which works for both text and binary files
-                    with open(file_path, 'rb') as f:
-                        binary_content = f.read(1000)
-                        
-                        # Try to decode as text if possible
-                        try:
-                            sample_content = binary_content.decode('utf-8', errors='replace')
-                        except:
-                            # If decoding fails completely, provide a hex dump
-                            sample_content = f"Binary content (hex): {binary_content.hex()[:100]}..."
-                        
-                        df['content_sample'] = [sample_content]
-                except Exception as e:
-                    logger.warning(f"Could not read file content: {str(e)}")
-                    df['content_sample'] = ["Could not read file content"]
-                
-                return df
-            except Exception as e:
-                logger.error(f"Failed to create placeholder DataFrame: {str(e)}")
-                raise ValueError(f"Error loading dataset - please try a different file")
+            logger.warning("All parsing attempts failed, skipping file")
+            return None
             
         # Handle common issues
         if len(df.columns) == 1 and file_extension not in ['.xlsx', '.xls'] and 'parsing_status' not in df.columns:
@@ -468,29 +438,14 @@ def load_xml_document(file_path: str) -> Union[pd.DataFrame, Dict[str, Any]]:
             logger.info(f"Created single-row DataFrame. Shape: {df.shape}")
             return df
         
-        # If all strategies fail, return XML metadata
-        logger.warning("All XML parsing strategies failed. Returning XML metadata.")
-        
-        # Get a sample of the XML content for reference
-        with open(file_path, 'r', encoding='utf-8') as f:
-            xml_sample = f.read(5000)  # First 5000 chars
-        
-        return {
-            "type": "xml",
-            "file_path": file_path,
-            "file_name": os.path.basename(file_path),
-            "root_tag": root.tag,
-            "xml_sample": xml_sample,
-            "parsing_error": "Could not convert XML to DataFrame"
-        }
+        # If all strategies fail, return None instead of XML metadata
+        logger.warning("All XML parsing strategies failed. Skipping file.")
+        return None
     
     except Exception as e:
         logger.error(f"Error loading XML file: {str(e)}")
-        # Return a minimal DataFrame with error information
-        return pd.DataFrame({
-            "error": [f"Failed to parse XML: {str(e)}"],
-            "file_path": [file_path]
-        })
+        # Return None instead of minimal DataFrame with error information
+        return None
 
 def find_repeating_elements(root):
     """
@@ -868,6 +823,34 @@ def load_json_document(file_path: str) -> pd.DataFrame:
         # Read the JSON file
         with open(file_path, 'r', encoding='utf-8') as f:
             json_data = json.load(f)
+        
+        # Strategy 0 (NEW): Handle Census API format (list of lists where first list contains headers)
+        if isinstance(json_data, list) and len(json_data) > 1 and isinstance(json_data[0], list) and all(isinstance(x, list) for x in json_data):
+            logger.info("Detected Census API format (list of lists with headers)")
+            try:
+                # First row is headers, subsequent rows are data
+                headers = json_data[0]
+                rows = json_data[1:]
+                
+                # Check if all rows have the same length as headers
+                if all(len(row) == len(headers) for row in rows):
+                    # Convert lists to dictionary records
+                    records = []
+                    for row in rows:
+                        record = {headers[i]: row[i] for i in range(len(headers))}
+                        records.append(record)
+                    
+                    logger.info(f"Successfully parsed Census API format with {len(records)} records")
+                    return pd.DataFrame(records)
+                else:
+                    logger.warning("JSON has arrays of different lengths, creating minimal DataFrame")
+                    return pd.DataFrame({
+                        "error": ["JSON has arrays of different lengths"],
+                        "file_path": [file_path]
+                    })
+            except Exception as e:
+                logger.warning(f"Error parsing Census API format: {e}")
+                # Fall through to other strategies
         
         # Strategy 1: If JSON is already a list of records (most common case)
         if isinstance(json_data, list) and len(json_data) > 0 and isinstance(json_data[0], dict):
