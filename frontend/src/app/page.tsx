@@ -16,8 +16,8 @@ export default function Home() {
   const containerRef = useRef<HTMLDivElement>(null);
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
   const trailPositions = useRef<Array<{x: number, y: number}>>([]);
-  const requestRef = useRef<number>();
-  const previousTimeRef = useRef<number>();
+  const requestRef = useRef<number | undefined>(undefined);
+  const previousTimeRef = useRef<number | undefined>(undefined);
   const [query, setQuery] = useState("");
   const [isMobile, setIsMobile] = useState(false);
   const router = useRouter();
@@ -284,6 +284,15 @@ export default function Home() {
       >
         {/* Navigation links */}
         <div className="absolute top-6 right-6 z-30 flex gap-4">
+          <Link href="/privacy">
+            <Button 
+              variant="link" 
+              className="text-white flex items-center gap-1 hover:text-white/80 transition-colors"
+              style={{ fontFamily: 'var(--font-geist-sans)' }}
+            >
+              Privacy <ArrowRight className="h-4 w-4" />
+            </Button>
+          </Link>
           <Link href="/waitlist">
             <Button 
               variant="link" 
@@ -293,13 +302,6 @@ export default function Home() {
               Join <Badge className="bg-purple-500 hover:bg-purple-500 text-xs py-0 px-1.5 font-normal rounded-sm">BETA</Badge> Waitlist <ArrowRight className="h-4 w-4" />
             </Button>
           </Link>
-          <Button 
-            variant="link" 
-            className="text-white flex items-center gap-1 hover:text-white/80 transition-colors"
-            style={{ fontFamily: 'var(--font-geist-sans)' }}
-          >
-            API (coming soon) <ArrowRight className="h-4 w-4" />
-          </Button>
         </div>
         
         {/* Data Text Background Layer */}
