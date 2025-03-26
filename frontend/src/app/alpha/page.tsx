@@ -798,6 +798,22 @@ export default function DatasetsPage() {
     warmFunctions();
   }, []);
 
+  // Add this effect to automatically search when URL has a query
+  useEffect(() => {
+    // Get query from URL
+    const params = new URLSearchParams(window.location.search);
+    const initialQuery = params.get('query');
+    
+    if (initialQuery) {
+      // Set the query in state
+      setQuery(initialQuery);
+      // Start the search automatically
+      processStreamingQuery(initialQuery);
+      // Mark search as performed
+      setSearchPerformed(true);
+    }
+  }, []);
+
   return (
     <>
       {/* Initial hero state - when no search has been performed */}
