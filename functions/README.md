@@ -1,0 +1,1 @@
+This folder contains `main.py` - the place to define new Cloud Functions. It also contains the `factchecker` directory-  where all of our underlying backend Python code lives.

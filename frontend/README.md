@@ -1,3 +1,11 @@
+## Crystal Docs
+This contains the Next.js frontend for our application. We previously used Django and next in SSR mode. Since we migrated to a static site and off Django, we no longer need Next.js API routes/Django backend functions.
+
+Running is super simple - just cd to this directory and do an `npm run dev`. If you need the rest of the backend set up navigate over to functions/tests/README.md.
+
+
+## Boilerplate docs below
+
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
 ## Getting Started
