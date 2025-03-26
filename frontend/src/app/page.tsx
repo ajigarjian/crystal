@@ -287,10 +287,10 @@ export default function Home() {
           <Link href="/waitlist">
             <Button 
               variant="link" 
-              className="text-white flex items-center gap-1 hover:text-white/80 transition-colors"
+              className="text-white flex items-center gap-2 hover:text-white/80 transition-colors"
               style={{ fontFamily: 'var(--font-geist-sans)' }}
             >
-              Join Beta Waitlist <ArrowRight className="h-4 w-4" />
+              Join <Badge className="bg-purple-500 hover:bg-purple-500 text-xs py-0 px-1.5 font-normal rounded-sm">BETA</Badge> Waitlist <ArrowRight className="h-4 w-4" />
             </Button>
           </Link>
           <Button 
