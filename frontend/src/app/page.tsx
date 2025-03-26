@@ -217,7 +217,7 @@ export default function Home() {
         ref={containerRef}
         className="w-full h-[calc(100vh-2rem)] rounded-lg bg-cover bg-center flex flex-col justify-center relative overflow-hidden"
         style={{
-          backgroundImage: "url('/images/crystal-bg0.png')",
+          backgroundImage: "url('/images/crystalbackground.png')",
           '--mouse-x': '50%',
           '--mouse-y': '50%',
           '--trail-x-0': '50%',
@@ -270,7 +270,7 @@ export default function Home() {
         {/* Background Image Layer with trail effect and darker overlay */}
         <div 
           className="absolute inset-0 z-10 bg-cover bg-center trail-mask after:absolute after:inset-0 after:bg-black/40 after:z-10" 
-          style={{ backgroundImage: "url('/images/crystal-bg0.png')" }}
+          style={{ backgroundImage: "url('/images/crystalbackground.png')" }}
         ></div>
         
         {/* Content */}
