@@ -1,10 +1,13 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { useEffect, useRef, useState } from "react";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Twitter } from "lucide-react";
 import Link from "next/link";
 import { warmFunctions } from "@/lib/firebase";
+import { useRouter } from "next/navigation";
+import { Badge } from "@/components/ui/badge";
 
 // Pre-generate the data text outside the component
 const DATA_TEXTS = generateDataTexts(150);
@@ -13,8 +16,11 @@ export default function Home() {
   const containerRef = useRef<HTMLDivElement>(null);
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
   const trailPositions = useRef<Array<{x: number, y: number}>>([]);
-  const requestRef = useRef<number>();
-  const previousTimeRef = useRef<number>();
+  const requestRef = useRef<number | undefined>(undefined);
+  const previousTimeRef = useRef<number | undefined>(undefined);
+  const [query, setQuery] = useState("");
+  const [isMobile, setIsMobile] = useState(false);
+  const router = useRouter();
   
   // State to hold the randomized positions and styles
   const [textStyles, setTextStyles] = useState<Array<{
@@ -211,13 +217,57 @@ export default function Home() {
     warmFunctions();
   }, []);
 
+  // Add this effect to check for mobile
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 640);
+    };
+    
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+  
+  // Add these example queries
+  const exampleQueries = [
+    "What's the air quality trend in NYC over the past 5 years?",
+    "How has median housing price changed in San Francisco since 2010?",
+    "What are the vaccination rates for children in Chicago by neighborhood?",
+  ];
+  
+  // Get displayed examples based on screen size
+  const displayedExamples = isMobile ? exampleQueries.slice(0, 3) : exampleQueries.slice(0, 3);
+  
+  // Add this handler for example clicks
+  const handleExampleClick = (exampleQuery: string) => {
+    router.push(`/alpha?query=${encodeURIComponent(exampleQuery)}`);
+  };
+  
+  // Add this handler for search submission
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (query.trim()) {
+      router.push(`/alpha?query=${encodeURIComponent(query)}`);
+    }
+  };
+  
+  // Add this handler for keydown events
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (query.trim()) {
+        router.push(`/alpha?query=${encodeURIComponent(query)}`);
+      }
+    }
+  };
+
   return (
     <div className="flex items-center justify-center min-h-screen bg-neutral-50 dark:bg-neutral-50 p-4">
       <div
         ref={containerRef}
         className="w-full h-[calc(100vh-2rem)] rounded-lg bg-cover bg-center flex flex-col justify-center relative overflow-hidden"
         style={{
-          backgroundImage: "url('/images/crystal-bg0.png')",
+          backgroundImage: "url('/images/crystalbackground.png')",
           '--mouse-x': '50%',
           '--mouse-y': '50%',
           '--trail-x-0': '50%',
@@ -234,13 +284,24 @@ export default function Home() {
       >
         {/* Navigation links */}
         <div className="absolute top-6 right-6 z-30 flex gap-4">
-          <Button 
-            variant="link" 
-            className="text-white flex items-center gap-1 hover:text-white/80 transition-colors"
-            style={{ fontFamily: 'var(--font-geist-sans)' }}
-          >
-            API (coming soon) <ArrowRight className="h-4 w-4" />
-          </Button>
+          <Link href="/privacy">
+            <Button 
+              variant="link" 
+              className="text-white flex items-center gap-1 hover:text-white/80 transition-colors"
+              style={{ fontFamily: 'var(--font-geist-sans)' }}
+            >
+              Privacy <ArrowRight className="h-4 w-4" />
+            </Button>
+          </Link>
+          <Link href="/waitlist">
+            <Button 
+              variant="link" 
+              className="text-white flex items-center gap-2 hover:text-white/80 transition-colors"
+              style={{ fontFamily: 'var(--font-geist-sans)' }}
+            >
+              Join <Badge className="bg-purple-500 hover:bg-purple-500 text-xs py-0 px-1.5 font-normal rounded-sm">BETA</Badge> Waitlist <ArrowRight className="h-4 w-4" />
+            </Button>
+          </Link>
         </div>
         
         {/* Data Text Background Layer */}
@@ -269,8 +330,8 @@ export default function Home() {
         
         {/* Background Image Layer with trail effect and darker overlay */}
         <div 
-          className="absolute inset-0 z-10 bg-cover bg-center trail-mask after:absolute after:inset-0 after:bg-black/40 after:z-10" 
-          style={{ backgroundImage: "url('/images/crystal-bg0.png')" }}
+          className="absolute inset-0 z-10 bg-cover bg-center trail-mask after:absolute after:inset-0 after:bg-black/70 after:backdrop-blur-sm" 
+          style={{ backgroundImage: "url('/images/crystalbackground.png')" }}
         ></div>
         
         {/* Content */}
@@ -281,9 +342,16 @@ export default function Home() {
             className="h-12 w-12 mr-3" 
             style={{ filter: "brightness(0) invert(1)" }}
           />
-          <h1 className="text-6xl font-bold text-white" style={{ fontFamily: 'var(--font-geist-sans)' }}>
-            Crystal
-          </h1>
+          <div className="relative">
+            <h1 className="text-6xl font-bold text-white" style={{ fontFamily: 'var(--font-geist-sans)' }}>
+              Crystal
+              <Badge 
+                className="ml-2 absolute -top-3 -right-16 bg-green-500 hover:bg-green-500 text-xs font-normal uppercase tracking-wide"
+              >
+                Alpha
+              </Badge>
+            </h1>
+          </div>
         </div>
         <div className="relative p-2 mt-2 z-20 text-center w-full">
           <h2 className="relative text-xl sm:text-2xl text-white" style={{ fontFamily: 'var(--font-geist-sans)' }}>
@@ -291,24 +359,57 @@ export default function Home() {
           </h2>
         </div>
         
-        {/* Call to action buttons */}
-        <div className="z-20 relative w-full max-w-md mx-auto px-4 mt-8 flex flex-col gap-4">
-          <Link href="/alpha" className="w-full">
+        {/* Example queries */}
+        <div className="z-20 relative w-full max-w-3xl mx-auto px-4 mt-8">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {displayedExamples.map((exampleQuery, index) => (
+              <button
+                key={index}
+                onClick={() => handleExampleClick(exampleQuery)}
+                className="bg-white/10 hover:bg-white/20 text-white text-sm p-3 rounded-lg border border-white/20 transition-colors text-left hover:border-green-400/50"
+              >
+                {exampleQuery}
+              </button>
+            ))}
+          </div>
+        </div>
+        
+        {/* Search input */}
+        <div className="z-20 relative w-full max-w-md mx-auto px-4 mt-8">
+          <form onSubmit={handleSubmit} className="flex w-full items-end gap-2">
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Ask about public data..."
+              className="min-h-10 bg-white/20 border-white/30 text-white placeholder:text-white/70 focus:border-green-400/70"
+            />
             <Button 
-              className="w-full bg-green-500/80 hover:bg-green-500/90 text-white font-medium transition-all"
+              type="submit"
+              className="bg-green-500/80 hover:bg-green-500/90 text-white h-10"
+              disabled={!query.trim()}
             >
-              Try the Alpha
+              Search
             </Button>
-          </Link>
-          
-          <Link href="/waitlist" className="w-full">
-            <Button 
-              variant="outline"
-              className="w-full bg-white/10 hover:bg-white/20 text-white border-white/30 font-medium transition-all"
-            >
-              Join Waitlist For Beta Access
-            </Button>
-          </Link>
+          </form>
+        </div>
+        
+        {/* Add footer with X logo */}
+        <div className="absolute bottom-4 w-full flex justify-center z-20">
+          <a 
+            href="https://x.com/askwithcrystal" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors"
+            aria-label="Follow us on X"
+          >
+            <img 
+              src="/images/xlogo.png" 
+              alt="X logo" 
+              className="h-5 w-5" 
+              style={{ filter: "brightness(0) invert(1)" }}
+            />
+          </a>
         </div>
       </div>
     </div>
