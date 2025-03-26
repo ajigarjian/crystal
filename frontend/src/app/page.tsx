@@ -3,7 +3,7 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useEffect, useRef, useState } from "react";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Twitter } from "lucide-react";
 import Link from "next/link";
 import { warmFunctions } from "@/lib/firebase";
 import { useRouter } from "next/navigation";
@@ -392,6 +392,24 @@ export default function Home() {
               Search
             </Button>
           </form>
+        </div>
+        
+        {/* Add footer with X logo */}
+        <div className="absolute bottom-4 w-full flex justify-center z-20">
+          <a 
+            href="https://x.com/askwithcrystal" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors"
+            aria-label="Follow us on X"
+          >
+            <img 
+              src="/images/xlogo.png" 
+              alt="X logo" 
+              className="h-5 w-5" 
+              style={{ filter: "brightness(0) invert(1)" }}
+            />
+          </a>
         </div>
       </div>
     </div>
