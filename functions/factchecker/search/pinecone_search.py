@@ -17,7 +17,6 @@ from typing import List, Dict, Any, Optional
 import logging
 import sys
 import traceback
-from factchecker.sqlalchemy_models import DatasetCatalog, DatasetResource
 import time
 
 # Import database utilities from shared helper module
