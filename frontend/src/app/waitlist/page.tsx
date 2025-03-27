@@ -73,12 +73,12 @@ export default function WaitlistPage() {
       <div
         className="w-full h-[calc(100vh-2rem)] rounded-lg bg-cover bg-center flex flex-col justify-center relative overflow-hidden"
         style={{
-          backgroundImage: "url('/images/crystal-bg0.png')",
+          backgroundImage: "url('/images/crystalbackground.png')",
         }}
       >
         {/* Background Image Layer with blur effect */}
         <div className="absolute inset-0 z-10 bg-cover bg-center after:absolute after:inset-0 after:bg-black/70 after:backdrop-blur-sm" 
-          style={{ backgroundImage: "url('/images/crystal-bg0.png')" }}>
+          style={{ backgroundImage: "url('/images/crystalbackground.png')" }}>
         </div>
         
         {/* Back to home link */}
