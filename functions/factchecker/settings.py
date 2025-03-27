@@ -1,6 +1,10 @@
 import os 
+from dotenv import load_dotenv
+
+load_dotenv()  # This should be called before importing settings
 
 DB_PASSWORD = os.environ["DB_PASSWORD"]
+
 
 # settings.py
 DATABASES = {
