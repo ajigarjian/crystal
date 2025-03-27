@@ -28,7 +28,7 @@ os.environ["FUNCTIONS_EMULATOR"] = "True"
 
 def test_process_query():
     res = process_query(query="What is the weather?", use_llm=True)
-    print(type(res))
+    print(res)
 
 
 if __name__ == "__main__":
