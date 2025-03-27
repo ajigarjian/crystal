@@ -7,19 +7,15 @@ import numpy as np
 import os
 import re
 import json
-from factchecker.sqlalchemy_models import DatasetCatalog, CensusDataset, CensusVariable, CensusGeography, CensusFIPSCode
+from factchecker.models import DatasetCatalog, CensusDataset, CensusVariable, CensusGeography, CensusFIPSCode, CensusTag
 from factchecker.search.search_utils import get_usable_resources
 from typing import Dict, List, Union, Optional
 from factchecker.utils.openai_client import create_embeddings, chat_completion, get_cached_openai_client
 from datetime import datetime
-from sqlalchemy import or_, and_, func
-from sqlalchemy.orm import Session
-from sqlalchemy.types import LargeBinary
+from django.db.models import Q, F, Value, FloatField
+from django.db.models.functions import Lower
 
 from helpers.db_utils import get_db_session
-from factchecker.sqlalchemy_models import (
-    CensusTag
-)
 
 ###########################################
 # QUERY PROCESSOR
@@ -225,18 +221,14 @@ class VectorSearcher:
         """
         Get available tags in the database, optionally filtered by year
         """
-        session = get_db_session()
-        try:
-            # Get all tags from the CensusTag table directly
-            available_tags = [tag.name for tag in session.query(CensusTag.name).all()]
+        # Get all tags from the CensusTag table directly
+        available_tags = [tag.name for tag in CensusTag.objects.values_list('name', flat=True)]
+        
+        # If no tags found in database, fall back to conceptual tags
+        if not available_tags:
+            available_tags = list(self.conceptual_tag_keywords.keys())
             
-            # If no tags found in database, fall back to conceptual tags
-            if not available_tags:
-                available_tags = list(self.conceptual_tag_keywords.keys())
-                
-            return available_tags
-        finally:
-            session.close()
+        return available_tags
     
     def _generate_tag_mapping(self, year=None, verbose=False):
         """
@@ -468,122 +460,116 @@ class VectorSearcher:
             # Debug: Print out filter parameters
             print(f"Debug => year: {year}, tags: {tags}, geo_level: {geo_level}, location: {location}")
 
-            session = get_db_session()
-            try:
-                # Start the base query
-                base_query = session.query(CensusDataset).filter(CensusDataset.embedding != None)
-                print("Debug => Base query for CensusDataset where embedding != None. Testing row count…")
+            # Start the base query
+            base_query = CensusDataset.objects.exclude(embedding=None)
+            print("Debug => Base query for CensusDataset where embedding != None. Testing row count…")
+            debug_count = base_query.count()
+            print(f"Debug => Row count so far: {debug_count}")
+
+            # Apply optional filters
+            if year:
+                print(f"Debug => Applying year filter: {year}")
+                base_query = base_query.filter(vintage=year)
                 debug_count = base_query.count()
-                print(f"Debug => Row count so far: {debug_count}")
+                print(f"Debug => Row count after year filter: {debug_count}")
 
-                # Apply optional filters
-                if year:
-                    print(f"Debug => Applying year filter: {year}")
-                    base_query = base_query.filter(CensusDataset.vintage == year)
-                    debug_count = base_query.count()
-                    print(f"Debug => Row count after year filter: {debug_count}")
+            if tags and isinstance(tags, list):
+                print(f"Debug => Applying tags filter: {tags}")
+                base_query = base_query.filter(tags__name__in=tags)
+                debug_count = base_query.count()
+                print(f"Debug => Row count after tags filter: {debug_count}")
 
-                if tags and isinstance(tags, list):
-                    print(f"Debug => Applying tags filter: {tags}")
-                    base_query = base_query.join(CensusDataset.tags).filter(CensusTag.name.in_(tags))
-                    debug_count = base_query.count()
-                    print(f"Debug => Row count after tags filter: {debug_count}")
+            if location:
+                print(f"Debug => Potential location filter: {location}")
+                # If you have location-based logic, do it here:
+                # base_query = base_query.filter(...)
+                # debug_count = base_query.count()
+                # print(f"Debug => Row count after location filter: {debug_count}")
 
-                if location:
-                    print(f"Debug => Potential location filter: {location}")
-                    # If you have location-based logic, do it here:
-                    # base_query = base_query.filter(...)
-                    # debug_count = base_query.count()
-                    # print(f"Debug => Row count after location filter: {debug_count}")
+            if geo_level:
+                print(f"Debug => Potential geo_level filter: {geo_level}")
+                # If you have geographic level logic, do it here:
+                # base_query = base_query.filter(...)
+                # debug_count = base_query.count()
+                # print(f"Debug => Row count after geo_level filter: {debug_count}")
 
-                if geo_level:
-                    print(f"Debug => Potential geo_level filter: {geo_level}")
-                    # If you have geographic level logic, do it here:
-                    # base_query = base_query.filter(...)
-                    # debug_count = base_query.count()
-                    # print(f"Debug => Row count after geo_level filter: {debug_count}")
+            # Finally, get the datasets
+            datasets = list(base_query.all())
+            print(f"Found {len(datasets)} datasets after filtering")
 
-                # Finally, get the datasets
-                datasets = base_query.all()
-                print(f"Found {len(datasets)} datasets after filtering")
+            if not datasets:
+                print("No datasets found after filtering, falling back to keyword search")
+                return self._census_fallback_keyword_search(query, year, tags, geo_level, location, verbose)
 
-                if not datasets:
-                    print("No datasets found after filtering, falling back to keyword search")
-                    return self._census_fallback_keyword_search(query, year, tags, geo_level, location, verbose)
-
-                results = []
-                for dataset in datasets:
-                    try:
-                        # Check if embedding exists
-                        if dataset.embedding is None:
-                            print(f"Dataset {dataset.id} has no embedding, skipping")
-                            continue
-                            
-                        # Debug the embedding
-                        #print(f"Dataset {dataset.id} embedding type: {type(dataset.embedding)}")
-                        if isinstance(dataset.embedding, bytes):
-                            print(f"Dataset {dataset.id} embedding is bytes, length: {len(dataset.embedding)}")
+            results = []
+            for dataset in datasets:
+                try:
+                    # Check if embedding exists
+                    if dataset.embedding is None:
+                        print(f"Dataset {dataset.id} has no embedding, skipping")
+                        continue
                         
-                        # Ensure proper conversion from binary to numpy array
-                        dataset_embedding = dataset.embedding
-                        if isinstance(dataset_embedding, bytes):
-                            if dataset_embedding.startswith(b'\\x'):
-                                hex_str = dataset_embedding.decode('utf-8')[2:]
-                                raw_bin = bytes.fromhex(hex_str)
-                                if len(raw_bin) % 4 == 0:
-                                    try:
-                                        dataset_embedding = np.frombuffer(raw_bin, dtype=np.float32)
-                                        print(f"Converted dataset {dataset.id} to np array shape {dataset_embedding.shape}")
-                                    except Exception as e:
-                                        print(f"Error converting dataset {dataset.id} embedding: {e}")
-                                        continue
-                                else:
-                                    print(f"Dataset {dataset.id} embedding length {len(raw_bin)} not multiple of 4")
+                    # Debug the embedding
+                    if isinstance(dataset.embedding, bytes):
+                        print(f"Dataset {dataset.id} embedding is bytes, length: {len(dataset.embedding)}")
+                    
+                    # Ensure proper conversion from binary to numpy array
+                    dataset_embedding = dataset.embedding
+                    if isinstance(dataset_embedding, bytes):
+                        if dataset_embedding.startswith(b'\\x'):
+                            hex_str = dataset_embedding.decode('utf-8')[2:]
+                            raw_bin = bytes.fromhex(hex_str)
+                            if len(raw_bin) % 4 == 0:
+                                try:
+                                    dataset_embedding = np.frombuffer(raw_bin, dtype=np.float32)
+                                    print(f"Converted dataset {dataset.id} to np array shape {dataset_embedding.shape}")
+                                except Exception as e:
+                                    print(f"Error converting dataset {dataset.id} embedding: {e}")
                                     continue
                             else:
-                                # If it's raw binary, parse only if length % 4 == 0
-                                if len(dataset_embedding) % 4 == 0:
-                                    try:
-                                        dataset_embedding = np.frombuffer(dataset_embedding, dtype=np.float32)
-                                    except Exception as e:
-                                        print(f"Error converting dataset {dataset.id} embedding: {e}")
-                                        continue
-                                else:
-                                    print(f"Dataset {dataset.id} embedding length {len(dataset_embedding)} not multiple of 4")
+                                print(f"Dataset {dataset.id} embedding length {len(raw_bin)} not multiple of 4")
+                                continue
+                        else:
+                            # If it's raw binary, parse only if length % 4 == 0
+                            if len(dataset_embedding) % 4 == 0:
+                                try:
+                                    dataset_embedding = np.frombuffer(dataset_embedding, dtype=np.float32)
+                                except Exception as e:
+                                    print(f"Error converting dataset {dataset.id} embedding: {e}")
                                     continue
-                        
-                        # Calculate similarity
-                        similarity = self._cosine_similarity(query_embedding, dataset_embedding)
-                        #print(f"Dataset {dataset.id} similarity: {similarity}")
-                        
-                        # Add to results if above threshold
-                        if similarity >= similarity_threshold:
-                            results.append({
-                                "id": dataset.id,
-                                "title": dataset.title,
-                                "description": dataset.description if dataset.description else "",
-                                "vintage": dataset.vintage,
-                                "dataset_path": dataset.dataset_path,
-                                "similarity": float(similarity),
-                                "search_source": "census_vector"
-                            })
-                    except Exception as e:
-                        print(f"Error processing dataset {dataset.id}: {e}")
-                        import traceback
-                        traceback.print_exc()
-                        continue
-                
-                # Sort by similarity (highest first)
-                results = sorted(results, key=lambda x: x["similarity"], reverse=True)
-                
-                # Limit to max_results
-                results = results[:self.max_results]
-                
-                print(f"Found {len(results)} results with similarity >= {similarity_threshold}")
-                
-                return results
-            finally:
-                session.close()
+                            else:
+                                print(f"Dataset {dataset.id} embedding length {len(dataset_embedding)} not multiple of 4")
+                                continue
+                    
+                    # Calculate similarity
+                    similarity = self._cosine_similarity(query_embedding, dataset_embedding)
+                    
+                    # Add to results if above threshold
+                    if similarity >= similarity_threshold:
+                        results.append({
+                            "id": dataset.id,
+                            "title": dataset.title,
+                            "description": dataset.description if dataset.description else "",
+                            "vintage": dataset.vintage,
+                            "dataset_path": dataset.dataset_path,
+                            "similarity": float(similarity),
+                            "search_source": "census_vector"
+                        })
+                except Exception as e:
+                    print(f"Error processing dataset {dataset.id}: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    continue
+            
+            # Sort by similarity (highest first)
+            results = sorted(results, key=lambda x: x["similarity"], reverse=True)
+            
+            # Limit to max_results
+            results = results[:self.max_results]
+            
+            print(f"Found {len(results)} results with similarity >= {similarity_threshold}")
+            
+            return results
             
         except Exception as e:
             print(f"Error searching Census datasets: {e}")
@@ -593,17 +579,16 @@ class VectorSearcher:
     
     def _census_fallback_keyword_search(self, query, year=None, tags=None, geo_level=None, location=None, verbose=False):
         """Fallback to keyword search when vector search fails"""
-        session = get_db_session()
         try:
             # Start with all datasets
-            base_query = session.query(CensusDataset)
+            base_query = CensusDataset.objects.all()
             
             if verbose:
                 print(f"Starting with {base_query.count()} total datasets")
             
             # Step 1: Filter by year if provided
             if year:
-                base_query = base_query.filter(CensusDataset.vintage == year)
+                base_query = base_query.filter(vintage=year)
                 if verbose:
                     print(f"After year filter: {base_query.count()} datasets")
                     
@@ -634,12 +619,12 @@ class VectorSearcher:
                     normalized_geo = geo_mapping.get(geo_level.lower(), geo_level.lower())
                     
                     # Find datasets that support this geography
-                    geo_subquery = session.query(CensusGeography.dataset_id).filter(
-                        func.lower(CensusGeography.name).contains(normalized_geo)
-                    )
+                    geo_dataset_ids = CensusGeography.objects.filter(
+                        name__icontains=normalized_geo
+                    ).values_list('dataset_id', flat=True)
                     
-                    if geo_subquery.count() > 0:
-                        base_query = base_query.filter(CensusDataset.id.in_(geo_subquery))
+                    if geo_dataset_ids.exists():
+                        base_query = base_query.filter(id__in=geo_dataset_ids)
                         if verbose:
                             print(f"After geography filter: {base_query.count()} datasets")
                     else:
@@ -655,13 +640,11 @@ class VectorSearcher:
                 # They contain data for all locations at a given geographic level
                 # So location filtering is purely optional and should never eliminate all results
                 location_filtered = base_query.filter(
-                    or_(
-                        func.lower(CensusDataset.title).contains(location.lower()),
-                        func.lower(CensusDataset.description).contains(location.lower())
-                    )
+                    Q(title__icontains=location) | 
+                    Q(description__icontains=location)
                 )
                 
-                if location_filtered.count() > 0:
+                if location_filtered.exists():
                     base_query = location_filtered
                     if verbose:
                         print(f"After location filter: {base_query.count()} datasets")
@@ -676,7 +659,7 @@ class VectorSearcher:
                 tag_mapping = self._generate_tag_mapping(year, verbose)
                 
                 # Build query for mapped tags
-                tag_conditions = []
+                tag_conditions = Q()
                 
                 for tag in tags:
                     if tag in tag_mapping:
@@ -684,21 +667,13 @@ class VectorSearcher:
                         mapped_tags = tag_mapping[tag]
                         for mapped_tag in mapped_tags:
                             # Add condition for each mapped tag
-                            tag_conditions.append(or_(
-                                func.lower(CensusDataset.title).contains(mapped_tag.lower()),
-                                func.lower(CensusDataset.description).contains(mapped_tag.lower())
-                            ))
+                            tag_conditions |= Q(title__icontains=mapped_tag) | Q(description__icontains=mapped_tag)
                     else:
                         # If it's already a database tag, use it directly
-                        tag_conditions.append(or_(
-                            func.lower(CensusDataset.title).contains(tag.lower()),
-                            func.lower(CensusDataset.description).contains(tag.lower())
-                        ))
+                        tag_conditions |= Q(title__icontains=tag) | Q(description__icontains=tag)
                 
                 if tag_conditions:
-                    # Use or_ to combine conditions
-                    tag_filter = or_(*tag_conditions)
-                    base_query = base_query.filter(tag_filter)
+                    base_query = base_query.filter(tag_conditions)
                     if verbose:
                         print(f"After tag filter: {base_query.count()} datasets")
             
@@ -707,29 +682,27 @@ class VectorSearcher:
             keywords = query.lower().split()
             
             # Build the query
-            keyword_conditions = []
+            keyword_conditions = Q()
             for keyword in keywords:
-                keyword_conditions.append(func.lower(CensusDataset.title).contains(keyword))
-                keyword_conditions.append(func.lower(CensusDataset.description).contains(keyword))
-                keyword_conditions.append(func.lower(CensusDataset.dataset_path).contains(keyword))
+                keyword_conditions |= Q(title__icontains=keyword)
+                keyword_conditions |= Q(description__icontains=keyword)
+                keyword_conditions |= Q(dataset_path__icontains=keyword)
             
             # Apply keyword filtering
             if keyword_conditions:
-                keyword_filter = or_(*keyword_conditions)
-                base_query = base_query.filter(keyword_filter)
+                base_query = base_query.filter(keyword_conditions)
             
             if verbose:
                 print(f"After keyword filter: {base_query.count()} datasets")
             
             # Format results
             results = []
-            for dataset in base_query.limit(self.max_results).all():
+            for dataset in base_query[:self.max_results]:
                 # Get available geographies for this dataset
                 geo_levels = []
                 try:
-                    # Check if dataset has geographies relationship
-                    if hasattr(dataset, 'geographies'):
-                        geo_levels = [geo.name for geo in dataset.geographies]
+                    # Get geographies for this dataset
+                    geo_levels = list(dataset.geographies.values_list('name', flat=True))
                 except Exception as e:
                     print(f"Error getting geographies for dataset {dataset.id}: {e}")
                 
@@ -739,7 +712,7 @@ class VectorSearcher:
                     'vintage': dataset.vintage,
                     'title': dataset.title,
                     'path': dataset.dataset_path,
-                    'variable_count': session.query(CensusVariable).filter(CensusVariable.dataset_id == dataset.id).count(),
+                    'variable_count': CensusVariable.objects.filter(dataset_id=dataset.id).count(),
                     'id': dataset.id,
                     'description': dataset.description or '',
                     'geographic_levels': geo_levels,
@@ -751,8 +724,11 @@ class VectorSearcher:
             
             # Ensure we return a list
             return list(results[:self.max_results])
-        finally:
-            session.close()
+        except Exception as e:
+            print(f"Error in fallback search: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
 
 ###########################################
 # PUBLIC FUNCTION INTERFACES
