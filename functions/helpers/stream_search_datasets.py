@@ -18,7 +18,7 @@ from factchecker.search.search_utils import parallel_search, single_search
 from factchecker.search import search_datasets
 from factchecker.search.pinecone_search import vector_search_datasets_pinecone as vector_search_datasets
 from factchecker.search.census_search import vector_search as census_vector_search
-from factchecker.processing.analysis.search_result_analyzer import assess_datafile_relevance_predownload
+from factchecker.processing.analysis.dataset_result_analyzer import assess_datafile_relevance_predownload
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
