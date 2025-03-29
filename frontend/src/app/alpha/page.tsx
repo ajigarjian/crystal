@@ -30,7 +30,7 @@ import {
 } from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Progress } from "@/components/ui/progress";
-import { AlertCircle, CheckCircle2, FileText, Database, ArrowRight, Download, FileCheck, Loader2 } from "lucide-react";
+import { AlertCircle, CheckCircle2, FileText, Database, ArrowRight, Download, FileCheck, Loader2, Star } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { streamSearchDatasets, warmFunctions, streamAnalyzeDatasets } from "@/lib/firebase";
 
@@ -65,6 +65,7 @@ interface Dataset {
   tags?: (Tag | string)[];
   image_url?: string;
   search_source?: string;
+  is_cached?: boolean;
   status?: 'starting' | 'downloading' | 'downloaded' | 'analyzing_files' | 'loading' | 'assessing' | 'relevant' | 'not_relevant' | 'skipped' | 'error';
   processing_complete?: boolean;
   pre_assessment?: {
@@ -1354,6 +1355,14 @@ export default function DatasetsPage() {
                           </div>
                         )}
                         
+                        {/* Preferred badge for cached datasets */}
+                        {dataset.is_cached && (
+                          <div className="absolute top-2 left-2 z-10 rounded-full px-2 py-0.5 flex items-center text-xs bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300">
+                            <Star className="h-3 w-3 mr-1" />
+                            <span>Preferred</span>
+                          </div>
+                        )}
+                        
                         <CardHeader className="p-3 pb-2">
                           <div className="flex items-start">
                             <div className="h-6 w-6 rounded overflow-hidden bg-neutral-200 mr-2 flex-shrink-0">
@@ -1706,6 +1715,14 @@ export default function DatasetsPage() {
                                   ) : (
                                     <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300">
                                       {Math.round(relevanceScore * 100)}%
+                                    </span>
+                                  )}
+                                  
+                                  {/* Add Preferred badge for cached datasets */}
+                                  {dataset.is_cached && (
+                                    <span className="inline-flex items-center px-2 py-1 ml-2 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300">
+                                      <Star className="h-3 w-3 mr-1" />
+                                      <span>Preferred</span>
                                     </span>
                                   )}
                                 </div>
