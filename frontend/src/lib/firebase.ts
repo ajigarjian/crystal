@@ -346,7 +346,7 @@ export const warmFunctions = async () => {
 export const streamAnalyzeDatasets = async (
   data: {
     query: string;
-    datasets: any[];
+    dataset_ids: string[];
   },
   onChunk?: (chunk: any) => void // Callback for streaming updates
 ) => {
@@ -355,7 +355,6 @@ export const streamAnalyzeDatasets = async (
     ? onChunk 
     : (chunk: any) => {
         console.log('Received analysis chunk:', chunk);
-        // Default implementation just logs the chunk
       };
 
   // Get the region and project ID from the functions instance
@@ -365,24 +364,26 @@ export const streamAnalyzeDatasets = async (
   // Construct the URL for the HTTP function
   let baseUrl = '';
   if (process.env.NODE_ENV === 'development') {
-    // Use emulator URL in development
     baseUrl = `http://localhost:5001/${projectId}/${region}`;
   } else {
-    // Use production URL in production
     baseUrl = `https://${region}-${projectId}.cloudfunctions.net`;
   }
   
-  // Corrected URL to match the actual backend function name
   const url = `${baseUrl}/stream_analyze`;
-  
-  // Convert the datasets array to dataset_ids array
-  const dataset_ids = data.datasets.map(dataset => dataset.id);
-  
-  // Create the proper payload expected by the backend
+
+  // If no dataset IDs, throw an error
+  if (!data.dataset_ids || data.dataset_ids.length === 0) {
+    console.error('No valid dataset IDs provided for analysis');
+    throw new Error('No valid dataset IDs provided for analysis');
+  }
+
+  // Build payload that matches what the Python function expects
   const payload = {
     query: data.query,
-    dataset_ids: dataset_ids
+    dataset_ids: data.dataset_ids
   };
+  
+  console.log('Sending analysis request with payload:', payload);
   
   try {
     const response = await fetch(url, {
@@ -399,58 +400,54 @@ export const streamAnalyzeDatasets = async (
       throw new Error(errorText || 'Failed to analyze datasets');
     }
     
-    // For streaming responses, we need to process the response as a stream
+    // For streaming responses, read as a stream
     const reader = response.body?.getReader();
     if (!reader) {
       throw new Error('Stream reader not available');
     }
     
-    // Process the stream and parse each chunk as JSON
     const decoder = new TextDecoder();
     let buffer = '';
-    const chunks = []; // Store processed chunks to return
+    const chunks = [];
     
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       
-      // Decode the chunk and add it to our buffer
       buffer += decoder.decode(value, { stream: true });
-      
-      // Split the buffer by newlines to get individual JSON objects
       const lines = buffer.split('\n');
-      
-      // Process all complete lines
       for (let i = 0; i < lines.length - 1; i++) {
         const line = lines[i].trim();
         if (line) {
           try {
-            const data = JSON.parse(line);
-            // Call the callback with each chunk of data
-            processChunk(data);
-            chunks.push(data);
+            const jsonStr = line.startsWith('data: ')
+              ? line.substring(6)
+              : line;
+            const parsed = JSON.parse(jsonStr);
+            processChunk(parsed);
+            chunks.push(parsed);
           } catch (e) {
             console.error('Error parsing JSON:', e, 'Line:', line);
           }
         }
       }
-      
-      // Keep the last (potentially incomplete) line in the buffer
       buffer = lines[lines.length - 1];
     }
     
-    // Process any remaining data in the buffer
     if (buffer.trim()) {
       try {
-        const data = JSON.parse(buffer.trim());
-        processChunk(data);
-        chunks.push(data);
+        const jsonStr = buffer.trim().startsWith('data: ')
+          ? buffer.trim().substring(6)
+          : buffer.trim();
+        const parsed = JSON.parse(jsonStr);
+        processChunk(parsed);
+        chunks.push(parsed);
       } catch (e) {
         console.error('Error parsing final JSON:', e);
       }
     }
     
-    return chunks; // Return all processed chunks
+    return chunks;
   } catch (error: any) {
     console.error('Error calling stream_analyze_datasets:', error);
     throw new Error(error.message || 'Failed to analyze datasets');
