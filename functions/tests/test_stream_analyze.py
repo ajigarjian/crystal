@@ -110,12 +110,13 @@ def local_stream_analyze(request_json):
                 # Create a document with the analysis results
                 analysis_ref = db.collection('analyses').document()
                 
-                # Add the analysis data
+                # Add the analysis data with web search results
                 analysis_ref.set({
                     'dataset_id': dataset_id,
                     'query': query,
                     'timestamp': firestore.SERVER_TIMESTAMP,
-                    'results': final_result
+                    'results': final_result,
+                    'has_web_search_results': 'web_search_results' in final_result
                 })
                 
                 logger.info(f"Stored analysis results in Firestore with ID: {analysis_ref.id}")
@@ -138,7 +139,7 @@ def run_local_analysis():
     # Example request data
     request_data = {
         "dataset_id": "f5899dc6-c712-43ac-a368-f7f4feda20aa",  # Replace with an actual dataset ID you want to test
-        "query": "soybean emissions factors",
+        "query": "How environmentally exhaustive are soybeans versus other farmed items?",
         "file_path": None  # Set to a specific path if needed, otherwise will use default locations
     }
     
@@ -156,6 +157,18 @@ def run_local_analysis():
                 # Status update
                 print(f"Status: {data.get('message', '')}")
                 
+            elif event_type == "web_search_results":
+                # Web search results
+                print(f"Web search results received")
+                summary = data.get("data", {}).get("summary", {})
+                if summary:
+                    print(f"Web search summary: {summary.get('summary', 'No summary available')}")
+            
+            elif event_type == "web_search_summary":
+                # Web search summary
+                summary = data.get("data", {})
+                print(f"Web search summary: {summary.get('summary', 'No summary available')}")
+                
             elif event_type == "analysis_result":
                 # Dataset info
                 dataset_info = data.get("data", {}).get("dataset_info", {})
@@ -165,14 +178,20 @@ def run_local_analysis():
             elif event_type == "analysis":
                 # Analysis content
                 analysis = data.get("data", "No analysis available")
-                print("\nAnalysis:")
-                print(analysis)
                 
             elif event_type == "complete":
                 # Final results
                 result = data.get("data", {})
                 print("\nAnalysis complete!")
                 print(f"Execution time: {result.get('execution_time', 0)} seconds")
+                
+                # Log if web search results are included
+                if 'web_search_results' in result:
+                    print("Analysis includes web search results")
+                    
+                    # Log summary information if available
+                    if 'summary' in result['web_search_results']:
+                        print(f"Web search summary: {result['web_search_results']['summary'].get('summary', 'No summary available')}")
                 
             elif event_type == "error":
                 # Error occurred

@@ -70,6 +70,10 @@ def process_and_yield_dataset(dataset, source, all_datasets_count, start_time):
     # Set search source
     dataset['search_source'] = source
     
+    # Check if resources are cached and set is_cached flag
+    resources = dataset.get('resources', [])
+    dataset['is_cached'] = any(resource.get('is_cached', False) for resource in resources)
+    
     # Yield status update about finding this dataset
     yield json.dumps({
         'type': 'discovery',
@@ -134,7 +138,8 @@ def search_census_data(query, similarity_threshold, max_results, start_time):
                     'resources': [],
                     'search_source': 'census',
                     'vintage': dataset_vintage,
-                    'dataset_path': dataset_path
+                    'dataset_path': dataset_path,
+                    'is_cached': False  # Default to not cached for Census datasets
                 }
                 
                 # Yield discovery message for this dataset
