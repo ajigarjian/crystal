@@ -372,7 +372,7 @@ def test_db_connection(request):
         "http://localhost:3000",
         "http://localhost:5173",
         ],
-        cors_methods=["get", "post"],
+        cors_methods=["get", "post", "options"],
     ),
     memory=options.MemoryOption.MB_512
 )
