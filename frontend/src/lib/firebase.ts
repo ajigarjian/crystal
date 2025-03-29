@@ -240,7 +240,7 @@ export const warmFunctions = async () => {
     const functionsToWarm = [
       'register_waitlist',
       'stream_search_datasets',
-      'stream_analyze_datasets'  // Add the new function
+      'stream_analyze'  // Corrected function name
     ];
     
     // Warm each function with a minimal payload
@@ -296,7 +296,17 @@ export const streamAnalyzeDatasets = async (
     baseUrl = `https://${region}-${projectId}.cloudfunctions.net`;
   }
   
-  const url = `${baseUrl}/stream_analyze_datasets`;
+  // Corrected URL to match the actual backend function name
+  const url = `${baseUrl}/stream_analyze`;
+  
+  // Convert the datasets array to dataset_ids array
+  const dataset_ids = data.datasets.map(dataset => dataset.id);
+  
+  // Create the proper payload expected by the backend
+  const payload = {
+    query: data.query,
+    dataset_ids: dataset_ids
+  };
   
   try {
     const response = await fetch(url, {
@@ -304,7 +314,7 @@ export const streamAnalyzeDatasets = async (
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(data),
+      body: JSON.stringify(payload),
     });
     
     if (!response.ok) {
