@@ -81,108 +81,129 @@ firebase_admin.initialize_app()
         ],
         cors_methods=["get", "post"],
     ),
-    memory=options.MemoryOption.MB_512
+    memory=options.MemoryOption.GB_1,  # Increase memory to 1GB
+    region=options.SupportedRegion.US_CENTRAL1,
+    timeout_sec=300
 )
 def stream_search_datasets(request):
     """HTTP Cloud Function that streams dataset search results."""
-
-    # Initialize db
-    db = firestore.client()
-    
-    # Parse request data
-    request_json = request.get_json(silent=True)
-    
-    if not request_json:
-        return https_fn.Response(
-            json.dumps({"error": "No JSON data provided"}),
-            status=400,
-            headers={"Content-Type": "application/json"}
-        )
-    
+    try:
+        # Initialize db
+        db = firestore.client()
+        
+        # Parse request data
+        try:
+            request_json = request.get_json(silent=True)
+        except Exception as e:
+            logger.error(f"Error parsing request JSON: {e}")
+            return https_fn.Response(
+                json.dumps({"error": "Invalid JSON format"}),
+                status=400,
+                headers={"Content-Type": "application/json"}
+            )
+        
+        if not request_json:
+            return https_fn.Response(
+                json.dumps({"error": "No JSON data provided"}),
+                status=400,
+                headers={"Content-Type": "application/json"}
+            )
+        
         # Handle warming requests quickly
-    if request_json.get('warming'):
-        logger.info("Warming request received for stream_search_datasets")
-        return https_fn.Response(
-            json.dumps({"status": "warmed"}),
-            status=200,
-            headers={"Content-Type": "application/json"}
-        )
-    
-    # Get the query parameter
-    query = request_json.get('query', '')
-    
-    if not query:
-        return https_fn.Response(
-            json.dumps({"error": "Query is required"}),
-            status=400,
-            headers={"Content-Type": "application/json"}
-        )
-    
-    # Get optional parameters with defaults
-    similarity_threshold = float(request_json.get('similarity_threshold', 0.3))
-    search_method = request_json.get('search_method', None)  # 'vector', 'keyword', or None for hybrid
-    max_results = int(request_json.get('max_results', 15))
-    census_max_results = int(request_json.get('census_max_results', 5))
-    relevance_threshold = 0.35 #hardcoded for now #float(request_json.get('relevance_threshold', 0.3)) 
-    
-    logger.info(f"Streaming search parameters: method={search_method}, threshold={similarity_threshold}, max_results={max_results}")
-    
-    # Create a generator function that yields dataset results as they come in
-    def generate():
-        # Initialize a variable to store the final result
-        final_result = None
+        if request_json.get('warming'):
+            logger.info("Warming request received for stream_search_datasets")
+            return https_fn.Response(
+                json.dumps({"status": "warmed"}),
+                status=200,
+                headers={"Content-Type": "application/json"}
+            )
         
-        # Process the streaming search
-        for chunk in stream_search_datasets_helper(
-            query=query,
-            similarity_threshold=similarity_threshold,
-            search_method=search_method,
-            max_results=max_results,
-            census_max_results=census_max_results,
-            relevance_threshold=relevance_threshold
-        ):
-            # If this is a JSON object and it's the 'complete' type, store it as the final result
+        # Get the query parameter
+        query = request_json.get('query', '')
+        
+        if not query:
+            return https_fn.Response(
+                json.dumps({"error": "Query is required"}),
+                status=400,
+                headers={"Content-Type": "application/json"}
+            )
+        
+        # Get optional parameters with defaults
+        similarity_threshold = float(request_json.get('similarity_threshold', 0.3))
+        search_method = request_json.get('search_method', None)  # 'vector', 'keyword', or None for hybrid
+        max_results = int(request_json.get('max_results', 15))
+        census_max_results = int(request_json.get('census_max_results', 5))
+        relevance_threshold = 0.35 #hardcoded for now #float(request_json.get('relevance_threshold', 0.3)) 
+        
+        logger.info(f"Streaming search parameters: method={search_method}, threshold={similarity_threshold}, max_results={max_results}")
+        
+        def generate():
             try:
-                chunk_data = json.loads(chunk.strip())
-                if chunk_data.get('type') == 'complete':
-                    final_result = chunk_data.get('data', {})
-            except:
-                pass
+                final_result = None
+                
+                # Add error handling around the stream processing
+                try:
+                    for chunk in stream_search_datasets_helper(
+                        query=query,
+                        similarity_threshold=similarity_threshold,
+                        search_method=search_method,
+                        max_results=max_results,
+                        census_max_results=census_max_results,
+                        relevance_threshold=relevance_threshold
+                    ):
+                        try:
+                            # Process each chunk in a try-except block
+                            if isinstance(chunk, str):
+                                chunk_data = json.loads(chunk.strip())
+                                if chunk_data.get('type') == 'complete':
+                                    final_result = chunk_data.get('data', {})
+                                yield chunk + "\n"
+                        except Exception as chunk_error:
+                            logger.error(f"Error processing chunk: {chunk_error}")
+                            continue
+                except Exception as stream_error:
+                    logger.error(f"Error in stream processing: {stream_error}")
+                    yield json.dumps({"error": "Stream processing error"}) + "\n"
+                
+                # Store results in Firestore
+                if final_result:
+                    try:
+                        search_ref = db.collection('queries').document()
+                        search_ref.set({
+                            'query': query,
+                            'timestamp': firestore.SERVER_TIMESTAMP,
+                            'results': final_result
+                        })
+                    except Exception as db_error:
+                        logger.error(f"Error storing results in Firestore: {db_error}")
             
-            # Yield the chunk
-            yield chunk + "\n"  # Add newline to ensure proper parsing on client side
-        
-        # If we have a final result, store it in Firestore for later retrieval
-        if final_result:
-            try:
-                # Get a reference to the Firestore database
-                db = firestore.client()
-                
-                # Create a document with the search results
-                search_ref = db.collection('queries').document()
-                
-                # Add the search data
-                search_ref.set({
-                    'query': query,
-                    'timestamp': firestore.SERVER_TIMESTAMP,
-                    'results': final_result
-                })
-                
-                logger.info(f"Stored search results in Firestore with ID: {search_ref.id}")
-            except Exception as e:
-                logger.error(f"Error storing results in Firestore: {e}")
-    
-    # Create and return the streaming response
-    return https_fn.Response(
-        generate(),
-        status=200,
-        headers={
-            "Content-Type": "text/event-stream",
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"
-        }
-    )
+            except Exception as gen_error:
+                logger.error(f"Generator error: {gen_error}")
+                yield json.dumps({"error": "Internal server error"}) + "\n"
+            
+            finally:
+                # Clean up any resources if needed
+                pass
+
+        return https_fn.Response(
+            generate(),
+            status=200,
+            headers={
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"Fatal error in stream_search_datasets: {e}")
+        logger.error(traceback.format_exc())
+        return https_fn.Response(
+            json.dumps({"error": "Internal server error", "details": str(e)}),
+            status=500,
+            headers={"Content-Type": "application/json"}
+        )
 
 @https_fn.on_request(
     cors=options.CorsOptions(
@@ -193,7 +214,10 @@ def stream_search_datasets(request):
             "http://localhost:5173",
         ],
         cors_methods=["get", "post", "options"]
-    )
+    ),
+    memory=options.MemoryOption.MB_512,
+    region=options.SupportedRegion.US_CENTRAL1,
+    timeout_sec=300
 )
 def register_waitlist(request):
     """HTTP Cloud Function that registers a user to the waitlist."""
@@ -302,7 +326,9 @@ def register_waitlist(request):
     cors=options.CorsOptions(
         cors_origins=["*"],
         cors_methods=["get", "post"],
-    )
+    ),
+    memory=options.MemoryOption.MB_512,
+    region=options.SupportedRegion.US_CENTRAL1
 )
 def test_db_connection(request):
     """HTTP Cloud Function that tests database connection."""
@@ -374,7 +400,8 @@ def test_db_connection(request):
         ],
         cors_methods=["get", "post"],
     ),
-    memory=options.MemoryOption.MB_512
+    memory=options.MemoryOption.MB_512,
+    region=options.SupportedRegion.US_CENTRAL1
 )
 def stream_analyze(request):
     """HTTP Cloud Function that streams dataset analysis results."""
@@ -485,6 +512,19 @@ def stream_analyze(request):
         }
     )
 
+@https_fn.on_request(
+    cors=options.CorsOptions(
+        cors_origins=[
+        "https://crystal-2f87e.web.app",
+        "https://askcrystal.info",
+        "http://localhost:3000",
+        "http://localhost:5173",
+        ],
+        cors_methods=["get", "post"],
+    ),
+    memory=options.MemoryOption.MB_512,
+    region=options.SupportedRegion.US_CENTRAL1
+)
 def submit_feedback(request):
     """HTTP Cloud Function that submits user feedback to the database using raw SQL."""
     logger.info("Starting submit_feedback function")
