@@ -741,4 +741,3 @@ def process_resource_metadata(resource_metadata):
         datasets[dataset_id]['resources'].sort(key=lambda x: x.get('position', 0))
     
     return datasets
-
