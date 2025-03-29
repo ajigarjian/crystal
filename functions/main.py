@@ -12,10 +12,7 @@ import numpy as np
 import concurrent.futures
 from threading import Lock
 import random
-
-from helpers.db_utils import execute_query, get_db_connection, get_connection_pool
-from helpers.stream_search_datasets import stream_search_datasets_helper
-from helpers.stream_analyze import stream_analyze_helper
+import django
 
 from dotenv import load_dotenv
 
@@ -25,6 +22,38 @@ load_dotenv()
 # turn on emulator
 if os.getenv('FUNCTIONS_EMULATOR'):
     os.environ["FIRESTORE_EMULATOR_HOST"] = "localhost:8080"  # adjust port if needed
+
+# Configure Django settings
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'factchecker.settings')
+
+# Set up Django with error handling for database connection
+try:
+    django.setup()
+except Exception as django_setup_error:
+    logger = logging.getLogger(__name__)
+    logger.error(f"Error in django.setup(): {django_setup_error}")
+    
+    # If running in production and error might be related to database connection
+    if not os.getenv('FUNCTIONS_EMULATOR') and 'database' in str(django_setup_error).lower():
+        try:
+            # Import settings to access the fallback configuration
+            from factchecker import settings
+            
+            # Apply fallback database configuration
+            if hasattr(settings, 'DB_FALLBACK'):
+                logger.info("Attempting to use fallback database configuration")
+                settings.DATABASES = settings.DB_FALLBACK
+                
+                # Retry Django setup with fallback configuration
+                django.setup()
+        except Exception as fallback_error:
+            logger.error(f"Fallback configuration also failed: {fallback_error}")
+            raise
+
+# After Django is set up, import helpers that might use Django models
+from helpers.db_utils import execute_query, get_db_connection, get_connection_pool
+from helpers.stream_search_datasets import stream_search_datasets_helper
+from helpers.stream_analyze import stream_analyze_helper
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -269,31 +298,57 @@ def register_waitlist(request):
 def test_db_connection(request):
     """HTTP Cloud Function that tests database connection."""
     try:
-        # Try to connect to the database
+        # Test the low-level database connection first
         conn = get_db_connection()
         
         # Execute a simple query
         with conn.cursor() as cursor:
             cursor.execute("SELECT 1 as connection_test")
-            result = cursor.fetchone()
+            psycopg_result = cursor.fetchone()
         
         conn.close()
+        
+        # Now test Django's connection
+        from django.db import connection
+        from django.conf import settings
+        
+        # Get current Django database settings
+        db_settings = settings.DATABASES['default']
+        connection_type = "Unix Socket" if '/cloudsql' in str(db_settings.get('HOST', '')) else "TCP/IP"
+        is_emulator = os.getenv('FUNCTIONS_EMULATOR') == 'true'
+        
+        # Execute a query using Django's connection
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1 as django_test")
+            django_result = cursor.fetchone()[0]
         
         return https_fn.Response(
             json.dumps({
                 "status": "success",
                 "message": "Database connection successful",
-                "result": result
+                "direct_connection": {
+                    "result": psycopg_result
+                },
+                "django_connection": {
+                    "result": django_result,
+                    "connection_type": connection_type,
+                    "environment": "emulator" if is_emulator else "production",
+                    "engine": db_settings.get('ENGINE'),
+                    "host": db_settings.get('HOST')
+                }
             }),
             status=200,
             headers={"Content-Type": "application/json"}
         )
     except Exception as e:
         logger.error(f"Database connection test failed: {e}")
+        logger.error(traceback.format_exc())
         return https_fn.Response(
             json.dumps({
                 "status": "error",
-                "message": f"Database connection failed: {str(e)}"
+                "message": f"Database connection failed: {str(e)}",
+                "traceback": traceback.format_exc(),
+                "environment": "emulator" if os.getenv('FUNCTIONS_EMULATOR') == 'true' else "production"
             }),
             status=500,
             headers={"Content-Type": "application/json"}
@@ -338,16 +393,21 @@ def stream_analyze(request):
         )
     
     # Get the required parameters
+    dataset_ids = request_json.get('dataset_ids', [])
+    # For backward compatibility, check for single dataset_id as well
     dataset_id = request_json.get('dataset_id', '')
+    if dataset_id and not dataset_ids:
+        dataset_ids = [dataset_id]
+    
     query = request_json.get('query', '')
     
     # Optional file path parameter
     file_path = request_json.get('file_path', None)
     
     # Validate required parameters
-    if not dataset_id:
+    if not dataset_ids:
         return https_fn.Response(
-            json.dumps({"error": "Dataset ID is required"}),
+            json.dumps({"error": "At least one dataset ID is required"}),
             status=400,
             headers={"Content-Type": "application/json"}
         )
@@ -359,7 +419,7 @@ def stream_analyze(request):
             headers={"Content-Type": "application/json"}
         )
     
-    logger.info(f"Streaming analysis parameters: dataset_id={dataset_id}, query='{query}'")
+    logger.info(f"Streaming analysis parameters: dataset_ids={dataset_ids}, query='{query}'")
     
     # Create a generator function that yields analysis results as they come in
     def generate():
@@ -368,7 +428,7 @@ def stream_analyze(request):
         
         # Process the streaming analysis
         for chunk in stream_analyze_helper(
-            dataset_id=dataset_id,
+            dataset_ids=dataset_ids,
             query=query,
             file_path=file_path
         ):
@@ -380,8 +440,8 @@ def stream_analyze(request):
             except:
                 pass
             
-            # Yield the chunk
-            yield chunk  # Add newline to ensure proper parsing on client side
+            # Yield the chunk in SSE format with "data:" prefix
+            yield f"data: {chunk}\n"
         
         # If we have a final result, store it in Firestore for later retrieval
         if final_result:
@@ -394,7 +454,7 @@ def stream_analyze(request):
                 
                 # Add the analysis data
                 analysis_ref.set({
-                    'dataset_id': dataset_id,
+                    'dataset_ids': dataset_ids,
                     'query': query,
                     'timestamp': firestore.SERVER_TIMESTAMP,
                     'results': final_result
@@ -415,15 +475,3 @@ def stream_analyze(request):
             "X-Accel-Buffering": "no"
         }
     )
-
-@https_fn.on_request(
-    cors=options.CorsOptions(
-        cors_origins=[
-            "https://crystal-2f87e.web.app",
-            "https://askcrystal.info",
-            "http://localhost:3000",
-            "http://localhost:5173",
-        ],
-        cors_methods=["get", "post", "options"]
-    )
-)
