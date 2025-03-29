@@ -624,18 +624,47 @@ export default function DatasetsPage() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
-    // If search is already complete, start analysis instead of searching again
+    // If search is already complete, start analysis with selected datasets
     if (searchComplete && datasets.length > 0) {
-      startAnalysis();
+      // If analysis functionality is ready, use the internal startAnalysis
+      // startAnalysis();
+      
+      // Otherwise, navigate to chat page with multiple datasets
+      handleMultiDatasetSelect();
     } else {
       // Otherwise do the search as before
       processStreamingQuery(query);
     }
   };
 
-  // Handle dataset selection
+  // Handle single dataset selection
   const handleDatasetSelect = (dataset: Dataset) => {
+    // Store the selected dataset ID in localStorage
+    localStorage.setItem('selectedDataset', dataset.id);
+    localStorage.setItem('lastQuery', query);
+    
+    // Navigate to the chat page with dataset ID and query
     router.push(`/chat?dataset=${dataset.id}&query=${encodeURIComponent(query)}`);
+  };
+  
+  // Handle multi-dataset selection - for when user wants to analyze multiple datasets
+  const handleMultiDatasetSelect = () => {
+    // Get the selected datasets
+    const datasetIds = Object.entries(selectedDatasets)
+      .filter(([_, isSelected]) => isSelected)
+      .map(([id]) => id);
+      
+    if (datasetIds.length === 0) {
+      setError("Please select at least one dataset to analyze.");
+      return;
+    }
+    
+    // Store selected dataset IDs in localStorage
+    localStorage.setItem('selectedDatasets', JSON.stringify(datasetIds));
+    localStorage.setItem('lastQuery', query);
+    
+    // Navigate to analysis page with dataset IDs and query
+    router.push(`/chat?datasets=${encodeURIComponent(JSON.stringify(datasetIds))}&query=${encodeURIComponent(query)}`);
   };
 
   // Helper function to get image URL
