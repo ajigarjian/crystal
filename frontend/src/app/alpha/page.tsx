@@ -42,6 +42,8 @@ import { AlertCircle, CheckCircle2, FileText, Database, ArrowRight, Download, Fi
 import { Checkbox } from "@/components/ui/checkbox";
 import { streamSearchDatasets, warmFunctions, streamAnalyzeDatasets, submitFeedback } from "@/lib/firebase";
 import Script from "next/script";
+// Import QUERY_EXAMPLES from constants
+import { QUERY_EXAMPLES } from "@/lib/constants";
 
 interface Resource {
   id: string;
@@ -355,16 +357,6 @@ export default function DatasetsPage() {
   
   const router = useRouter();
   
-  // Add example queries
-  const exampleQueries = [
-    "What's the air quality trend in NYC over the past 5 years?",
-    "How has median housing price changed in San Francisco since 2010?",
-    "What are the vaccination rates for children in Chicago by neighborhood?",
-    "Compare public transit ridership in Boston before and after COVID-19",
-    "What's the correlation between green space and asthma rates in Los Angeles?",
-    "Show me demographic changes in Atlanta's neighborhoods since 2015"
-  ];
-  
   // Determine if we're on mobile (for responsive design)
   const [isMobile, setIsMobile] = useState(false);
   
@@ -384,8 +376,23 @@ export default function DatasetsPage() {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
   
+  // Get random example queries - using useEffect to ensure it only runs once on mount
+  const [exampleQueries, setExampleQueries] = useState<string[]>([]);
+  
+  useEffect(() => {
+    // Create a copy of the query examples to avoid modifying the original
+    const examples = [...QUERY_EXAMPLES];
+    // Shuffle the array using Fisher-Yates algorithm
+    for (let i = examples.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [examples[i], examples[j]] = [examples[j], examples[i]];
+    }
+    // Set the first 3 examples
+    setExampleQueries(examples.slice(0, 3));
+  }, []);
+  
   // Get the appropriate number of examples based on screen size
-  const displayedExamples = isMobile ? exampleQueries.slice(0, 3) : exampleQueries.slice(0, 3);
+  const displayedExamples = isMobile ? exampleQueries.slice(0, 3) : exampleQueries;
   
   // Function to handle clicking an example query
   const handleExampleClick = (query: string) => {
@@ -844,10 +851,7 @@ export default function DatasetsPage() {
     
     // If search is already complete, start analysis with selected datasets
     if (searchComplete && datasets.length > 0) {
-      // If analysis functionality is ready, use the internal startAnalysis
-      // startAnalysis();
-      
-      // Otherwise, navigate to chat page with multiple datasets
+      // Use the multi-dataset selection function
       handleMultiDatasetSelect();
     } else {
       // Otherwise do the search as before
@@ -857,12 +861,9 @@ export default function DatasetsPage() {
 
   // Handle single dataset selection
   const handleDatasetSelect = (dataset: Dataset) => {
-    // Store the selected dataset ID in localStorage
-    localStorage.setItem('selectedDataset', dataset.id);
-    localStorage.setItem('lastQuery', query);
-    
-    // Navigate to the beta page with dataset ID and query
-    router.push(`/beta?dataset=${dataset.id}&query=${encodeURIComponent(query)}`);
+    // Call stream_analyze instead of redirecting to beta page
+    const datasetIds = [dataset.id];
+    startAnalysisWithDatasets(datasetIds);
   };
   
   // Handle multi-dataset selection - for when user wants to analyze multiple datasets
@@ -877,12 +878,121 @@ export default function DatasetsPage() {
       return;
     }
     
-    // Store selected dataset IDs in localStorage
-    localStorage.setItem('selectedDatasets', JSON.stringify(datasetIds));
-    localStorage.setItem('lastQuery', query);
-    
-    // Navigate to beta page with dataset IDs and query
-    router.push(`/beta?datasets=${encodeURIComponent(JSON.stringify(datasetIds))}&query=${encodeURIComponent(query)}`);
+    startAnalysisWithDatasets(datasetIds);
+  };
+
+  // Function to start analysis with selected datasets
+  const startAnalysisWithDatasets = async (datasetIds: string[]) => {
+    try {
+      // Update UI state
+      setIsAnalyzing(true);
+      setError(null);
+      setAnalysisComplete(false);
+      setAnalysisResults(null);
+      
+      // Initialize processing datasets
+      const datasetsToAnalyze = datasets.filter(d => datasetIds.includes(d.id));
+      
+      // Mark selected datasets as queued
+      const initialProcessing = datasetsToAnalyze.map(dataset => ({
+        ...dataset,
+        status: 'queued'
+      }));
+      
+      setProcessingDatasets(initialProcessing);
+      
+      // Call the Firebase function with streaming
+      await streamAnalyzeDatasets(
+        {
+          // Change to dataset_ids instead of datasets
+          dataset_ids: datasetIds,
+          query: query,
+          // Remove file_path if not needed
+        },
+        (data) => {
+          console.log('Received analysis chunk:', data);
+          
+          // Process different message types
+          switch (data.type) {
+            case 'status':
+              // Add global status message
+              const statusMessage: StatusMessage = {
+                id: Math.random().toString(36).substring(2, 9),
+                message: data.message,
+                timestamp: Date.now(),
+                type: 'status'
+              };
+              setStatusMessages(prev => [...prev, statusMessage]);
+              break;
+              
+            case 'dataset_status':
+              // Update the status of a specific dataset
+              if (data.dataset_id && data.status) {
+                setProcessingDatasets(prev => 
+                  prev.map(d => 
+                    d.id === data.dataset_id 
+                      ? { ...d, status: data.status, progress: data.progress }
+                      : d
+                  )
+                );
+              }
+              break;
+              
+            case 'dataset_result':
+              // Store analysis results for a specific dataset
+              if (data.dataset_id && data.result) {
+                setProcessingDatasets(prev => 
+                  prev.map(d => 
+                    d.id === data.dataset_id 
+                      ? { ...d, analysis_result: data.result, status: 'analyzed' }
+                      : d
+                  )
+                );
+              }
+              break;
+              
+            case 'result':
+              // Store overall analysis results
+              setAnalysisResults(prev => ({
+                ...prev,
+                ...data.data
+              }));
+              break;
+              
+            case 'complete':
+              // Analysis is complete
+              setAnalysisComplete(true);
+              setIsAnalyzing(false);
+              break;
+              
+            case 'error':
+              // Handle error - either global or for a specific dataset
+              if (data.dataset_id) {
+                // Dataset-specific error
+                setProcessingDatasets(prev => 
+                  prev.map(d => 
+                    d.id === data.dataset_id 
+                      ? { ...d, status: 'error', error: data.message }
+                      : d
+                  )
+                );
+              } else {
+                // Global error
+                setError(data.message);
+                setIsAnalyzing(false);
+              }
+              break;
+              
+            default:
+              console.log(`Unknown analysis message type: ${data.type}`, data);
+          }
+        }
+      );
+    } catch (err: any) {
+      console.error("Error in dataset analysis:", err);
+      setError(`Failed to analyze datasets: ${err.message || String(err)}`);
+      setIsAnalyzing(false);
+    }
   };
 
   // Helper function to get image URL
@@ -1087,121 +1197,6 @@ export default function DatasetsPage() {
     }
   }, [datasets]);
 
-  // Add the new analysis function
-  const startAnalysis = async () => {
-    // Get the selected datasets
-    const datasetIds = Object.entries(selectedDatasets)
-      .filter(([_, isSelected]) => isSelected)
-      .map(([id]) => id);
-      
-    if (datasetIds.length === 0) {
-      setError("Please select at least one dataset to analyze.");
-      return;
-    }
-    
-    try {
-      // Update UI state
-      setIsAnalyzing(true);
-      setError(null);
-      setAnalysisComplete(false);
-      setAnalysisResults(null);
-      
-      // Initialize processing datasets
-      const datasetsToAnalyze = datasets.filter(d => datasetIds.includes(d.id));
-      
-      // Mark selected datasets as queued
-      const initialProcessing = datasetsToAnalyze.map(dataset => ({
-        ...dataset,
-        status: 'queued'
-      }));
-      
-      setProcessingDatasets(initialProcessing);
-      
-      // Call the Firebase function with streaming
-      await streamAnalyzeDatasets(
-        {
-          query: query,
-          datasets: datasetsToAnalyze,
-        },
-        (data) => {
-          console.log('Received analysis chunk:', data);
-          
-          // Process different message types
-          switch (data.type) {
-            case 'status':
-              // Add global status message (if needed)
-              break;
-              
-            case 'dataset_status':
-              // Update the status of a specific dataset
-              if (data.dataset_id && data.status) {
-                setProcessingDatasets(prev => 
-                  prev.map(d => 
-                    d.id === data.dataset_id 
-                      ? { ...d, status: data.status, progress: data.progress }
-                      : d
-                  )
-                );
-              }
-              break;
-              
-            case 'dataset_result':
-              // Store analysis results for a specific dataset
-              if (data.dataset_id && data.result) {
-                setProcessingDatasets(prev => 
-                  prev.map(d => 
-                    d.id === data.dataset_id 
-                      ? { ...d, analysis_result: data.result, status: 'analyzed' }
-                      : d
-                  )
-                );
-              }
-              break;
-              
-            case 'result':
-              // Store overall analysis results
-              setAnalysisResults(prev => ({
-                ...prev,
-                ...data.data
-              }));
-              break;
-              
-            case 'complete':
-              // Analysis is complete
-              setAnalysisComplete(true);
-              setIsAnalyzing(false);
-              break;
-              
-            case 'error':
-              // Handle error - either global or for a specific dataset
-              if (data.dataset_id) {
-                // Dataset-specific error
-                setProcessingDatasets(prev => 
-                  prev.map(d => 
-                    d.id === data.dataset_id 
-                      ? { ...d, status: 'error', error: data.message }
-                      : d
-                  )
-                );
-              } else {
-                // Global error
-                setError(data.message);
-                setIsAnalyzing(false);
-              }
-              break;
-              
-            default:
-              console.log(`Unknown analysis message type: ${data.type}`, data);
-          }
-        }
-      );
-    } catch (err: any) {
-      console.error("Error in dataset analysis:", err);
-      setError(`Failed to analyze datasets: ${err.message || String(err)}`);
-      setIsAnalyzing(false);
-    }
-  };
-
   // Add these helper functions for status display
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -1282,6 +1277,21 @@ export default function DatasetsPage() {
       default:
         return status.charAt(0).toUpperCase() + status.slice(1);
     }
+  };
+
+  // Replace the old startAnalysis function
+  const startAnalysis = async () => {
+    // Get the selected datasets
+    const datasetIds = Object.entries(selectedDatasets)
+      .filter(([_, isSelected]) => isSelected)
+      .map(([id]) => id);
+    
+    if (datasetIds.length === 0) {
+      setError("Please select at least one dataset to analyze.");
+      return;
+    }
+    
+    startAnalysisWithDatasets(datasetIds);
   };
 
   return (
