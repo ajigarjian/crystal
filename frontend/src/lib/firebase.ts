@@ -223,6 +223,81 @@ export const processDatasetChunks = (chunks: any[]) => {
   };
 };
 
+// Add this function after your other export functions
+export const submitFeedback = async (data: {
+  feedback_type: string;
+  title: string;
+  description: string;
+  email?: string;
+  page_url: string;
+  tags?: string[];
+  metadata?: any;
+}) => {
+  console.log("Starting submitFeedback with data:", data);
+  
+  const region = functions.region || 'us-central1';
+  const projectId = firebaseConfig.projectId;
+  
+  let baseUrl = '';
+  if (process.env.NODE_ENV === 'development') {
+    baseUrl = `http://localhost:5001/${projectId}/${region}`;
+    console.log("Using development URL:", baseUrl);
+  } else {
+    baseUrl = `https://${region}-${projectId}.cloudfunctions.net`;
+    console.log("Using production URL:", baseUrl);
+  }
+  
+  const url = `${baseUrl}/submit_feedback`;
+  console.log("Full request URL:", url);
+  
+  try {
+    console.log("Making fetch request...");
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(data),
+    });
+    
+    console.log("Fetch response received. Status:", response.status);
+    
+    let responseText;
+    try {
+      responseText = await response.text();
+      console.log("Response text:", responseText);
+    } catch (textError) {
+      console.error("Error reading response text:", textError);
+      responseText = "Unable to read response";
+    }
+    
+    if (!response.ok) {
+      let errorData;
+      try {
+        errorData = JSON.parse(responseText);
+      } catch (jsonError) {
+        console.error("Error parsing JSON response:", jsonError);
+        errorData = { error: responseText || "Unknown error" };
+      }
+      throw new Error(errorData.error || 'Failed to submit feedback');
+    }
+    
+    let result;
+    try {
+      result = JSON.parse(responseText);
+    } catch (jsonError) {
+      console.error("Error parsing success response:", jsonError);
+      throw new Error("Invalid response format");
+    }
+    
+    console.log("Submission successful:", result);
+    return { data: result };
+  } catch (error: any) {
+    console.error('Error submitting feedback:', error);
+    throw new Error(error.message || 'Failed to submit feedback');
+  }
+};
+
 // Update warmFunctions to include the new function
 export const warmFunctions = async () => {
   if (process.env.NODE_ENV === 'development') {
@@ -240,7 +315,8 @@ export const warmFunctions = async () => {
     const functionsToWarm = [
       'register_waitlist',
       'stream_search_datasets',
-      'stream_analyze_datasets'  // Add the new function
+      'stream_analyze_datasets',
+      'submit_feedback'
     ];
     
     // Warm each function with a minimal payload

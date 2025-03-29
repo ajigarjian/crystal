@@ -1,9 +1,18 @@
+import os
+import django
+from django.conf import settings
+
+# Set the DJANGO_SETTINGS_MODULE environment variable
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "factchecker.settings")
+
+# Initialize Django
+django.setup()
+
 from firebase_functions import https_fn, options
 from firebase_admin import initialize_app, firestore
 import requests
 from datetime import datetime
 import firebase_admin
-import os
 import logging
 import time
 import json
@@ -294,6 +303,165 @@ def test_db_connection(request):
                 "status": "error",
                 "message": f"Database connection failed: {str(e)}"
             }),
+            status=500,
+            headers={"Content-Type": "application/json"}
+        )
+
+@https_fn.on_request(
+    cors=options.CorsOptions(
+        cors_origins=[
+            "https://crystal-2f87e.web.app",
+            "https://askcrystal.info",
+            "http://localhost:3000",
+            "http://localhost:5173",
+        ],
+        cors_methods=["get", "post", "options"]
+    )
+)
+def submit_feedback(request):
+    """HTTP Cloud Function that submits user feedback to the database using raw SQL."""
+    logger.info("Starting submit_feedback function")
+
+    # Parse the request data from bytes to JSON
+    try:
+        if request.data:
+            logger.info(f"Request data: {request.data}")
+            data = json.loads(request.data)
+        else:
+            data = {}
+            logger.info("No request data")
+    except json.JSONDecodeError as e:
+        logger.error(f"Invalid JSON data: {str(e)}")
+        return https_fn.Response(
+            json.dumps({"error": "Invalid JSON data", "status": "error"}),
+            status=400,
+            headers={"Content-Type": "application/json"}
+        )
+
+    # Handle warming requests quickly
+    if data.get('warming'):
+        logger.info("Warming request received for submit_feedback")
+        return https_fn.Response(
+            json.dumps({"status": "warmed"}),
+            status=200,
+            headers={"Content-Type": "application/json"}
+        )
+    
+    if not data:
+        logger.error("No data provided")
+        return https_fn.Response(
+            json.dumps({"error": "No data provided", "status": "error"}),
+            status=400,
+            headers={"Content-Type": "application/json"}
+        )
+
+    # Extract required fields
+    feedback_type = data.get('feedback_type', '')
+    title = data.get('title', '')
+    description = data.get('description', '')
+    
+    # Extract optional fields
+    email = data.get('email', None)
+    page_url = data.get('page_url', '')
+    tags = data.get('tags', [])  # Default to empty array
+    metadata = data.get('metadata', {})  # Default to empty object
+    
+    logger.info(f"Received feedback submission: type={feedback_type}, title={title}")
+
+    # Validate required fields
+    if not feedback_type or not title or not description:
+        error_msg = "Required fields missing: feedback_type, title, and description are required"
+        logger.error(error_msg)
+        return https_fn.Response(
+            json.dumps({"error": error_msg, "status": "error"}),
+            status=400,
+            headers={"Content-Type": "application/json"}
+        )
+    
+    # Validate feedback type
+    valid_types = ['suggestion', 'bug', 'feature_request', 'praise']
+    if feedback_type not in valid_types:
+        error_msg = f"Invalid feedback type. Must be one of: {', '.join(valid_types)}"
+        logger.error(error_msg)
+        return https_fn.Response(
+            json.dumps({"error": error_msg, "status": "error"}),
+            status=400,
+            headers={"Content-Type": "application/json"}
+        )
+
+    try:
+        # Get connection from pool
+        logger.info("Getting database connection")
+        pool = get_connection_pool()
+        conn = pool.getconn()
+        
+        try:
+            with conn.cursor() as cursor:
+                # Create a unique ID
+                unique_id = int(time.time() * 1000) + random.randint(1, 1000)
+                logger.info(f"Generated unique ID: {unique_id}")
+                
+                # Convert metadata to JSON string
+                metadata_json = json.dumps(metadata)
+                
+                # Get current timestamp
+                current_time = datetime.now().isoformat()
+                
+                # Log the SQL operation for debugging
+                logger.info(f"Inserting feedback record with ID: {unique_id}")
+                
+                # Execute the raw SQL insert statement
+                cursor.execute(
+                    """
+                    INSERT INTO factchecker_feedback 
+                    (id, feedback_type, title, description, email, page_url, tags, metadata, status, created_at, updated_at, upvotes) 
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        unique_id, 
+                        feedback_type,
+                        title,
+                        description,
+                        email,
+                        page_url,
+                        tags if tags else [], # Ensure empty list, not None
+                        metadata_json,
+                        'new',  # status
+                        current_time,
+                        current_time,
+                        0  # upvotes
+                    )
+                )
+                
+                # Commit the transaction
+                conn.commit()
+                logger.info(f"Successfully added feedback with ID: {unique_id}")
+                
+                # Return success response
+                return https_fn.Response(
+                    json.dumps({
+                        "status": "success",
+                        "message": "Feedback submitted successfully",
+                        "id": unique_id
+                    }),
+                    status=200, # Use 200 to match register_waitlist
+                    headers={"Content-Type": "application/json"}
+                )
+        except Exception as db_error:
+            # Log the database error and roll back any changes
+            logger.error(f"Database error in submit_feedback: {db_error}")
+            logger.error(traceback.format_exc())
+            conn.rollback()
+            raise
+        finally:
+            # Always return the connection to the pool
+            pool.putconn(conn)
+    except Exception as e:
+        # Handle any other exceptions
+        logger.error(f"Error submitting feedback: {e}")
+        logger.error(traceback.format_exc())
+        return https_fn.Response(
+            json.dumps({"status": "error", "message": f"Failed to submit feedback: {str(e)}"}),
             status=500,
             headers={"Content-Type": "application/json"}
         )
