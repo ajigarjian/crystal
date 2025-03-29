@@ -95,3 +95,4 @@ xlrd==2.0.1
 yarl==1.18.3
 sqlalchemy
 pinecone
+pyarrow==19.0.1
