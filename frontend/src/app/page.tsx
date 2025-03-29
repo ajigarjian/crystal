@@ -2,15 +2,16 @@
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useEffect, useRef, useState } from "react";
-import { ArrowRight, Twitter } from "lucide-react";
+import { useEffect, useRef, useState, useMemo } from "react";
+import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { warmFunctions } from "@/lib/firebase";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
+import queryExamples from "@/components/QueryExamples";
 
-// Pre-generate the data text outside the component
-const DATA_TEXTS = generateDataTexts(150);
+// Reduce the number of data texts for better performance
+const DATA_TEXTS = generateDataTexts(40); // Reduced from 150 to 40
 
 export default function Home() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -34,76 +35,63 @@ export default function Home() {
   
   // Initialize trail positions
   useEffect(() => {
-    // Initialize with 5 points at the center
+    // Initialize with just the center point we need
     const centerX = window.innerWidth / 2;
     const centerY = window.innerHeight / 2;
-    trailPositions.current = Array(5).fill({ x: centerX, y: centerY });
+    trailPositions.current = [
+      { x: centerX, y: centerY },
+      { x: centerX, y: centerY },
+      { x: centerX, y: centerY }
+    ];
     
-    // Generate random styles for text elements on client-side only
+    // Generate random styles for text elements on client-side only - simplified
     const newTextStyles = DATA_TEXTS.map((_, i) => {
-      // Create a more structured distribution by dividing the screen into a grid
-      const gridCols = 10;
-      const gridRows = 10;
+      // Create a more structured distribution by dividing the screen into sections
+      const gridCols = 8; // Fewer columns
+      const gridRows = 6; // Fewer rows
       
       // Calculate grid position
       const gridCol = i % gridCols;
       const gridRow = Math.floor(i / gridCols) % gridRows;
       
-      // Add randomness within the grid cell (±10%)
-      const randomOffsetX = (Math.random() - 0.5) * 20;
-      const randomOffsetY = (Math.random() - 0.5) * 20;
+      // Add minimal randomness
+      const randomOffsetX = (Math.random() - 0.5) * 10;
+      const randomOffsetY = (Math.random() - 0.5) * 10;
       
       // Calculate final position with margins to prevent edge clipping
       const left = (gridCol * (100 / gridCols)) + randomOffsetX;
       const top = (gridRow * (100 / gridRows)) + randomOffsetY;
       
-      // Define the "safe zones" - areas where we don't want text to appear
+      // Define a single large safe zone for the center content
+      const isInSafeZone = 
+        (gridCol >= 2 && gridCol <= 5) && // Middle columns
+        (gridRow >= 1 && gridRow <= 4);   // Middle rows
       
-      // Title zone (top-center)
-      const isInTitleZone = 
-        (gridCol >= 3 && gridCol <= 6) && // Middle columns
-        (gridRow >= 3 && gridRow <= 4);   // Upper-middle rows
-      
-      // Tagline zone (below title)
-      const isInTaglineZone = 
-        (gridCol >= 2 && gridCol <= 7) && // Middle-wide columns
-        (gridRow >= 4 && gridRow <= 5);   // Middle rows
-      
-      // Buttons zone (center of page) - SMALLER THAN BEFORE
-      const isInButtonsZone = 
-        (gridCol >= 3 && gridCol <= 6) && // Middle columns
-        (gridRow >= 6 && gridRow <= 7);   // Just 2 rows instead of 3-4 rows previously
-      
-      // Navigation links zone (top-right) - EXPANDED
-      const isInNavLinksZone = 
-        (gridCol >= 6 && gridCol <= 9) && // Right side columns
-        (gridRow <= 1);                   // Top row
-      
-      // If in any safe zone, move the text elsewhere
+      // If in safe zone, move to edges
       let safeLeft = left;
       let safeTop = top;
       
-      if (isInTitleZone || isInTaglineZone || isInButtonsZone || isInNavLinksZone) {
+      if (isInSafeZone) {
         // Create larger margins around important elements
         // Move to one of the corners or edges
         const position = Math.floor(Math.random() * 4); // 0-3 for different positions
         
         switch(position) {
-          case 0: // Top-left
-            safeLeft = 5 + (Math.random() * 15);
-            safeTop = 5 + (Math.random() * 15);
+          case 0: // Left side
+            safeLeft = 5 + (Math.random() * 10);
+            safeTop = 20 + (Math.random() * 60);
             break;
-          case 1: // Middle-right
-            safeLeft = 70 + (Math.random() * 20);
-            safeTop = 40 + (Math.random() * 20);
+          case 1: // Right side
+            safeLeft = 85 + (Math.random() * 10);
+            safeTop = 20 + (Math.random() * 60);
             break;
-          case 2: // Bottom-left
-            safeLeft = 5 + (Math.random() * 15);
-            safeTop = 70 + (Math.random() * 20);
+          case 2: // Top
+            safeLeft = 20 + (Math.random() * 60);
+            safeTop = 5 + (Math.random() * 10);
             break;
-          case 3: // Bottom-right
-            safeLeft = 70 + (Math.random() * 20);
-            safeTop = 70 + (Math.random() * 20);
+          case 3: // Bottom
+            safeLeft = 20 + (Math.random() * 60);
+            safeTop = 85 + (Math.random() * 10);
             break;
         }
       } else {
@@ -112,66 +100,53 @@ export default function Home() {
         safeTop = Math.max(5, Math.min(95, top));
       }
       
-      const animationDelay = Math.random() * 10;
-      const animationDuration = 15 + Math.random() * 20;
+      // Simplified animations with longer durations to reduce CPU load
+      const animationDelay = Math.random() * 5;
+      const animationDuration = 25 + Math.random() * 15; // Slower animations
       const animationType = i % 2 === 0 ? 'float' : 'float-alt';
       
       return {
         top: `${safeTop}%`,
         left: `${safeLeft}%`,
         animation: `${animationType} ${animationDuration}s ease-in-out ${animationDelay}s infinite`,
-        fontSize: `${Math.max(0.7, Math.random() * 0.3 + 0.7)}rem`,
-        opacity: 0.3 + Math.random() * 0.5,
-        transform: `rotate(${(Math.random() - 0.5) * 10}deg)`,
+        fontSize: `${Math.max(0.7, Math.random() * 0.2 + 0.7)}rem`, // More consistent sizes
+        opacity: 0.3 + Math.random() * 0.3, // Lower max opacity
+        transform: `rotate(${(Math.random() - 0.5) * 5}deg)`, // Less rotation
       };
     });
     
     setTextStyles(newTextStyles);
   }, []);
   
-  // Animation loop for the trail effect
+  // Optimized animation loop for the trail effect
   const animate = (time: number) => {
     if (previousTimeRef.current !== undefined) {
-      // Update trail positions with physics
+      // Update trail positions with physics - only using one trail point for performance
       const mousePos = { x: mousePosition.x, y: mousePosition.y };
       
-      // Update the first point to follow the mouse with some easing
+      // Update the trail point to follow the mouse with easing
       if (trailPositions.current.length > 0) {
-        const firstPoint = trailPositions.current[0];
-        const dx = mousePos.x - firstPoint.x;
-        const dy = mousePos.y - firstPoint.y;
+        const point = trailPositions.current[2]; // We only need the middle point now
+        const dx = mousePos.x - point.x;
+        const dy = mousePos.y - point.y;
         
-        // Apply easing (0.2 = more lag, 0.8 = less lag)
-        trailPositions.current[0] = {
-          x: firstPoint.x + dx * 0.3,
-          y: firstPoint.y + dy * 0.3
+        // Apply easing
+        trailPositions.current[2] = {
+          x: point.x + dx * 0.2,
+          y: point.y + dy * 0.2
         };
-        
-        // Update the rest of the trail to follow the point ahead of it
-        for (let i = 1; i < trailPositions.current.length; i++) {
-          const point = trailPositions.current[i];
-          const prevPoint = trailPositions.current[i - 1];
-          const dx = prevPoint.x - point.x;
-          const dy = prevPoint.y - point.y;
-          
-          trailPositions.current[i] = {
-            x: point.x + dx * 0.3,
-            y: point.y + dy * 0.3
-          };
-        }
       }
       
-      // Update CSS variables for all trail points
+      // Update CSS variables - minimized to only what we need
       if (containerRef.current) {
         // Main spotlight follows the mouse directly
         containerRef.current.style.setProperty('--mouse-x', `${mousePos.x}px`);
         containerRef.current.style.setProperty('--mouse-y', `${mousePos.y}px`);
         
-        // Trail points
-        trailPositions.current.forEach((pos, i) => {
-          containerRef.current?.style.setProperty(`--trail-x-${i}`, `${pos.x}px`);
-          containerRef.current?.style.setProperty(`--trail-y-${i}`, `${pos.y}px`);
-        });
+        // Just one trail point now (optimized)
+        const pos = trailPositions.current[2];
+        containerRef.current.style.setProperty('--trail-x-2', `${pos.x}px`);
+        containerRef.current.style.setProperty('--trail-y-2', `${pos.y}px`);
       }
     }
     
@@ -190,7 +165,18 @@ export default function Home() {
   }, [mousePosition]);
   
   useEffect(() => {
+    // Throttled mouse move handler to avoid too many updates
+    let lastCall = 0;
+    const throttleDelay = 30; // ms between updates (roughly 30fps)
+    
     const handleMouseMove = (e: MouseEvent) => {
+      const now = Date.now();
+      
+      // Skip if it's been less than throttleDelay since last update
+      if (now - lastCall < throttleDelay) return;
+      
+      lastCall = now;
+      
       if (!containerRef.current) return;
       
       const rect = containerRef.current.getBoundingClientRect();
@@ -200,17 +186,20 @@ export default function Home() {
       setMousePosition({ x, y });
     };
     
-    const container = containerRef.current;
-    if (container) {
-      container.addEventListener('mousemove', handleMouseMove);
-    }
-    
-    return () => {
+    // Only add the event listener if not mobile
+    if (!isMobile) {
+      const container = containerRef.current;
       if (container) {
-        container.removeEventListener('mousemove', handleMouseMove);
+        container.addEventListener('mousemove', handleMouseMove);
       }
-    };
-  }, []);
+      
+      return () => {
+        if (container) {
+          container.removeEventListener('mousemove', handleMouseMove);
+        }
+      };
+    }
+  }, [isMobile]); // Depend on isMobile so it changes when screen size changes
 
   // Add this effect to warm functions when the page loads
   useEffect(() => {
@@ -228,15 +217,33 @@ export default function Home() {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
   
-  // Add these example queries
-  const exampleQueries = [
-    "What's the air quality trend in NYC over the past 5 years?",
-    "How has median housing price changed in San Francisco since 2010?",
-    "What are the vaccination rates for children in Chicago by neighborhood?",
-  ];
+  // Replace the existing exampleQueries implementation with this:
+  const exampleQueries = useMemo(() => {
+    // Use a consistent seed for the shuffle
+    const shuffleWithSeed = (array: string[]) => {
+      const seededRandom = (seed: number) => {
+        let x = Math.sin(seed++) * 10000;
+        return x - Math.floor(x);
+      };
+      
+      // Create a copy of the array
+      const shuffled = [...array];
+      let seed = 1; // Use a fixed seed
+      
+      // Fisher-Yates shuffle with seeded random
+      for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(seededRandom(seed++) * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
+      
+      return shuffled;
+    };
+
+    return shuffleWithSeed(queryExamples).slice(0, 3);
+  }, []); // Empty dependency array means this only runs once
   
   // Get displayed examples based on screen size
-  const displayedExamples = isMobile ? exampleQueries.slice(0, 3) : exampleQueries.slice(0, 3);
+  const displayedExamples = isMobile ? exampleQueries : exampleQueries;
   
   // Add this handler for example clicks
   const handleExampleClick = (exampleQuery: string) => {
@@ -304,7 +311,7 @@ export default function Home() {
           </Link>
         </div>
         
-        {/* Data Text Background Layer */}
+        {/* Data Text Background Layer - Optimized with will-change and transform properties */}
         <div className="absolute inset-0 z-0 data-text-background">
           {DATA_TEXTS.map((text, i) => (
             <div 
@@ -316,14 +323,17 @@ export default function Home() {
                 animation: textStyles[i].animation,
                 fontSize: textStyles[i].fontSize,
                 opacity: textStyles[i].opacity,
-                transform: textStyles[i].transform,
+                transform: `${textStyles[i].transform} translateZ(0)`, 
+                willChange: 'transform, opacity',
                 maxWidth: '300px',
                 textWrap: 'nowrap',
                 overflow: 'hidden',
-                textOverflow: 'ellipsis'
+                textOverflow: 'ellipsis',
+                visibility: isMobile ? 'hidden' : 'visible' // Hide on mobile for performance
               } : {}}
             >
-              {text}
+              {/* Only render visible elements on non-mobile */}
+              {!isMobile && text}
             </div>
           ))}
         </div>

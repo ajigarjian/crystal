@@ -9,9 +9,10 @@ const nextConfig: NextConfig = {
     // Disable TypeScript type checking during builds
     ignoreBuildErrors: true,
   },
-  output: 'export',  // This replaces the next export command
+  // Removed 'output: export' to enable SSR
   images: {
-    unoptimized: true, // Required for static export
+    domains: ['firebasestorage.googleapis.com'],
+    formats: ['image/avif', 'image/webp'],
   },
 };
 

@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -42,6 +43,7 @@ import { AlertCircle, CheckCircle2, FileText, Database, ArrowRight, Download, Fi
 import { Checkbox } from "@/components/ui/checkbox";
 import { streamSearchDatasets, warmFunctions, streamAnalyzeDatasets, submitFeedback } from "@/lib/firebase";
 import Script from "next/script";
+import { PREFERRED_DATASET_IDS, PREFERRED_DATASET_ID_SET } from "@/lib/constants";
 
 interface Resource {
   id: string;
@@ -93,6 +95,8 @@ interface Dataset {
   primary_file?: string;
   preview?: DatasetPreview;
   isRemoving?: boolean;
+  analysis_result?: any; // Consider creating a proper type for this
+  progress?: number; // Add progress property for download tracking
 }
 
 interface DatasetPreview {
@@ -403,12 +407,17 @@ export default function DatasetsPage() {
   }, [discoveryMessages]);
   */
 
-  // Auto-scroll to bottom of status messages when they update
+  // Auto-scroll to bottom of status messages when they update - with debounce
   useEffect(() => {
-    const statusMessageContainers = document.querySelectorAll('.status-message-container');
-    statusMessageContainers.forEach(container => {
-      container.scrollTop = container.scrollHeight;
-    });
+    // Debounce the scroll operation to prevent excessive DOM manipulation
+    const debounceTimer = setTimeout(() => {
+      const statusMessageContainers = document.querySelectorAll('.status-message-container');
+      statusMessageContainers.forEach(container => {
+        container.scrollTop = container.scrollHeight;
+      });
+    }, 100); // 100ms debounce
+    
+    return () => clearTimeout(debounceTimer);
   }, [statusMessages]);
 
   // Function to process a query with streaming
@@ -575,7 +584,8 @@ export default function DatasetsPage() {
                 // Add file count based on resources if available
                 const datasetWithFileCount = {
                   ...data.data,
-                  file_count: data.data.resources?.length || 0
+                  file_count: data.data.resources?.length || 0,
+                  status: 'starting' // Set initial status for all datasets
                 };
                 
                 // Sort datasets by similarity
@@ -844,11 +854,8 @@ export default function DatasetsPage() {
     
     // If search is already complete, start analysis with selected datasets
     if (searchComplete && datasets.length > 0) {
-      // If analysis functionality is ready, use the internal startAnalysis
-      // startAnalysis();
-      
-      // Otherwise, navigate to chat page with multiple datasets
-      handleMultiDatasetSelect();
+      // Start the analysis on this page instead of navigating
+      startAnalysis();
     } else {
       // Otherwise do the search as before
       processStreamingQuery(query);
@@ -865,7 +872,8 @@ export default function DatasetsPage() {
     router.push(`/beta?dataset=${dataset.id}&query=${encodeURIComponent(query)}`);
   };
   
-  // Handle multi-dataset selection - for when user wants to analyze multiple datasets
+  // Remove or comment out handleMultiDatasetSelect since we won't be using it
+  /*
   const handleMultiDatasetSelect = () => {
     // Get the selected datasets
     const datasetIds = Object.entries(selectedDatasets)
@@ -884,6 +892,7 @@ export default function DatasetsPage() {
     // Navigate to beta page with dataset IDs and query
     router.push(`/beta?datasets=${encodeURIComponent(JSON.stringify(datasetIds))}&query=${encodeURIComponent(query)}`);
   };
+  */
 
   // Helper function to get image URL
   const getImageUrl = (dataset: Dataset) => {
@@ -1109,13 +1118,24 @@ export default function DatasetsPage() {
       // Initialize processing datasets
       const datasetsToAnalyze = datasets.filter(d => datasetIds.includes(d.id));
       
-      // Mark selected datasets as queued
-      const initialProcessing = datasetsToAnalyze.map(dataset => ({
+      // Mark selected datasets as processing
+      setProcessingDatasets(datasetsToAnalyze.map(dataset => ({
         ...dataset,
-        status: 'queued'
-      }));
+        status: 'analyzing_files' as const // Use const assertion to match Dataset type
+      })));
       
-      setProcessingDatasets(initialProcessing);
+      // Also update the datasets state with the analyzing_files status
+      setDatasets(prev => {
+        return prev.map(dataset => {
+          if (datasetIds.includes(dataset.id)) {
+            return {
+              ...dataset,
+              status: 'analyzing_files'
+            };
+          }
+          return dataset;
+        });
+      });
       
       // Call the Firebase function with streaming
       await streamAnalyzeDatasets(
@@ -1129,16 +1149,32 @@ export default function DatasetsPage() {
           // Process different message types
           switch (data.type) {
             case 'status':
-              // Add global status message (if needed)
+              // Add status message
+              setStatusMessages(prev => [...prev, {
+                id: Math.random().toString(36).substring(2, 9),
+                message: data.message,
+                timestamp: Date.now(),
+                type: 'status'
+              }]);
               break;
               
             case 'dataset_status':
               // Update the status of a specific dataset
               if (data.dataset_id && data.status) {
+                // Update processing datasets
                 setProcessingDatasets(prev => 
                   prev.map(d => 
                     d.id === data.dataset_id 
-                      ? { ...d, status: data.status, progress: data.progress }
+                      ? { ...d, status: data.status as Dataset['status'], progress: data.progress }
+                      : d
+                  )
+                );
+                
+                // Also update the main datasets state
+                setDatasets(prev => 
+                  prev.map(d => 
+                    d.id === data.dataset_id 
+                      ? { ...d, status: data.status as Dataset['status'], progress: data.progress }
                       : d
                   )
                 );
@@ -1148,10 +1184,20 @@ export default function DatasetsPage() {
             case 'dataset_result':
               // Store analysis results for a specific dataset
               if (data.dataset_id && data.result) {
+                // Update processing datasets
                 setProcessingDatasets(prev => 
                   prev.map(d => 
                     d.id === data.dataset_id 
-                      ? { ...d, analysis_result: data.result, status: 'analyzed' }
+                      ? { ...d, analysis_result: data.result, status: 'relevant' as const }
+                      : d
+                  )
+                );
+                
+                // Also update the main datasets state
+                setDatasets(prev => 
+                  prev.map(d => 
+                    d.id === data.dataset_id 
+                      ? { ...d, analysis_result: data.result, status: 'relevant' as const }
                       : d
                   )
                 );
@@ -1160,129 +1206,123 @@ export default function DatasetsPage() {
               
             case 'result':
               // Store overall analysis results
-              setAnalysisResults(prev => ({
-                ...prev,
-                ...data.data
-              }));
+              setAnalysisResults(data.data);
               break;
               
             case 'complete':
               // Analysis is complete
               setAnalysisComplete(true);
               setIsAnalyzing(false);
+              
+              // Add completion message
+              setStatusMessages(prev => [...prev, {
+                id: Math.random().toString(36).substring(2, 9),
+                message: "Analysis complete",
+                timestamp: Date.now(),
+                type: 'status'
+              }]);
               break;
               
             case 'error':
-              // Handle error - either global or for a specific dataset
-              if (data.dataset_id) {
-                // Dataset-specific error
-                setProcessingDatasets(prev => 
-                  prev.map(d => 
-                    d.id === data.dataset_id 
-                      ? { ...d, status: 'error', error: data.message }
-                      : d
-                  )
-                );
-              } else {
-                // Global error
-                setError(data.message);
-                setIsAnalyzing(false);
-              }
+              handleAnalysisError(data);
               break;
-              
-            default:
-              console.log(`Unknown analysis message type: ${data.type}`, data);
           }
         }
       );
-    } catch (err: any) {
-      console.error("Error in dataset analysis:", err);
-      setError(`Failed to analyze datasets: ${err.message || String(err)}`);
+    } catch (error: Error) {
+      console.error("Error in dataset analysis:", error);
+      setError(`Failed to analyze datasets: ${error.message}`);
       setIsAnalyzing(false);
     }
   };
 
-  // Add these helper functions for status display
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'downloading':
-      case 'downloaded':
-        return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300';
-      case 'loading':
-      case 'loaded':
-        return 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300';
-      case 'assessing':
-      case 'assessed':
-        return 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300';
-      case 'extracting':
-      case 'extracted':
-        return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300';
-      case 'analyzing':
-      case 'analyzed':
-        return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300';
-      case 'error':
-        return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300';
-      case 'queued':
-      default:
-        return 'bg-gray-100 text-gray-800 dark:bg-gray-800/30 dark:text-gray-300';
+  // Add helper function to handle analysis errors
+  const handleAnalysisError = (data: { dataset_id?: string; message: string }) => {
+    if (data.dataset_id) {
+      // Dataset-specific error
+      setProcessingDatasets(prev => 
+        prev.map(d => 
+          d.id === data.dataset_id 
+            ? { ...d, status: 'error' as const, error: data.message }
+            : d
+        )
+      );
+    } else {
+      // Global error
+      setError(data.message);
+      setIsAnalyzing(false);
     }
+    
+    // Add error message to status messages
+    setStatusMessages(prev => [...prev, {
+      id: Math.random().toString(36).substring(2, 9),
+      message: data.message,
+      timestamp: Date.now(),
+      type: 'error'
+    }]);
   };
 
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'downloading':
-        return <Download className="h-3 w-3 animate-pulse" />;
-      case 'downloaded':
-        return <Download className="h-3 w-3" />;
-      case 'loading':
-      case 'assessing':
-      case 'extracting':
-      case 'analyzing':
-        return <Loader2 className="h-3 w-3 animate-spin" />;
-      case 'loaded':
-      case 'assessed':
-      case 'extracted':
-      case 'analyzed':
-        return <CheckCircle2 className="h-3 w-3" />;
-      case 'error':
-        return <AlertCircle className="h-3 w-3" />;
-      case 'queued':
-      default:
-        return <FileText className="h-3 w-3" />;
-    }
-  };
+  // Memoize status helper functions to prevent recalculation on every render
+  const statusColorMap = React.useMemo(() => ({
+    'downloading': 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
+    'downloaded': 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
+    'loading': 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300',
+    'loaded': 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300',
+    'assessing': 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300',
+    'assessed': 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300',
+    'extracting': 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
+    'extracted': 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
+    'analyzing': 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
+    'analyzed': 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
+    'error': 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
+    'queued': 'bg-gray-100 text-gray-800 dark:bg-gray-800/30 dark:text-gray-300',
+    'default': 'bg-gray-100 text-gray-800 dark:bg-gray-800/30 dark:text-gray-300'
+  }), []);
 
-  const getStatusLabel = (status: string) => {
-    // Convert status to a more readable format
-    switch (status) {
-      case 'downloading':
-        return 'Downloading';
-      case 'downloaded':
-        return 'Downloaded';
-      case 'loading':
-        return 'Loading';
-      case 'loaded':
-        return 'Loaded';
-      case 'assessing':
-        return 'Assessing';
-      case 'assessed':
-        return 'Assessed';
-      case 'extracting':
-        return 'Extracting';
-      case 'extracted':
-        return 'Extracted';
-      case 'analyzing':
-        return 'Analyzing';
-      case 'analyzed':
-        return 'Analyzed';
-      case 'error':
-        return 'Error';
-      case 'queued':
-        return 'Queued';
-      default:
-        return status.charAt(0).toUpperCase() + status.slice(1);
-    }
-  };
+  const getStatusColor = React.useCallback((status: string) => {
+    return statusColorMap[status] || statusColorMap.default;
+  }, [statusColorMap]);
+
+  // Pre-render status icons
+  const statusIconMap = React.useMemo(() => ({
+    'downloading': <Download className="h-3 w-3 animate-pulse" />,
+    'downloaded': <Download className="h-3 w-3" />,
+    'loading': <Loader2 className="h-3 w-3 animate-spin" />,
+    'assessing': <Loader2 className="h-3 w-3 animate-spin" />,
+    'extracting': <Loader2 className="h-3 w-3 animate-spin" />,
+    'analyzing': <Loader2 className="h-3 w-3 animate-spin" />,
+    'loaded': <CheckCircle2 className="h-3 w-3" />,
+    'assessed': <CheckCircle2 className="h-3 w-3" />,
+    'extracted': <CheckCircle2 className="h-3 w-3" />,
+    'analyzed': <CheckCircle2 className="h-3 w-3" />,
+    'error': <AlertCircle className="h-3 w-3" />,
+    'queued': <FileText className="h-3 w-3" />,
+    'default': <FileText className="h-3 w-3" />
+  }), []);
+
+  const getStatusIcon = React.useCallback((status: string) => {
+    return statusIconMap[status] || statusIconMap.default;
+  }, [statusIconMap]);
+
+  // Pre-compute status labels
+  const statusLabelMap = React.useMemo(() => ({
+    'downloading': 'Downloading',
+    'downloaded': 'Downloaded',
+    'loading': 'Loading',
+    'loaded': 'Loaded',
+    'assessing': 'Assessing',
+    'assessed': 'Assessed',
+    'extracting': 'Extracting',
+    'extracted': 'Extracted',
+    'analyzing': 'Analyzing',
+    'analyzed': 'Analyzed',
+    'error': 'Error',
+    'queued': 'Queued'
+  }), []);
+
+  const getStatusLabel = React.useCallback((status: string) => {
+    return statusLabelMap[status] || status.charAt(0).toUpperCase() + status.slice(1);
+  }, [statusLabelMap]);
 
   return (
     <>
@@ -1976,18 +2016,25 @@ export default function DatasetsPage() {
                                 )}
                               </TableCell>
                               <TableCell className="text-center">
-                                <Checkbox
-                                  checked={selectedDatasets[dataset.id] === true}
-                                  disabled={isAnalyzing}
-                                  onCheckedChange={(checked) => {
-                                    setSelectedDatasets(prev => ({
-                                      ...prev,
-                                      [dataset.id]: checked === true
-                                    }));
-                                  }}
-                                  aria-label="Include in analysis"
-                                  className="mx-auto"
-                                />
+                                <div className="flex items-center justify-center gap-2">
+                                  <Checkbox
+                                    checked={selectedDatasets[dataset.id] === true}
+                                    disabled={isAnalyzing}
+                                    onCheckedChange={(checked) => {
+                                      setSelectedDatasets(prev => ({
+                                        ...prev,
+                                        [dataset.id]: checked === true
+                                      }));
+                                    }}
+                                    aria-label="Include in analysis"
+                                  />
+                                  {PREFERRED_DATASET_ID_SET.has(dataset.id) && (
+                                    <Badge className="bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300">
+                                      <Star className="h-3 w-3 mr-1" />
+                                      Preferred
+                                    </Badge>
+                                  )}
+                                </div>
                               </TableCell>
                             </TableRow>
                           );
@@ -2006,7 +2053,7 @@ export default function DatasetsPage() {
         </div>
       )}
       
-      {/* Add fadeIn animation to the global styles */}
+      {/* Add optimized animations with transform and opacity only (best performance) */}
       <style jsx global>{`
         @keyframes fadeIn {
           from { opacity: 0; transform: translateY(10px); }
@@ -2017,21 +2064,24 @@ export default function DatasetsPage() {
           opacity: 0;
           animation: fadeIn 0.5s ease-out forwards;
           animation-delay: var(--animation-delay, 0ms);
+          will-change: transform, opacity;
+          transform: translateZ(0);
         }
         
-        /* Smooth transition for dataset cards */
+        /* Optimized transitions for dataset cards using will-change and hardware acceleration */
         .dataset-card {
-          transition: opacity 0.5s ease, transform 0.5s ease, max-height 0.5s ease, margin 0.5s ease, padding 0.5s ease;
+          transition: opacity 0.5s ease, transform 0.5s ease;
           opacity: 1;
-          transform: scale(1);
+          transform: scale(1) translateZ(0);
           max-height: 500px;
           overflow: hidden;
+          will-change: transform, opacity;
         }
         
         .dataset-card.removing {
           opacity: 0;
-          transform: scale(0.95);
-          max-height: 0;
+          transform: scale(0.95) translateZ(0);
+          pointer-events: none;
         }
       `}</style>
 

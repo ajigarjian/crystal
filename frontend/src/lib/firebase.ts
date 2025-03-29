@@ -1,46 +1,35 @@
 import { initializeApp } from "firebase/app";
 import { getFunctions, httpsCallable, connectFunctionsEmulator } from "firebase/functions";
 import { getFirestore, connectFirestoreEmulator } from "firebase/firestore";
+import { FIREBASE_CONFIG, SSR_ENABLED, API_ENDPOINTS } from './constants';
 
-// Your web app's Firebase configuration
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
-const firebaseConfig = {
-    apiKey: "AIzaSyC3KIK0ol5TquNaz6-DyVoxzijDNySgrq4",
-    authDomain: "crystal-2f87e.firebaseapp.com",
-    projectId: "crystal-2f87e",
-    storageBucket: "crystal-2f87e.firebasestorage.app",
-    messagingSenderId: "422374862387",
-    appId: "1:422374862387:web:1a11af2b205c777173bd46",
-    measurementId: "G-1CFM4WMH4B"
-  };
-
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
+// Initialize Firebase only on client side
+const app = typeof window !== 'undefined' ? initializeApp(FIREBASE_CONFIG) : null;
 
 // Initialize Cloud Firestore and get a reference to the service
-export const db = getFirestore(app);
+export const db = typeof window !== 'undefined' ? getFirestore(app) : null;
 
 // Initialize Cloud Functions
-export const functions = getFunctions(app);
+export const functions = typeof window !== 'undefined' ? getFunctions(app) : null;
 
 // Set up emulator if in development
-if (process.env.NODE_ENV === 'development') {
+if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
   console.log(`Using Firebase Functions emulator...`);
-  connectFunctionsEmulator(functions, 'localhost', 5001);
+  connectFunctionsEmulator(functions, 'localhost', 5002);
   connectFirestoreEmulator(db, 'localhost', 8080);
 }
 
 // Export a helper for calling the waitlist registration function
 export const registerWaitlist = async (data: { email: string, first_name: string }) => {
   // Get the region and project ID from the functions instance
-  const region = functions.region || 'us-central1';
-  const projectId = firebaseConfig.projectId;
+  const region = functions?.region || 'us-central1';
+  const projectId = FIREBASE_CONFIG.projectId || 'crystal-local';
   
   // Construct the URL for the HTTP function
   let baseUrl = '';
   if (process.env.NODE_ENV === 'development') {
     // Use emulator URL in development
-    baseUrl = `http://localhost:5001/${projectId}/${region}`;
+    baseUrl = `http://localhost:5002/${projectId}/${region}`;
   } else {
     // Use production URL in production
     baseUrl = `https://${region}-${projectId}.cloudfunctions.net`;
@@ -54,6 +43,8 @@ export const registerWaitlist = async (data: { email: string, first_name: string
       headers: {
         'Content-Type': 'application/json',
       },
+      mode: 'cors',
+      credentials: 'omit', // Don't send credentials
       body: JSON.stringify(data),
     });
     
@@ -90,21 +81,26 @@ export const streamSearchDatasets = async (
         // Default implementation just logs the chunk
       };
 
-  // Get the region and project ID from the functions instance
-  const region = functions.region || 'us-central1';
-  const projectId = firebaseConfig.projectId;
-  
-  // Construct the URL for the HTTP function
-  let baseUrl = '';
+  // Use the API endpoint directly
+  let url = '';
   if (process.env.NODE_ENV === 'development') {
-    // Use emulator URL in development
-    baseUrl = `http://localhost:5001/${projectId}/${region}`;
+    // In development, use the Next.js API route
+    console.log("Development environment detected, using emulator URL");
+    
+    // Make sure to use the absolute URL for the API route
+    // Get base URL - crucial for making the request to the correct host
+    const baseUrl = window.location.origin;
+    url = `${baseUrl}${API_ENDPOINTS.streamSearch}`;
+    console.log("Using API endpoint:", url);
   } else {
     // Use production URL in production
-    baseUrl = `https://${region}-${projectId}.cloudfunctions.net`;
+    const region = functions?.region || 'us-central1';
+    const projectId = FIREBASE_CONFIG.projectId || 'crystal-local';
+    url = `https://${region}-${projectId}.cloudfunctions.net/stream_search_datasets`;
+    console.log("Using production URL:", url);
   }
   
-  const url = `${baseUrl}/stream_search_datasets`;
+  console.log("Full request URL:", url);
   
   try {
     const response = await fetch(url, {
@@ -235,12 +231,12 @@ export const submitFeedback = async (data: {
 }) => {
   console.log("Starting submitFeedback with data:", data);
   
-  const region = functions.region || 'us-central1';
-  const projectId = firebaseConfig.projectId;
+  const region = functions?.region || 'us-central1';
+  const projectId = FIREBASE_CONFIG.projectId || 'crystal-local';
   
   let baseUrl = '';
   if (process.env.NODE_ENV === 'development') {
-    baseUrl = `http://localhost:5001/${projectId}/${region}`;
+    baseUrl = `http://localhost:5002/${projectId}/${region}`;
     console.log("Using development URL:", baseUrl);
   } else {
     baseUrl = `https://${region}-${projectId}.cloudfunctions.net`;
@@ -257,6 +253,8 @@ export const submitFeedback = async (data: {
       headers: {
         'Content-Type': 'application/json',
       },
+      mode: 'cors',
+      credentials: 'omit', // Don't send credentials
       body: JSON.stringify(data),
     });
     
@@ -307,15 +305,15 @@ export const warmFunctions = async () => {
   
   try {
     // Get the region and project ID
-    const region = functions.region || 'us-central1';
-    const projectId = firebaseConfig.projectId;
+    const region = functions?.region || 'us-central1';
+    const projectId = FIREBASE_CONFIG.projectId || 'crystal-local';
     const baseUrl = `https://${region}-${projectId}.cloudfunctions.net`;
     
     // List of functions to warm
     const functionsToWarm = [
       'register_waitlist',
       'stream_search_datasets',
-      'stream_analyze_datasets',
+      'stream_analyze',
       'submit_feedback'
     ];
     
@@ -329,6 +327,8 @@ export const warmFunctions = async () => {
           headers: {
             'Content-Type': 'application/json',
           },
+          mode: 'cors',
+          credentials: 'omit', // Don't send credentials
           body: JSON.stringify({ warming: true }),
         });
         console.log(`Warmed function: ${functionName}`);
@@ -344,47 +344,35 @@ export const warmFunctions = async () => {
 
 // Export a helper for calling the stream analyze datasets function
 export const streamAnalyzeDatasets = async (
-  data: {
+  params: {
     query: string;
-    datasets: any[];
+    datasets: Dataset[];
   },
-  onChunk?: (chunk: any) => void // Callback for streaming updates
+  processChunk: (data: any) => void
 ) => {
-  // Create a default onChunk function if none is provided
-  const processChunk = typeof onChunk === 'function' 
-    ? onChunk 
-    : (chunk: any) => {
-        console.log('Received analysis chunk:', chunk);
-        // Default implementation just logs the chunk
-      };
-
-  // Get the region and project ID from the functions instance
-  const region = functions.region || 'us-central1';
-  const projectId = firebaseConfig.projectId;
-  
-  // Construct the URL for the HTTP function
-  let baseUrl = '';
-  if (process.env.NODE_ENV === 'development') {
-    // Use emulator URL in development
-    baseUrl = `http://localhost:5001/${projectId}/${region}`;
-  } else {
-    // Use production URL in production
-    baseUrl = `https://${region}-${projectId}.cloudfunctions.net`;
-  }
-  
-  // Corrected URL to match the actual backend function name
-  const url = `${baseUrl}/stream_analyze`;
-  
-  // Convert the datasets array to dataset_ids array
-  const dataset_ids = data.datasets.map(dataset => dataset.id);
-  
-  // Create the proper payload expected by the backend
-  const payload = {
-    query: data.query,
-    dataset_ids: dataset_ids
-  };
-  
   try {
+    // Get the base URL
+    let url = '';
+    if (process.env.NODE_ENV === 'development') {
+      // For development, use the API route with the correct origin
+      const baseUrl = window.location.origin;
+      url = `${baseUrl}${API_ENDPOINTS.streamAnalyze}`;
+      console.log("Using API endpoint:", url);
+    } else {
+      // Production URL
+      const region = functions?.region || 'us-central1';
+      const projectId = FIREBASE_CONFIG.projectId || 'crystal-local';
+      url = `https://${region}-${projectId}.cloudfunctions.net/stream_analyze`;
+    }
+    
+    console.log("Full request URL:", url);
+    
+    // Prepare the payload with the correct structure
+    const payload = {
+      query: params.query,
+      dataset_ids: params.datasets.map(dataset => dataset.id)
+    };
+    
     const response = await fetch(url, {
       method: 'POST',
       headers: {
@@ -399,60 +387,57 @@ export const streamAnalyzeDatasets = async (
       throw new Error(errorText || 'Failed to analyze datasets');
     }
     
-    // For streaming responses, we need to process the response as a stream
-    const reader = response.body?.getReader();
-    if (!reader) {
-      throw new Error('Stream reader not available');
+    if (!response.body) {
+      throw new Error('Response body is null');
     }
-    
-    // Process the stream and parse each chunk as JSON
+
+    // Process the stream
+    const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
-    const chunks = []; // Store processed chunks to return
-    
+
     while (true) {
       const { done, value } = await reader.read();
+      
       if (done) break;
-      
-      // Decode the chunk and add it to our buffer
+
+      // Append new data to buffer and process complete lines
       buffer += decoder.decode(value, { stream: true });
-      
-      // Split the buffer by newlines to get individual JSON objects
       const lines = buffer.split('\n');
-      
-      // Process all complete lines
-      for (let i = 0; i < lines.length - 1; i++) {
-        const line = lines[i].trim();
-        if (line) {
+      buffer = lines.pop() || ''; // Keep the last incomplete line
+
+      for (const line of lines) {
+        if (line.trim()) {
           try {
-            const data = JSON.parse(line);
-            // Call the callback with each chunk of data
+            // Remove the "data: " prefix if it exists
+            const jsonStr = line.startsWith('data: ') ? line.slice(5) : line;
+            const data = JSON.parse(jsonStr);
             processChunk(data);
-            chunks.push(data);
           } catch (e) {
-            console.error('Error parsing JSON:', e, 'Line:', line);
+            console.warn('Failed to parse line:', line);
+            processChunk({
+              type: 'error',
+              message: 'Failed to parse server response',
+              error: String(e)
+            });
           }
         }
       }
-      
-      // Keep the last (potentially incomplete) line in the buffer
-      buffer = lines[lines.length - 1];
     }
-    
-    // Process any remaining data in the buffer
+
+    // Process any remaining data in buffer
     if (buffer.trim()) {
       try {
-        const data = JSON.parse(buffer.trim());
+        const jsonStr = buffer.startsWith('data: ') ? buffer.slice(5) : buffer;
+        const data = JSON.parse(jsonStr);
         processChunk(data);
-        chunks.push(data);
       } catch (e) {
-        console.error('Error parsing final JSON:', e);
+        console.warn('Failed to parse remaining buffer:', buffer);
       }
     }
-    
-    return chunks; // Return all processed chunks
-  } catch (error: any) {
-    console.error('Error calling stream_analyze_datasets:', error);
-    throw new Error(error.message || 'Failed to analyze datasets');
+
+  } catch (error) {
+    console.error('Error in stream analyze:', error);
+    throw error;
   }
 }; 
