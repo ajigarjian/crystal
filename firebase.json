@@ -13,8 +13,12 @@
   "functions": {
     "source": "functions",
     "runtime": "python312",
-    "timeoutSeconds": 180,
-    "memory": "512MB",
+    "gen2": true,
+    "timeoutSeconds": 300,
+    "memory": "1GB",
+    "minInstances": 0,
+    "maxInstances": 10,
+    "concurrency": 40,
     "ignore": [
       "venv",
       ".git",
