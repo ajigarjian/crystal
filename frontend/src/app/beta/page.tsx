@@ -33,6 +33,127 @@ export default function BetaPage() {
   const [startY, setStartY] = useState(0);
   const [startScrollTop, setStartScrollTop] = useState(0);
   
+  // Process URL parameters on page load
+  useEffect(() => {
+    const processUrlParams = async () => {
+      try {
+        // Get URL parameters
+        const urlParams = new URLSearchParams(window.location.search);
+        const datasetsParam = urlParams.get('datasets');
+        const queryParam = urlParams.get('query');
+        
+        // If both parameters are present, trigger analysis
+        if (datasetsParam && queryParam) {
+          // Parse dataset IDs (removing brackets and quotes if needed)
+          let datasetIds;
+          try {
+            datasetIds = JSON.parse(datasetsParam);
+          } catch (e) {
+            // If parsing fails, try to split by comma
+            datasetIds = datasetsParam.split(',');
+          }
+          
+          if (datasetIds && datasetIds.length > 0) {
+            // Add user message to the chat
+            setMessages(prev => [...prev, { role: 'user', content: queryParam }]);
+            
+            // Add a loading message from the assistant
+            setMessages(prev => [...prev, { role: 'assistant', content: '', loading: true }]);
+            
+            // Switch to chat mode
+            setChatMode(true);
+            setIsLoading(true);
+            
+            // Make API call to analyze datasets
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/crystal-2f87e/us-central1';
+            const response = await fetch(`${apiUrl}/stream_analyze`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ 
+                dataset_ids: datasetIds,
+                query: queryParam 
+              }),
+            });
+            
+            if (!response.ok) {
+              throw new Error(`API error: ${response.status}`);
+            }
+            
+            // Handle the streaming response
+            const reader = response.body?.getReader();
+            let partialData = '';
+            
+            if (reader) {
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                
+                const text = new TextDecoder().decode(value);
+                partialData += text;
+                
+                // Split by SSE format "data:" lines
+                const lines = partialData.split(/data:/);
+                
+                for (const line of lines) {
+                  if (!line.trim()) continue;
+                  
+                  try {
+                    const data = JSON.parse(line.trim());
+                    
+                    // Handle different message types
+                    if (data.type === 'update' || data.type === 'complete') {
+                      // Update the assistant message with latest content
+                      setMessages(prev => {
+                        const newMessages = [...prev];
+                        const loadingIndex = newMessages.findIndex(m => m.loading);
+                        if (loadingIndex !== -1) {
+                          newMessages[loadingIndex] = {
+                            role: 'assistant',
+                            content: data.data?.summary || data.message || "Processing...",
+                            loading: data.type !== 'complete',
+                            response: data.data || data
+                          };
+                        }
+                        return newMessages;
+                      });
+                      
+                      if (data.type === 'complete') {
+                        setIsLoading(false);
+                      }
+                    }
+                  } catch (e) {
+                    // Skip parsing errors for partial chunks
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error processing URL parameters:', error);
+        
+        // Update with error message
+        setMessages(prev => {
+          const newMessages = [...prev];
+          const loadingIndex = newMessages.findIndex(m => m.loading);
+          if (loadingIndex !== -1) {
+            newMessages[loadingIndex] = {
+              role: 'assistant',
+              content: "Sorry, I encountered an error processing your request. Please try again."
+            };
+          }
+          return newMessages;
+        });
+        
+        setIsLoading(false);
+      }
+    };
+    
+    processUrlParams();
+  }, []);
+  
   // Add example queries
   const exampleQueries = [
     "What's the air quality trend in NYC over the past 5 years?",
@@ -79,7 +200,22 @@ export default function BetaPage() {
     setIsLoading(true);
     
     try {
-      const response = await processQuery(query);
+      // Check URL for dataset IDs
+      const urlParams = new URLSearchParams(window.location.search);
+      const datasetsParam = urlParams.get('datasets');
+      let datasetIds;
+      
+      // Parse dataset IDs if available
+      if (datasetsParam) {
+        try {
+          datasetIds = JSON.parse(datasetsParam);
+        } catch (e) {
+          datasetIds = datasetsParam.split(',');
+        }
+      }
+      
+      // Process the query with dataset IDs if available
+      const response = await processQuery(query, datasetIds);
       
       // Update the loading message with the actual response
       setMessages(prev => {
@@ -238,7 +374,22 @@ export default function BetaPage() {
     setInputValue("");
     
     try {
-      const response = await processQuery(userMessage);
+      // Check URL for dataset IDs
+      const urlParams = new URLSearchParams(window.location.search);
+      const datasetsParam = urlParams.get('datasets');
+      let datasetIds;
+      
+      // Parse dataset IDs if available
+      if (datasetsParam) {
+        try {
+          datasetIds = JSON.parse(datasetsParam);
+        } catch (e) {
+          datasetIds = datasetsParam.split(',');
+        }
+      }
+      
+      // Process the query with dataset IDs if available
+      const response = await processQuery(userMessage, datasetIds);
       
       // Update the loading message with the actual response
       setMessages(prev => {
