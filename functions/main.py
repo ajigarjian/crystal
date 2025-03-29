@@ -367,7 +367,10 @@ def test_db_connection(request):
 @https_fn.on_request(
     cors=options.CorsOptions(
         cors_origins=[
-        "*"
+        "https://crystal-2f87e.web.app",
+        "https://askcrystal.info",
+        "http://localhost:3000",
+        "http://localhost:5173",
         ],
         cors_methods=["get", "post", "options"],
     ),
