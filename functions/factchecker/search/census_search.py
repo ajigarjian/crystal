@@ -332,20 +332,52 @@ class VectorSearcher:
             embedding = create_embeddings(text)
             
             # Debug the embedding type and shape
-            #print(f"Embedding type: {type(embedding)}")
             if hasattr(embedding, 'shape'):
                 print(f"Embedding shape: {embedding.shape}")
             elif isinstance(embedding, list):
                 print(f"Embedding length: {len(embedding)}")
             
-            # Ensure the embedding is a numpy array, not bytes
+            # Standardized conversion to numpy array
             if isinstance(embedding, bytes):
-                print("Converting bytes embedding to numpy array")
-                embedding = np.frombuffer(embedding, dtype=np.float32)
+                try:
+                    # Try to decode as JSON string first
+                    try:
+                        decoded = embedding.decode('utf-8')
+                        if decoded.startswith('[') and decoded.endswith(']'):
+                            # It's likely a JSON array
+                            embedding_list = json.loads(decoded)
+                            embedding = np.array(embedding_list, dtype=np.float32)
+                            print("Converted JSON bytes embedding to numpy array")
+                        else:
+                            # Try direct numpy conversion
+                            embedding = np.frombuffer(embedding, dtype=np.float32)
+                            print("Converted binary bytes embedding to numpy array")
+                    except UnicodeDecodeError:
+                        # Not a UTF-8 string, try direct numpy conversion
+                        embedding = np.frombuffer(embedding, dtype=np.float32)
+                        print("Converted raw bytes embedding to numpy array")
+                except Exception as e:
+                    print(f"Error converting embedding from bytes: {e}")
+                    return None
             elif isinstance(embedding, list):
                 print("Converting list embedding to numpy array")
                 embedding = np.array(embedding, dtype=np.float32)
+            elif isinstance(embedding, str):
+                # Handle serialized JSON string
+                try:
+                    if embedding.startswith('[') and embedding.endswith(']'):
+                        embedding_list = json.loads(embedding)
+                        embedding = np.array(embedding_list, dtype=np.float32)
+                        print("Converted JSON string embedding to numpy array")
+                except Exception as e:
+                    print(f"Error converting embedding from JSON string: {e}")
+                    return None
             
+            # Final check to ensure we have a numpy array
+            if not isinstance(embedding, np.ndarray):
+                print(f"Warning: embedding is not a numpy array: {type(embedding)}")
+                return None
+                
             return embedding
         except Exception as e:
             print(f"Error creating embedding: {e}")
@@ -356,31 +388,53 @@ class VectorSearcher:
     def _cosine_similarity(self, vec1, vec2):
         """Calculate cosine similarity between two vectors"""
         try:
-            # If either is bytes, check if it's actually ASCII hex like b'\\x4d1a49...'
+            # Handle vec1 conversion
             if isinstance(vec1, bytes):
-                if vec1.startswith(b'\\x'):
-                    hex_str = vec1.decode('utf-8')[2:]
-                    raw_bin = bytes.fromhex(hex_str)
-                    vec1 = np.frombuffer(raw_bin, dtype=np.float32) if len(raw_bin) % 4 == 0 else raw_bin
-                else:
-                    # If it's raw binary, parse only if length % 4 == 0
-                    vec1 = np.frombuffer(vec1, dtype=np.float32) if len(vec1) % 4 == 0 else vec1
+                try:
+                    # Try to decode as JSON string first
+                    try:
+                        decoded = vec1.decode('utf-8')
+                        if decoded.startswith('[') and decoded.endswith(']'):
+                            # It's likely a JSON array
+                            vec1_list = json.loads(decoded)
+                            vec1 = np.array(vec1_list, dtype=np.float32)
+                        else:
+                            # Try direct numpy conversion
+                            vec1 = np.frombuffer(vec1, dtype=np.float32)
+                    except UnicodeDecodeError:
+                        # Not a UTF-8 string, try direct numpy conversion
+                        vec1 = np.frombuffer(vec1, dtype=np.float32)
+                except Exception as e:
+                    print(f"Failed to convert vec1 from bytes: {e}")
+                    return 0.0
 
+            # Handle vec2 conversion
             if isinstance(vec2, bytes):
-                if vec2.startswith(b'\\x'):
-                    hex_str = vec2.decode('utf-8')[2:]
-                    raw_bin = bytes.fromhex(hex_str)
-                    vec2 = np.frombuffer(raw_bin, dtype=np.float32) if len(raw_bin) % 4 == 0 else raw_bin
-                else:
-                    vec2 = np.frombuffer(vec2, dtype=np.float32) if len(vec2) % 4 == 0 else vec2
+                try:
+                    # Try to decode as JSON string first
+                    try:
+                        decoded = vec2.decode('utf-8')
+                        if decoded.startswith('[') and decoded.endswith(']'):
+                            # It's likely a JSON array
+                            vec2_list = json.loads(decoded)
+                            vec2 = np.array(vec2_list, dtype=np.float32)
+                        else:
+                            # Try direct numpy conversion
+                            vec2 = np.frombuffer(vec2, dtype=np.float32)
+                    except UnicodeDecodeError:
+                        # Not a UTF-8 string, try direct numpy conversion
+                        vec2 = np.frombuffer(vec2, dtype=np.float32)
+                except Exception as e:
+                    print(f"Failed to convert vec2 from bytes: {e}")
+                    return 0.0
 
-            # If either is still a list, convert to numpy
+            # If either is a list, convert to numpy
             if isinstance(vec1, list):
                 vec1 = np.array(vec1, dtype=np.float32)
             if isinstance(vec2, list):
                 vec2 = np.array(vec2, dtype=np.float32)
 
-            # If they're still raw bytes, bail out or do your fallback
+            # If they're still not numpy arrays, bail out
             if not isinstance(vec1, np.ndarray) or not isinstance(vec2, np.ndarray):
                 print("Warning: could not parse one of the vectors as float32 array.")
                 return 0.0
@@ -513,33 +567,29 @@ class VectorSearcher:
                     if isinstance(dataset.embedding, bytes):
                         print(f"Dataset {dataset.id} embedding is bytes, length: {len(dataset.embedding)}")
                     
-                    # Ensure proper conversion from binary to numpy array
+                    # Standardized conversion from various formats to numpy array
                     dataset_embedding = dataset.embedding
                     if isinstance(dataset_embedding, bytes):
-                        if dataset_embedding.startswith(b'\\x'):
-                            hex_str = dataset_embedding.decode('utf-8')[2:]
-                            raw_bin = bytes.fromhex(hex_str)
-                            if len(raw_bin) % 4 == 0:
-                                try:
-                                    dataset_embedding = np.frombuffer(raw_bin, dtype=np.float32)
-                                    print(f"Converted dataset {dataset.id} to np array shape {dataset_embedding.shape}")
-                                except Exception as e:
-                                    print(f"Error converting dataset {dataset.id} embedding: {e}")
-                                    continue
-                            else:
-                                print(f"Dataset {dataset.id} embedding length {len(raw_bin)} not multiple of 4")
-                                continue
-                        else:
-                            # If it's raw binary, parse only if length % 4 == 0
-                            if len(dataset_embedding) % 4 == 0:
-                                try:
+                        try:
+                            # First try to decode as JSON string
+                            try:
+                                decoded = dataset_embedding.decode('utf-8')
+                                if decoded.startswith('[') and decoded.endswith(']'):
+                                    # Likely a JSON array
+                                    embedding_list = json.loads(decoded)
+                                    dataset_embedding = np.array(embedding_list, dtype=np.float32)
+                                    print(f"Converted dataset {dataset.id} JSON to np array shape {dataset_embedding.shape}")
+                                else:
+                                    # Try direct numpy conversion
                                     dataset_embedding = np.frombuffer(dataset_embedding, dtype=np.float32)
-                                except Exception as e:
-                                    print(f"Error converting dataset {dataset.id} embedding: {e}")
-                                    continue
-                            else:
-                                print(f"Dataset {dataset.id} embedding length {len(dataset_embedding)} not multiple of 4")
-                                continue
+                                    print(f"Converted dataset {dataset.id} bytes to np array shape {dataset_embedding.shape}")
+                            except UnicodeDecodeError:
+                                # Not a UTF-8 string, try direct numpy conversion
+                                dataset_embedding = np.frombuffer(dataset_embedding, dtype=np.float32)
+                                print(f"Converted dataset {dataset.id} binary to np array shape {dataset_embedding.shape}")
+                        except Exception as e:
+                            print(f"Error converting dataset {dataset.id} embedding: {e}")
+                            continue
                     
                     # Calculate similarity
                     similarity = self._cosine_similarity(query_embedding, dataset_embedding)
@@ -744,95 +794,9 @@ def vector_search(query: str,
                  verbose: bool = False,
                  skip_empty_filters: bool = True) -> List[Dict]:
     """
-    Vector search for Census datasets
+    Vector search for Census datasets - CURRENTLY DISABLED
     
-    Args:
-        query (str): Natural language query
-        similarity_threshold (float): Minimum similarity score threshold
-        year (int, optional): Filter Census results by specific year/vintage
-        tags (list, optional): Filter Census results by specific tags
-        geo_level (str, optional): Filter by geographic level (e.g., "state", "county")
-        location (str, optional): Location information (e.g., "California")
-            This is mainly informational as datasets typically 
-            contain data for all locations at their supported geographic levels
-        max_results (int, optional): Maximum number of results to return
-        verbose (bool): Whether to print detailed logging information
-        skip_empty_filters (bool): If True, ignore empty year and tags filters
-        
-    Returns:
-        list: Matching datasets with relevance scores
+    Returns an empty list - all census functionality is temporarily disabled.
     """
-    searcher = VectorSearcher()
-    
-    # Process the query if geo_level or location are not explicitly provided
-    if skip_empty_filters and (geo_level is None or location is None):
-        if verbose:
-            print("Extracting geographic information from query")
-            
-        processor = QueryProcessor()
-        processed = processor.process_query(query)
-        
-        # Use extracted geo_level if not explicitly provided
-        if geo_level is None and processed.get('geo_level'):
-            geo_level = processed.get('geo_level')
-            if verbose:
-                print(f"Extracted geo_level from query: {geo_level}")
-                
-        # Use extracted location if not explicitly provided
-        if location is None and processed.get('location'):
-            location = processed.get('location')
-            if verbose:
-                print(f"Extracted location from query: {location}")
-    
-    # Skip filters if they're empty and skip_empty_filters is True
-    if skip_empty_filters:
-        if year is None and (tags is None or len(tags) == 0) and geo_level is None:
-            if verbose:
-                print("No year, tags, or geo filters specified, searching without filters")
-        elif year is None:
-            if verbose:
-                print("No year specified, searching without year filter")
-        elif tags is None or len(tags) == 0:
-            if verbose:
-                print("No tags specified, searching without tags filter")
-            tags = None
-    
-    try:
-        # Ensure query is a string
-        if not isinstance(query, str):
-            query = str(query)
-            
-        print(f"Starting vector search with query: {query}")
-        results = searcher.search(
-            query=query,
-            similarity_threshold=similarity_threshold,
-            year=year,
-            tags=tags,
-            geo_level=geo_level,
-            location=location,
-            max_results=max_results,
-            verbose=verbose
-        )
-        
-        print(f"Search returned results of type: {type(results)}")
-        if results is None:
-            print("Search returned None, returning empty list")
-            return []
-        elif hasattr(results, '__iter__') and not isinstance(results, list):
-            print(f"Converting results of type {type(results)} to list")
-            print(f"Results dir: {dir(results)}")  # Print available methods
-            try:
-                list_results = list(results)
-                print(f"Successfully converted to list with {len(list_results)} items")
-                return list_results
-            except Exception as e:
-                print(f"Error converting to list: {str(e)}")
-                # ... existing fallback code ...
-        
-        print(f"Returning {len(results)} search results")
-        return results
-    except Exception as e:
-        print(f"Error searching Census datasets: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return []
+    print("Census search functionality is temporarily disabled")
+    return []

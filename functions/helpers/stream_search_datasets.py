@@ -91,80 +91,8 @@ def process_and_yield_dataset(dataset, source, all_datasets_count, start_time):
 
 def search_census_data(query, similarity_threshold, max_results, start_time):
     """Search Census data and yield status updates and results"""
-    yield create_status_message('I\'m checking Census datasets...', start_time)
-    
-    try:
-        # Get census search results
-        census_results = census_vector_search(
-            query=query,
-            similarity_threshold=similarity_threshold,
-            max_results=max_results,
-            verbose=False
-        )
-        
-        # Ensure we have a list
-        if hasattr(census_results, '__iter__') and not isinstance(census_results, list):
-            census_results = list(census_results)
-        elif not isinstance(census_results, list):
-            census_results = []
-        
-        # Check if we got any results
-        if census_results:
-            # Yield discovery message
-            yield json.dumps({
-                'type': 'discovery',
-                'message': f'I\'ve found {len(census_results)} Census datasets that might be relevant.',
-                'count': len(census_results),
-                'timestamp': time.time() - start_time
-            }, cls=NumpyEncoder) + '\n'
-            
-            # Process and yield each Census dataset
-            for i, dataset in enumerate(census_results):
-                # Extract proper fields from the Census dataset
-                dataset_id = dataset.get('id', f'census-{i}')
-                dataset_title = dataset.get('title', 'Census Dataset')
-                dataset_description = dataset.get('description', '')
-                dataset_vintage = dataset.get('vintage', '')
-                dataset_path = dataset.get('dataset_path', '')
-                dataset_similarity = dataset.get('similarity', 0.8)
-                
-                # Create a properly formatted dataset object
-                formatted_dataset = {
-                    'id': dataset_id,
-                    'title': dataset_title,
-                    'description': dataset_description,
-                    'organization': 'U.S. Census Bureau',
-                    'similarity': dataset_similarity,
-                    'resources': [],
-                    'search_source': 'census',
-                    'vintage': dataset_vintage,
-                    'dataset_path': dataset_path,
-                    'is_cached': False  # Default to not cached for Census datasets
-                }
-                
-                # Yield discovery message for this dataset
-                yield json.dumps({
-                    'type': 'discovery',
-                    'message': f'I\'ve found a dataset: {dataset_title}',
-                    'count': len(census_results),
-                    'timestamp': time.time() - start_time
-                }, cls=NumpyEncoder) + '\n'
-                
-                # Yield the dataset
-                yield json.dumps({
-                    'type': 'dataset',
-                    'data': formatted_dataset,
-                    'timestamp': time.time() - start_time
-                }, cls=NumpyEncoder) + '\n'
-        else:
-            yield create_status_message('No relevant Census datasets found.', start_time)
-            
-    except Exception as e:
-        logger.error(f"Error in Census search: {e}")
-        yield create_status_message(
-            "I encountered an issue with Census data. Continuing with other sources...",
-            start_time
-        )
+    yield create_status_message('Census search functionality is temporarily disabled.', start_time)
+    return []
 
 def search_vector_datasets(query, similarity_threshold, max_results, start_time):
     """Search datasets using vector search and yield results"""
@@ -402,50 +330,8 @@ def stream_search_datasets_helper(query, similarity_threshold=0.3, search_method
         for chunk in search_census_data(query, similarity_threshold, census_max_results, start_time):
             yield chunk
         
-        # Now get the actual census datasets
-        try:
-            # Extract structured info from query for Census search
-            query_info = process_census_query(query)
-            
-            # Perform Census search with proper error handling
-            try:
-                # Use empty lists for tags if None to avoid Boolean clause issues
-                tags = query_info.get('tags', []) if query_info.get('tags') is not None else []
-                
-                census_results = census_vector_search(
-                    query=query,
-                    similarity_threshold=similarity_threshold,
-                    year=query_info.get('year'),
-                    tags=tags,  # Pass empty list instead of None
-                    geo_level=query_info.get('geo_level'),
-                    location=query_info.get('location'),
-                    max_results=census_max_results,
-                    verbose=False
-                )
-                
-                # Ensure we have a list
-                if hasattr(census_results, '__iter__') and not isinstance(census_results, list):
-                    census_results = list(census_results)
-                elif not isinstance(census_results, list):
-                    census_results = []
-                
-                # Process census results
-                census_datasets = census_results
-                
-                # We've already yielded the datasets in the search_census_data function,
-                # so we don't need to yield them again here
-            except Exception as e:
-                logger.error(f"Error in census search: {e}")
-                yield create_status_message(
-                    "I encountered an issue with Census data. Continuing with other sources...",
-                    start_time
-                )
-        except Exception as e:
-            logger.error(f"Error processing Census results: {str(e)}")
-            yield create_status_message(
-                "I encountered an issue with Census data. Continuing with other sources...",
-                start_time
-            )
+        # Census functionality is temporarily disabled
+        census_datasets = []
         
         # Now launch Data.gov searches
         with concurrent.futures.ThreadPoolExecutor() as executor:

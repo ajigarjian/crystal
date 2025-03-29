@@ -386,13 +386,13 @@ export default function BetaPage() {
         
         {/* Navigation links */}
         <div className="absolute top-6 right-6 z-30 flex gap-4">
-          <Link href="/datasets">
+          <Link href="/alpha">
             <Button 
               variant="link" 
               className="text-white flex items-center gap-1 hover:text-white/80 transition-colors"
               style={{ fontFamily: 'var(--font-geist-sans)' }}
             >
-              Datasets
+              Alpha
             </Button>
           </Link>
         </div>

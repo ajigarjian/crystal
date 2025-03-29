@@ -644,8 +644,8 @@ export default function DatasetsPage() {
     localStorage.setItem('selectedDataset', dataset.id);
     localStorage.setItem('lastQuery', query);
     
-    // Navigate to the chat page with dataset ID and query
-    router.push(`/chat?dataset=${dataset.id}&query=${encodeURIComponent(query)}`);
+    // Navigate to the beta page with dataset ID and query
+    router.push(`/beta?dataset=${dataset.id}&query=${encodeURIComponent(query)}`);
   };
   
   // Handle multi-dataset selection - for when user wants to analyze multiple datasets
@@ -664,8 +664,8 @@ export default function DatasetsPage() {
     localStorage.setItem('selectedDatasets', JSON.stringify(datasetIds));
     localStorage.setItem('lastQuery', query);
     
-    // Navigate to analysis page with dataset IDs and query
-    router.push(`/chat?datasets=${encodeURIComponent(JSON.stringify(datasetIds))}&query=${encodeURIComponent(query)}`);
+    // Navigate to beta page with dataset IDs and query
+    router.push(`/beta?datasets=${encodeURIComponent(JSON.stringify(datasetIds))}&query=${encodeURIComponent(query)}`);
   };
 
   // Helper function to get image URL
