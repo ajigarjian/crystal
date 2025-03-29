@@ -275,19 +275,23 @@ def execute_relevant_data(relevant_data) -> Dict[str, Any]:
     
     return result
 
-def execute_code(df: pd.DataFrame, code: str) -> Tuple[Any, str]:
+def execute_code(df, code: str) -> Tuple[Any, str]:
     """
     Execute the provided code and return the result and any printed output.
     
     Args:
-        df: The DataFrame to execute the code on
+        df: The DataFrame or data to execute the code on
         code: The Python code to execute
         
     Returns:
         Tuple of (execution_result, printed_output)
     """
-    # Create a copy of the DataFrame to avoid modifying the original
-    local_env = {"df": df.copy(), "pd": pd, "np": np}
+    # Create the local environment with appropriate variables
+    # Check if df is a DataFrame before trying to copy it
+    if isinstance(df, pd.DataFrame):
+        local_env = {"df": df.copy(), "pd": pd, "np": np}
+    else:
+        local_env = {"df": df, "pd": pd, "np": np}
     
     # Clean the code - remove markdown code block markers if present
     if code.startswith("```python"):
