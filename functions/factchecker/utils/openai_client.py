@@ -120,8 +120,8 @@ def chat_completion(
     Args:
         prompt: The user prompt
         system_message: The system message to use
-        temperature: The temperature to use for generation
-        max_tokens: Maximum tokens
+        temperature: The temperature to use for generation (not supported by all models)
+        max_tokens: Maximum tokens (will be mapped to max_completion_tokens for models that require it)
         response_format: Optional format specification for the response
         model_name: Optional model name to use (e.g., "gpt-4o", "gpt-4o-mini")
         
@@ -131,28 +131,34 @@ def chat_completion(
     client = get_cached_openai_client()
     
     try:
-        # Create API call with or without response_format based on whether it's provided
+        # Base parameters for the API call
+        params = {
+            "model": model_name,
+            "messages": [
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": prompt}
+            ],
+        }
+        
+        # Add temperature for models that support it
+        # o3-mini doesn't support temperature parameter
+        if not model_name.endswith("o3-mini"):
+            params["temperature"] = temperature
+        
+        # Add response_format if provided
         if response_format is not None:
-            response = client.chat.completions.create(
-                model=model_name,
-                messages=[
-                    {"role": "system", "content": system_message},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=temperature,
-                max_tokens=max_tokens,
-                response_format=response_format
-            )
+            params["response_format"] = response_format
+            
+        # Handle token limit parameter based on model
+        if "o3" in model_name or "-o" in model_name:
+            # For newer models like GPT-4o and o3 models that use max_completion_tokens
+            params["max_completion_tokens"] = max_tokens
         else:
-            response = client.chat.completions.create(
-                model=model_name,
-                messages=[
-                    {"role": "system", "content": system_message},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=temperature,
-                max_tokens=max_tokens
-            )
+            # For older models that use max_tokens
+            params["max_tokens"] = max_tokens
+            
+        response = client.chat.completions.create(**params)
+        
         print("Generated response with model:", model_name)
         return response.choices[0].message.content
 
