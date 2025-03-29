@@ -9,8 +9,8 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 if project_root not in sys.path:
     sys.path.append(project_root)
 
-from functions.factchecker.search.web_search import enhanced_web_search
-from functions.factchecker.processing.analysis.web_search_result_analyzer import analyze_search_results, summarize_search_analysis
+from factchecker.search.web_search import enhanced_web_search
+from factchecker.processing.analysis.web_search_result_analyzer import analyze_search_results, summarize_search_analysis
 
 
 def search_and_analyze(

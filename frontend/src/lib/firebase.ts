@@ -53,6 +53,7 @@ export const registerWaitlist = async (data: { email: string, first_name: string
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
       },
       body: JSON.stringify(data),
     });
@@ -111,6 +112,7 @@ export const streamSearchDatasets = async (
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
       },
       body: JSON.stringify(data),
     });
@@ -147,7 +149,12 @@ export const streamSearchDatasets = async (
         const line = lines[i].trim();
         if (line) {
           try {
-            const data = JSON.parse(line);
+            // Extract the JSON part if the line starts with 'data:'
+            const jsonStr = line.startsWith('data:') 
+              ? line.substring(5).trim() 
+              : line;
+            
+            const data = JSON.parse(jsonStr);
             // Call the callback with each chunk of data
             processChunk(data);
             chunks.push(data);
@@ -164,7 +171,12 @@ export const streamSearchDatasets = async (
     // Process any remaining data in the buffer
     if (buffer.trim()) {
       try {
-        const data = JSON.parse(buffer.trim());
+        // Extract the JSON part if the line starts with 'data:'
+        const jsonStr = buffer.trim().startsWith('data:') 
+          ? buffer.trim().substring(5).trim() 
+          : buffer.trim();
+        
+        const data = JSON.parse(jsonStr);
         processChunk(data);
         chunks.push(data);
       } catch (e) {
@@ -256,6 +268,7 @@ export const submitFeedback = async (data: {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
       },
       body: JSON.stringify(data),
     });
@@ -315,7 +328,7 @@ export const warmFunctions = async () => {
     const functionsToWarm = [
       'register_waitlist',
       'stream_search_datasets',
-      'stream_analyze_datasets',
+      'stream_analyze',
       'submit_feedback'
     ];
     
@@ -328,6 +341,7 @@ export const warmFunctions = async () => {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
           },
           body: JSON.stringify({ warming: true }),
         });
@@ -390,6 +404,7 @@ export const streamAnalyzeDatasets = async (
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
       },
       body: JSON.stringify(payload),
     });
@@ -420,9 +435,11 @@ export const streamAnalyzeDatasets = async (
         const line = lines[i].trim();
         if (line) {
           try {
-            const jsonStr = line.startsWith('data: ')
-              ? line.substring(6)
+            // Extract the JSON part if the line starts with 'data:'
+            const jsonStr = line.startsWith('data:') 
+              ? line.substring(5).trim() 
               : line;
+            
             const parsed = JSON.parse(jsonStr);
             processChunk(parsed);
             chunks.push(parsed);
@@ -436,9 +453,11 @@ export const streamAnalyzeDatasets = async (
     
     if (buffer.trim()) {
       try {
-        const jsonStr = buffer.trim().startsWith('data: ')
-          ? buffer.trim().substring(6)
+        // Extract the JSON part if the line starts with 'data:'
+        const jsonStr = buffer.trim().startsWith('data:') 
+          ? buffer.trim().substring(5).trim() 
           : buffer.trim();
+        
         const parsed = JSON.parse(jsonStr);
         processChunk(parsed);
         chunks.push(parsed);
@@ -449,7 +468,7 @@ export const streamAnalyzeDatasets = async (
     
     return chunks;
   } catch (error: any) {
-    console.error('Error calling stream_analyze_datasets:', error);
+    console.error('Error calling stream_analyze:', error);
     throw new Error(error.message || 'Failed to analyze datasets');
   }
 }; 

@@ -371,7 +371,7 @@ def test_db_connection(request):
         ],
         cors_methods=["get", "post", "options"],
     ),
-    memory=options.MemoryOption.MB_512
+    memory=options.MemoryOption.GB_4
 )
 def stream_analyze(request):
     """HTTP Cloud Function that streams dataset analysis results."""

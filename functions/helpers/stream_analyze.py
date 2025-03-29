@@ -14,7 +14,23 @@ import concurrent.futures
 from threading import Lock
 import pprint
 import pandas as pd
-import pyarrow.parquet as pq
+try:
+    import pyarrow.parquet as pq
+except ImportError:
+    # Use an alternative like pandas for Parquet
+    import pandas as pd
+    
+    # Define wrapper functions to maintain compatibility
+    def read_parquet(file_path):
+        return pd.read_parquet(file_path)
+    
+    # Create a pq namespace with similar functions
+    class ParquetCompat:
+        @staticmethod
+        def read_table(file_path):
+            return read_parquet(file_path)
+    
+    pq = ParquetCompat()
 import re
 
 # Factchecker imports
