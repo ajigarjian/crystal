@@ -1,9 +1,18 @@
+import os
+import django
+from django.conf import settings
+
+# Set the DJANGO_SETTINGS_MODULE environment variable
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "factchecker.settings")
+
+# Initialize Django
+django.setup()
+
 from firebase_functions import https_fn, options
 from firebase_admin import initialize_app, firestore
 import requests
 from datetime import datetime
 import firebase_admin
-import os
 import logging
 import time
 import json

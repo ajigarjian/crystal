@@ -1,6 +1,7 @@
 from django.db import models
 import json
 from django.utils import timezone
+from django.contrib.postgres.fields import ArrayField
 
 class DatasetCatalog(models.Model):
     """Model to store dataset metadata from Data.gov with vector search support"""
@@ -379,3 +380,54 @@ class CensusQueryMapping(models.Model):
     
     def __str__(self):
         return f"{self.query_pattern} → {self.variable.variable_name}"
+
+class Feedback(models.Model):
+    """Model to store user feedback without requiring authentication"""
+    
+    # Feedback types as choices for validation
+    FEEDBACK_TYPES = [
+        ('suggestion', 'Suggestion'),
+        ('bug', 'Bug Report'),
+        ('feature_request', 'Feature Request'),
+        ('praise', 'Praise'),
+    ]
+    
+    # Status options as choices
+    STATUS_CHOICES = [
+        ('new', 'New'),
+        ('in_review', 'In Review'),
+        ('planned', 'Planned'),
+        ('implemented', 'Implemented'),
+        ('declined', 'Declined'),
+    ]
+    
+    # Core fields
+    feedback_type = models.CharField(max_length=50, choices=FEEDBACK_TYPES)
+    title = models.CharField(max_length=255)
+    description = models.TextField()
+    status = models.CharField(max_length=50, choices=STATUS_CHOICES, default='new')
+    email = models.EmailField(blank=True, null=True)
+    page_url = models.URLField(max_length=512, blank=True, null=True)
+    
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    # Engagement
+    upvotes = models.IntegerField(default=0)
+    
+    # Using PostgreSQL-specific fields
+    tags = ArrayField(models.CharField(max_length=100), blank=True, default=list)
+    metadata = models.JSONField(blank=True, null=True)
+    
+    class Meta:
+        app_label = 'factchecker'
+        db_table = 'factchecker_feedback'
+        indexes = [
+            models.Index(fields=['feedback_type']),
+            models.Index(fields=['status']),
+            models.Index(fields=['created_at']),
+        ]
+    
+    def __str__(self):
+        return f"{self.feedback_type}: {self.title}"
