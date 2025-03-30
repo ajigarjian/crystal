@@ -822,6 +822,26 @@ export default function DatasetsPage() {
               setIsSummaryLoading(false); // Hide skeleton when actual data arrives
               break;
             
+            case 'formatted_data':
+              try {
+                console.log('Processing formatted data');
+                // Extract the formatted_data from the nested structure
+                const formattedData = data.data.formatted_data;
+                
+                if (formattedData) {
+                  setSummaryData({
+                    query: query,
+                    summary: formattedData.summary || '',
+                    keyFindings: formattedData.key_points || [],
+                    sources: formattedData.sources || []
+                  });
+                  setIsSummaryLoading(false);
+                }
+              } catch (error) {
+                console.error('Error processing formatted data:', error);
+              }
+              break;
+            
             default:
               console.log(`Unknown message type: ${data.type}`, data);
           }
@@ -1149,10 +1169,19 @@ export default function DatasetsPage() {
               
             case 'formatted_findings':
               try {
-                // Process the formatted findings
-                const formattedData = typeof chunk.data === 'string' 
-                  ? parseFormattedFindings(chunk.data)
-                  : chunk.data;
+                console.log('Processing formatted findings');
+                let formattedData;
+                
+                if (typeof data.data === 'string') {
+                  // Format 1: String format
+                  formattedData = parseFormattedFindings(data.data);
+                } else if (data.data.formatted_data) {
+                  // Format 2: Nested object format
+                  formattedData = data.data.formatted_data;
+                } else {
+                  // Format 3: Direct object format
+                  formattedData = data.data;
+                }
                 
                 setSummaryData({
                   query: query,
@@ -1160,9 +1189,9 @@ export default function DatasetsPage() {
                   keyFindings: formattedData.key_points || [],
                   sources: formattedData.sources || []
                 });
-                setIsSummaryLoading(false); // Hide skeleton when actual data arrives
+                setIsSummaryLoading(false);
               } catch (error) {
-                console.error("Error parsing formatted findings:", error);
+                console.error('Error processing formatted findings:', error);
               }
               break;
               
@@ -1192,8 +1221,23 @@ export default function DatasetsPage() {
               break;
               
             case 'formatted_data':
-              console.log("Received formatted data");
-              // Process formatted data if needed
+              try {
+                console.log('Processing formatted data');
+                // Extract the formatted_data from the nested structure
+                const formattedData = data.data.formatted_data;
+                
+                if (formattedData) {
+                  setSummaryData({
+                    query: query,
+                    summary: formattedData.summary || '',
+                    keyFindings: formattedData.key_points || [],
+                    sources: formattedData.sources || []
+                  });
+                  setIsSummaryLoading(false);
+                }
+              } catch (error) {
+                console.error('Error processing formatted data:', error);
+              }
               break;
               
             default:
