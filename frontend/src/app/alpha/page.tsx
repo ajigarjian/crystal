@@ -1538,6 +1538,37 @@ export default function DatasetsPage() {
               }
               break;
               
+            case 'findings':
+              console.log("Received findings data");
+              break;
+              
+            case 'formatted_findings':
+              try {
+                const formattedData = typeof data.data === 'string' 
+                  ? parseFormattedFindings(data.data)
+                  : data.data;
+                
+                setSummaryData({
+                  query: query,
+                  summary: formattedData.summary || '',
+                  keyFindings: formattedData.key_points || [],
+                  sources: formattedData.sources || []
+                });
+                setIsSummaryLoading(false);
+              } catch (error) {
+                console.error("Error parsing formatted findings:", error);
+              }
+              break;
+              
+            case 'web_search_results':
+            case 'web_search_summary':
+            case 'analysis_result':
+            case 'analysis':
+            case 'extracted_data':
+            case 'formatted_data':
+              console.log(`Received ${data.type}`);
+              break;
+            
             default:
               console.log(`Unknown analysis message type: ${data.type}`, data);
           }
@@ -1545,8 +1576,17 @@ export default function DatasetsPage() {
       );
     } catch (err: any) {
       console.error("Error in dataset analysis:", err);
-      setError(`Failed to analyze datasets: ${err.message || String(err)}`);
+      setError(`Failed to analyze datasets: ${err instanceof Error ? err.message : String(err)}`);
       setIsAnalyzing(false);
+      
+      // Add error to status messages
+      const errorMessage: StatusMessage = {
+        id: Math.random().toString(36).substring(2, 9),
+        message: `Error: Failed to analyze datasets: ${err instanceof Error ? err.message : String(err)}`,
+        timestamp: Date.now(),
+        type: 'error'
+      };
+      setStatusMessages(prev => [...prev, errorMessage]);
     }
   };
 
