@@ -326,54 +326,6 @@ def stream_analyze_helper(dataset_ids, query, file_path=None):
             )
             return
         
-        # Call search_and_analyze at the beginning
-        yield create_status_message(
-            f'Performing web search and analysis for your query...',
-            start_time
-        )
-        
-        # Call search_and_analyze with default parameters and handle errors
-        search_results = {}
-        try:
-            search_results = search_and_analyze(
-                query=query,
-                max_results=5,  # Limit to 5 results for performance
-                search_type="comprehensive",
-                analyze_results=True
-            )
-        except Exception as e:
-            logger.error(f"Error in web search: {str(e)}")
-            logger.error(traceback.format_exc())
-            # Continue with empty search results rather than failing
-            search_results = {}
-        
-        # Stream search results as they become available
-        if search_results:
-            try:
-                yield json.dumps({
-                    'type': 'web_search_results',
-                    'data': search_results.get('search_results', search_results),
-                    'timestamp': time.time() - start_time
-                }, cls=NumpyEncoder) + '\n'
-                
-                # If there's a summary, send it as a separate message
-                if 'summary' in search_results:
-                    # Direct summary from search_results structure
-                    yield json.dumps({
-                        'type': 'web_search_summary',
-                        'data': search_results['summary'],
-                        'timestamp': time.time() - start_time
-                    }, cls=NumpyEncoder) + '\n'
-                # Check for summary in search_results.search_results (nested structure)
-                elif 'search_results' in search_results and 'summary' in search_results.get('search_results', {}):
-                    yield json.dumps({
-                        'type': 'web_search_summary',
-                        'data': search_results['search_results']['summary'],
-                        'timestamp': time.time() - start_time
-                    }, cls=NumpyEncoder) + '\n'
-            except Exception as e:
-                logger.error(f"Error streaming web search results: {str(e)}")
-                # Continue execution without search results
         
         # Get the resource metadata from the DB
         resource_metadata = query_datasets_helper(dataset_ids)
@@ -746,6 +698,55 @@ def stream_analyze_helper(dataset_ids, query, file_path=None):
                 )
                 continue
         
+        # Call search_and_analyze at the beginning
+        yield create_status_message(
+            f'Performing web search and analysis for your query...',
+            start_time
+        )
+        
+        # Call search_and_analyze with default parameters and handle errors
+        search_results = {}
+        try:
+            search_results = search_and_analyze(
+                query=query,
+                max_results=5,  # Limit to 5 results for performance
+                search_type="comprehensive",
+                analyze_results=True
+            )
+        except Exception as e:
+            logger.error(f"Error in web search: {str(e)}")
+            logger.error(traceback.format_exc())
+            # Continue with empty search results rather than failing
+            search_results = {}
+        
+        # Stream search results as they become available
+        if search_results:
+            try:
+                yield json.dumps({
+                    'type': 'web_search_results',
+                    'data': search_results.get('search_results', search_results),
+                    'timestamp': time.time() - start_time
+                }, cls=NumpyEncoder) + '\n'
+                
+                # If there's a summary, send it as a separate message
+                if 'summary' in search_results:
+                    # Direct summary from search_results structure
+                    yield json.dumps({
+                        'type': 'web_search_summary',
+                        'data': search_results['summary'],
+                        'timestamp': time.time() - start_time
+                    }, cls=NumpyEncoder) + '\n'
+                # Check for summary in search_results.search_results (nested structure)
+                elif 'search_results' in search_results and 'summary' in search_results.get('search_results', {}):
+                    yield json.dumps({
+                        'type': 'web_search_summary',
+                        'data': search_results['search_results']['summary'],
+                        'timestamp': time.time() - start_time
+                    }, cls=NumpyEncoder) + '\n'
+            except Exception as e:
+                logger.error(f"Error streaming web search results: {str(e)}")
+
+
         # After processing all datasets, generate the findings summary
         if all_formatted_data:
             yield create_status_message(

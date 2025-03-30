@@ -327,8 +327,8 @@ def stream_search_datasets_helper(query, similarity_threshold=0.3, search_method
         
         # Search Census data - this is a generator that yields status updates
         # We need to collect the actual datasets separately
-        for chunk in search_census_data(query, similarity_threshold, census_max_results, start_time):
-            yield chunk
+        #for chunk in search_census_data(query, similarity_threshold, census_max_results, start_time):
+        #    yield chunk
         
         # Census functionality is temporarily disabled
         census_datasets = []
