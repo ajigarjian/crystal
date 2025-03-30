@@ -301,14 +301,6 @@ def register_waitlist(request):
 
 @https_fn.on_request(
     cors=options.CorsOptions(
-        cors_origins=["*"],
-        cors_methods=["get", "post"],
-    )
-)
-
-
-@https_fn.on_request(
-    cors=options.CorsOptions(
         cors_origins=[
         "https://crystal-2f87e.web.app",
         "https://askcrystal.info",
@@ -317,7 +309,7 @@ def register_waitlist(request):
         ],
         cors_methods=["get", "post", "options"],
     ),
-    memory=options.MemoryOption.GB_2
+    memory=options.MemoryOption.GB_2,
     timeout_sec=300
 )
 def stream_analyze(request):
@@ -432,13 +424,14 @@ def stream_analyze(request):
 @https_fn.on_request(
     cors=options.CorsOptions(
         cors_origins=[
-            "https://crystal-2f87e.web.app",
-            "https://askcrystal.info",
-            "http://localhost:3000",
-            "http://localhost:5173",
+        "https://crystal-2f87e.web.app",
+        "https://askcrystal.info",
+        "http://localhost:3000",
+        "http://localhost:5173",
         ],
-        cors_methods=["get", "post", "options"]
-    )
+        cors_methods=["get", "post", "options"],
+    ),
+    memory=options.MemoryOption.MB_512
 )
 def submit_feedback(request):
     """HTTP Cloud Function that submits user feedback to the database using raw SQL."""
