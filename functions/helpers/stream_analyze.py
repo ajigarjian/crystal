@@ -54,24 +54,46 @@ class NumpyEncoder(json.JSONEncoder):
             return obj.to_dict()  # Convert Series to dict
         return super(NumpyEncoder, self).default(obj)
 
-def create_status_message(message, start_time):
-    """Create a status message JSON object"""
-    return json.dumps({
+def create_status_message(message, start_time, dataset_id=None, status=None, progress=None):
+    """Create a status message JSON object, optionally with dataset status information"""
+    status_obj = {
         'type': 'status',
         'message': message,
         'timestamp': time.time() - start_time
-    }, cls=NumpyEncoder) + '\n'
+    }
+    
+    # If dataset_id is provided, this is a dataset status update
+    if dataset_id:
+        status_obj['type'] = 'dataset_status'
+        status_obj['dataset_id'] = dataset_id
+        
+        # Include status if provided
+        if status:
+            status_obj['status'] = status
+            
+        # Include progress if provided
+        if progress is not None:
+            status_obj['progress'] = progress
+    
+    return json.dumps(status_obj, cls=NumpyEncoder) + '\n'
 
-def create_error_message(message, details=None, start_time=None):
-    """Create an error message JSON object"""
+def create_error_message(message, details=None, start_time=None, dataset_id=None):
+    """Create an error message JSON object, optionally with dataset information"""
     timestamp = time.time() - start_time if start_time else time.time()
     error_obj = {
         'type': 'error',
         'message': message,
         'timestamp': timestamp
     }
+    
+    # Add dataset_id if provided (for dataset-specific errors)
+    if dataset_id:
+        error_obj['dataset_id'] = dataset_id
+        
+    # Add error details if provided
     if details:
         error_obj['details'] = details
+    
     return json.dumps(error_obj, cls=NumpyEncoder) + '\n'
 
 def query_datasets_helper(dataset_ids):
@@ -362,10 +384,44 @@ def stream_analyze_helper(dataset_ids, query, file_path=None):
 
         # For each dataset, Download the best resource
         for dataset_id, dataset in datasets.items():
+            # Set initial dataset status to queued
+            yield create_status_message(
+                f'Adding dataset "{dataset["title"]}" to processing queue',
+                start_time,
+                dataset_id=dataset_id,
+                status='queued'
+            )
+            
             best_resource = datasets[dataset_id]['best_resource']
+
+            # Set status to downloading
+            yield create_status_message(
+                f'Downloading files for dataset "{dataset["title"]}"',
+                start_time,
+                dataset_id=dataset_id,
+                status='downloading'
+            )
 
             file_path = download_resource_helper(dataset_id, best_resource)
             print(file_path)
+
+            if not file_path:
+                # Handle download failure
+                yield create_status_message(
+                    f'Failed to download dataset files',
+                    start_time,
+                    dataset_id=dataset_id,
+                    status='error'
+                )
+                continue
+            
+            # Update status to downloaded
+            yield create_status_message(
+                f'Successfully downloaded dataset files',
+                start_time,
+                dataset_id=dataset_id,
+                status='downloaded'
+            )
 
             # Extract into CSV if the file path contains ".parquet":
             if ".parquet" in file_path:
@@ -373,7 +429,6 @@ def stream_analyze_helper(dataset_ids, query, file_path=None):
                 os.remove(file_path)
                 file_path = csv_file_path
 
-        
             # Create dataset metadata
             dataset_metadata = {
                 "id": dataset_id,
@@ -387,10 +442,12 @@ def stream_analyze_helper(dataset_ids, query, file_path=None):
                 start_time
             )
             
-            # Load the dataset
+            # Update status to loading
             yield create_status_message(
                 f'Loading the dataset from {file_path}...',
-                start_time
+                start_time,
+                dataset_id=dataset_id,
+                status='loading'
             )
         
             try:
@@ -410,17 +467,28 @@ def stream_analyze_helper(dataset_ids, query, file_path=None):
                     
             except Exception as e:
                 logger.error(f"Error loading dataset: {str(e)}")
+                # Update status to error
+                yield create_status_message(
+                    f'Error loading dataset: {str(e)}',
+                    start_time,
+                    dataset_id=dataset_id,
+                    status='error'
+                )
+                
                 yield create_error_message(
                     f'Error loading dataset: {str(e)}',
                     details=traceback.format_exc(),
-                    start_time=start_time
+                    start_time=start_time,
+                    dataset_id=dataset_id
                 )
-                return
+                continue
             
-            # Assess dataset relevance (more detailed assessment with the actual data)
+            # Update status to assessing
             yield create_status_message(
                 f'Assessing dataset relevance to your query...',
-                start_time
+                start_time,
+                dataset_id=dataset_id,
+                status='assessing'
             )
         
             try:
@@ -453,6 +521,15 @@ def stream_analyze_helper(dataset_ids, query, file_path=None):
                     relevance_threshold=0.4
                 )
                 
+                # After assessment, update status based on relevance
+                relevance_status = 'relevant' if is_relevant else 'not_relevant'
+                yield create_status_message(
+                    f'Dataset assessed as {relevance_status} (Score: {relevance_score:.2f})',
+                    start_time,
+                    dataset_id=dataset_id,
+                    status=relevance_status
+                )
+                
                 if is_relevant:
                     yield create_status_message(
                         f'Dataset is relevant to your query (Score: {relevance_score:.2f})',
@@ -475,15 +552,26 @@ def stream_analyze_helper(dataset_ids, query, file_path=None):
             
             except Exception as e:
                 logger.warning(f"Error in relevance assessment: {str(e)}")
+                # Update status to error for assessment
+                yield create_status_message(
+                    f'Error assessing relevance: {str(e)}',
+                    start_time,
+                    dataset_id=dataset_id,
+                    status='error'
+                )
+                
                 # Continue with analysis even if relevance assessment fails
                 is_relevant = True  # Assume relevant if assessment fails
             
             # Extract relevant data if the dataset is deemed relevant
             extracted_data = None
             if is_relevant:
+                # Update status to extracting
                 yield create_status_message(
                     f'Extracting relevant data from the dataset...',
-                    start_time
+                    start_time,
+                    dataset_id=dataset_id,
+                    status='extracting'
                 )
                 
                 try:
@@ -514,18 +602,38 @@ def stream_analyze_helper(dataset_ids, query, file_path=None):
                             'timestamp': time.time() - start_time
                         }, cls=NumpyEncoder) + '\n'
                         
+                    # After successful extraction
+                    yield create_status_message(
+                        f'Successfully extracted relevant data',
+                        start_time,
+                        dataset_id=dataset_id,
+                        status='extracted'
+                    )
+                    
                 except Exception as e:
                     logger.error(f"Error extracting relevant data: {str(e)}")
+                    # Update status for extraction error
                     yield create_status_message(
                         f'Error extracting data: {str(e)}',
-                        start_time
+                        start_time,
+                        dataset_id=dataset_id,
+                        status='error'
+                    )
+                    
+                    yield create_error_message(
+                        f'Error extracting data: {str(e)}',
+                        details=traceback.format_exc(),
+                        start_time=start_time,
+                        dataset_id=dataset_id
                     )
                     # Continue with analysis even if extraction fails
             
-            # Analyze the dataset
+            # Update status to analyzing
             yield create_status_message(
                 f'Analyzing the dataset content...',
-                start_time
+                start_time,
+                dataset_id=dataset_id,
+                status='analyzing'
             )
         
             try:
@@ -595,15 +703,32 @@ def stream_analyze_helper(dataset_ids, query, file_path=None):
                     'data': analysis_result.get('analysis', 'No analysis available'),
                     'timestamp': time.time() - start_time
                 }, cls=NumpyEncoder) + '\n'
+                
+                # After successful analysis, update status to complete
+                yield create_status_message(
+                    f'Dataset analysis complete',
+                    start_time,
+                    dataset_id=dataset_id,
+                    status='complete'
+                )
             
             except Exception as e:
                 logger.error(f"Error analyzing dataset: {str(e)}")
+                # Update status for analysis error
+                yield create_status_message(
+                    f'Error analyzing dataset: {str(e)}',
+                    start_time,
+                    dataset_id=dataset_id,
+                    status='error'
+                )
+                
                 yield create_error_message(
                     f'Error analyzing dataset: {str(e)}',
                     details=traceback.format_exc(),
-                    start_time=start_time
+                    start_time=start_time,
+                    dataset_id=dataset_id
                 )
-                return
+                continue
         
         # After processing all datasets, generate the findings summary
         if all_formatted_data:
@@ -642,7 +767,8 @@ def stream_analyze_helper(dataset_ids, query, file_path=None):
                 yield create_error_message(
                     f'Error generating findings summary: {str(e)}',
                     details=traceback.format_exc(),
-                    start_time=start_time
+                    start_time=start_time,
+                    dataset_id=None
                 )
                 # Continue with completion even if findings summary fails
         
@@ -687,7 +813,8 @@ def stream_analyze_helper(dataset_ids, query, file_path=None):
         yield create_error_message(
             "I'm sorry, I encountered an error while processing your request. Please try again.",
             details=error_message,
-            start_time=start_time if 'start_time' in locals() else None
+            start_time=start_time if 'start_time' in locals() else None,
+            dataset_id=None
         )
 
 def process_resource_metadata(resource_metadata):

@@ -81,6 +81,7 @@ firebase_admin.initialize_app()
         ],
         cors_methods=["get", "post"],
     ),
+    timeout_seconds=300,  # 9 minutes (maximum allowed)
     memory=options.MemoryOption.MB_512
 )
 def stream_search_datasets(request):
@@ -402,11 +403,26 @@ def stream_analyze(request):
         )
     
     # Get the required parameters
-    dataset_ids = request_json.get('dataset_ids', [])
+    # Support both formats: dataset_ids array or datasets array of objects
+    dataset_ids = []
+    
+    # If datasets array is provided (array of dataset objects)
+    if 'datasets' in request_json:
+        datasets = request_json.get('datasets', [])
+        logger.info(f"Received {len(datasets)} dataset objects")
+        
+        # Extract IDs from dataset objects
+        dataset_ids = [dataset.get('id') for dataset in datasets if dataset.get('id')]
+    else:
+        # Get dataset_ids directly if provided in that format
+        dataset_ids = request_json.get('dataset_ids', [])
+        
     # For backward compatibility, check for single dataset_id as well
     dataset_id = request_json.get('dataset_id', '')
     if dataset_id and not dataset_ids:
         dataset_ids = [dataset_id]
+    
+    logger.info(f"Processing dataset_ids: {dataset_ids}")
     
     query = request_json.get('query', '')
     

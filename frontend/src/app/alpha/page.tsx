@@ -38,12 +38,10 @@ import {
 } from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Progress } from "@/components/ui/progress";
-import { AlertCircle, CheckCircle2, FileText, Database, ArrowRight, Download, FileCheck, Loader2, Star } from "lucide-react";
+import { AlertCircle, CheckCircle2, FileText, Database, ArrowRight, Download, FileCheck, Loader2 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { streamSearchDatasets, warmFunctions, streamAnalyzeDatasets, submitFeedback } from "@/lib/firebase";
 import Script from "next/script";
-// Import QUERY_EXAMPLES from constants
-import { QUERY_EXAMPLES } from "@/lib/constants";
 
 interface Resource {
   id: string;
@@ -76,7 +74,6 @@ interface Dataset {
   tags?: (Tag | string)[];
   image_url?: string;
   search_source?: string;
-  is_cached?: boolean;
   status?: 'starting' | 'downloading' | 'downloaded' | 'analyzing_files' | 'loading' | 'assessing' | 'relevant' | 'not_relevant' | 'skipped' | 'error';
   processing_complete?: boolean;
   pre_assessment?: {
@@ -357,6 +354,16 @@ export default function DatasetsPage() {
   
   const router = useRouter();
   
+  // Add example queries
+  const exampleQueries = [
+    "What's the air quality trend in NYC over the past 5 years?",
+    "How has median housing price changed in San Francisco since 2010?",
+    "What are the vaccination rates for children in Chicago by neighborhood?",
+    "Compare public transit ridership in Boston before and after COVID-19",
+    "What's the correlation between green space and asthma rates in Los Angeles?",
+    "Show me demographic changes in Atlanta's neighborhoods since 2015"
+  ];
+  
   // Determine if we're on mobile (for responsive design)
   const [isMobile, setIsMobile] = useState(false);
   
@@ -376,23 +383,8 @@ export default function DatasetsPage() {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
   
-  // Get random example queries - using useEffect to ensure it only runs once on mount
-  const [exampleQueries, setExampleQueries] = useState<string[]>([]);
-  
-  useEffect(() => {
-    // Create a copy of the query examples to avoid modifying the original
-    const examples = [...QUERY_EXAMPLES];
-    // Shuffle the array using Fisher-Yates algorithm
-    for (let i = examples.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [examples[i], examples[j]] = [examples[j], examples[i]];
-    }
-    // Set the first 3 examples
-    setExampleQueries(examples.slice(0, 3));
-  }, []);
-  
   // Get the appropriate number of examples based on screen size
-  const displayedExamples = isMobile ? exampleQueries.slice(0, 3) : exampleQueries;
+  const displayedExamples = isMobile ? exampleQueries.slice(0, 3) : exampleQueries.slice(0, 3);
   
   // Function to handle clicking an example query
   const handleExampleClick = (query: string) => {
@@ -849,73 +841,18 @@ export default function DatasetsPage() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
-    // If search is already complete, start analysis with selected datasets
+    // If search is already complete, start analysis instead of searching again
     if (searchComplete && datasets.length > 0) {
-      // Use the multi-dataset selection function
-      handleMultiDatasetSelect();
+      startAnalysis();
     } else {
       // Otherwise do the search as before
       processStreamingQuery(query);
     }
   };
 
-  // Handle single dataset selection
+  // Handle dataset selection
   const handleDatasetSelect = (dataset: Dataset) => {
-    // Call stream_analyze instead of redirecting to beta page
-    const datasetIds = [dataset.id];
-    startAnalysisWithDatasets(datasetIds);
-  };
-  
-  // Handle multi-dataset selection - for when user wants to analyze multiple datasets
-  const handleMultiDatasetSelect = () => {
-    // Get the selected datasets
-    const datasetIds = Object.entries(selectedDatasets)
-      .filter(([_, isSelected]) => isSelected)
-      .map(([id]) => id);
-      
-    if (datasetIds.length === 0) {
-      setError("Please select at least one dataset to analyze.");
-      return;
-    }
-    
-    startAnalysisWithDatasets(datasetIds);
-  };
-
-  // Function to start analysis with selected datasets
-  const startAnalysisWithDatasets = async (datasetIds: string[]) => {
-    try {
-      // Update UI state
-      setIsAnalyzing(true);
-      setError(null);
-      setAnalysisComplete(false);
-      setAnalysisResults(null);
-      
-      // Initialize processing datasets
-      const datasetsToAnalyze = datasets.filter(d => datasetIds.includes(d.id));
-      
-      // Mark selected datasets as queued
-      const initialProcessing = datasetsToAnalyze.map(dataset => ({
-        ...dataset,
-        status: 'queued'
-      }));
-      
-      setProcessingDatasets(initialProcessing);
-      
-      // Call the Firebase function with streaming
-      await streamAnalyzeDatasets(
-        {
-          query: query,  // Or whatever query string you have
-          dataset_ids: datasetIds  // <-- pass the array of selected dataset IDs directly
-        },
-        (chunk) => {
-          // ... handle streaming updates as needed ...
-        }
-      );
-    } catch (err: any) {
-      console.error("Error in dataset analysis:", err);
-      setError(`Failed to analyze datasets: ${err.message || String(err)}`);
-      setIsAnalyzing(false);
-    }
+    router.push(`/chat?dataset=${dataset.id}&query=${encodeURIComponent(query)}`);
   };
 
   // Helper function to get image URL
@@ -1120,6 +1057,121 @@ export default function DatasetsPage() {
     }
   }, [datasets]);
 
+  // Add the new analysis function
+  const startAnalysis = async () => {
+    // Get the selected datasets
+    const datasetIds = Object.entries(selectedDatasets)
+      .filter(([_, isSelected]) => isSelected)
+      .map(([id]) => id);
+      
+    if (datasetIds.length === 0) {
+      setError("Please select at least one dataset to analyze.");
+      return;
+    }
+    
+    try {
+      // Update UI state
+      setIsAnalyzing(true);
+      setError(null);
+      setAnalysisComplete(false);
+      setAnalysisResults(null);
+      
+      // Initialize processing datasets
+      const datasetsToAnalyze = datasets.filter(d => datasetIds.includes(d.id));
+      
+      // Mark selected datasets as queued
+      const initialProcessing = datasetsToAnalyze.map(dataset => ({
+        ...dataset,
+        status: 'queued'
+      }));
+      
+      setProcessingDatasets(initialProcessing);
+      
+      // Call the Firebase function with streaming
+      await streamAnalyzeDatasets(
+        {
+          query: query,
+          datasets: datasetsToAnalyze,
+        },
+        (data) => {
+          console.log('Received analysis chunk:', data);
+          
+          // Process different message types
+          switch (data.type) {
+            case 'status':
+              // Add global status message (if needed)
+              break;
+              
+            case 'dataset_status':
+              // Update the status of a specific dataset
+              if (data.dataset_id && data.status) {
+                setProcessingDatasets(prev => 
+                  prev.map(d => 
+                    d.id === data.dataset_id 
+                      ? { ...d, status: data.status, progress: data.progress }
+                      : d
+                  )
+                );
+              }
+              break;
+              
+            case 'dataset_result':
+              // Store analysis results for a specific dataset
+              if (data.dataset_id && data.result) {
+                setProcessingDatasets(prev => 
+                  prev.map(d => 
+                    d.id === data.dataset_id 
+                      ? { ...d, analysis_result: data.result, status: 'analyzed' }
+                      : d
+                  )
+                );
+              }
+              break;
+              
+            case 'result':
+              // Store overall analysis results
+              setAnalysisResults(prev => ({
+                ...prev,
+                ...data.data
+              }));
+              break;
+              
+            case 'complete':
+              // Analysis is complete
+              setAnalysisComplete(true);
+              setIsAnalyzing(false);
+              break;
+              
+            case 'error':
+              // Handle error - either global or for a specific dataset
+              if (data.dataset_id) {
+                // Dataset-specific error
+                setProcessingDatasets(prev => 
+                  prev.map(d => 
+                    d.id === data.dataset_id 
+                      ? { ...d, status: 'error', error: data.message }
+                      : d
+                  )
+                );
+              } else {
+                // Global error
+                setError(data.message);
+                setIsAnalyzing(false);
+              }
+              break;
+              
+            default:
+              console.log(`Unknown analysis message type: ${data.type}`, data);
+          }
+        }
+      );
+    } catch (err: any) {
+      console.error("Error in dataset analysis:", err);
+      setError(`Failed to analyze datasets: ${err.message || String(err)}`);
+      setIsAnalyzing(false);
+    }
+  };
+
   // Add these helper functions for status display
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -1143,6 +1195,12 @@ export default function DatasetsPage() {
       case 'queued':
       default:
         return 'bg-gray-100 text-gray-800 dark:bg-gray-800/30 dark:text-gray-300';
+      case 'relevant':
+        return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300';
+      case 'not_relevant':
+        return 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300';
+      case 'complete':  // Add this to handle 'complete' status
+        return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300';
     }
   };
 
@@ -1167,6 +1225,12 @@ export default function DatasetsPage() {
       case 'queued':
       default:
         return <FileText className="h-3 w-3" />;
+      case 'relevant':
+        return <CheckCircle2 className="h-3 w-3" />;
+      case 'not_relevant':
+        return <AlertCircle className="h-3 w-3" />;
+      case 'complete':  // Add this to handle 'complete' status
+        return <CheckCircle2 className="h-3 w-3" />;
     }
   };
 
@@ -1199,22 +1263,13 @@ export default function DatasetsPage() {
         return 'Queued';
       default:
         return status.charAt(0).toUpperCase() + status.slice(1);
+      case 'relevant':
+        return 'Relevant';
+      case 'not_relevant':
+        return 'Not Relevant';
+      case 'complete':  // Add this to handle 'complete' status
+        return 'Completed';
     }
-  };
-
-  // Replace the old startAnalysis function
-  const startAnalysis = async () => {
-    // Get the selected datasets
-    const datasetIds = Object.entries(selectedDatasets)
-      .filter(([_, isSelected]) => isSelected)
-      .map(([id]) => id);
-    
-    if (datasetIds.length === 0) {
-      setError("Please select at least one dataset to analyze.");
-      return;
-    }
-    
-    startAnalysisWithDatasets(datasetIds);
   };
 
   return (
@@ -1510,14 +1565,6 @@ export default function DatasetsPage() {
                           <div className={`absolute top-2 right-2 z-10 rounded-full px-2 py-0.5 flex items-center text-xs ${statusInfo.color}`}>
                             {statusInfo.icon}
                             <span className="ml-1">{statusInfo.text}</span>
-                          </div>
-                        )}
-                        
-                        {/* Preferred badge for cached datasets */}
-                        {dataset.is_cached && (
-                          <div className="absolute top-2 left-2 z-10 rounded-full px-2 py-0.5 flex items-center text-xs bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300">
-                            <Star className="h-3 w-3 mr-1" />
-                            <span>Preferred</span>
                           </div>
                         )}
                         
@@ -1873,14 +1920,6 @@ export default function DatasetsPage() {
                                   ) : (
                                     <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300">
                                       {Math.round(relevanceScore * 100)}%
-                                    </span>
-                                  )}
-                                  
-                                  {/* Add Preferred badge for cached datasets */}
-                                  {dataset.is_cached && (
-                                    <span className="inline-flex items-center px-2 py-1 ml-2 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300">
-                                      <Star className="h-3 w-3 mr-1" />
-                                      <span>Preferred</span>
                                     </span>
                                   )}
                                 </div>

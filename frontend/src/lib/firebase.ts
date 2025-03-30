@@ -346,9 +346,10 @@ export const warmFunctions = async () => {
 export const streamAnalyzeDatasets = async (
   data: {
     query: string;
-    dataset_ids: string[];
+    datasets?: Dataset[];     // Support datasets array
+    dataset_ids?: string[];   // Support dataset_ids array
   },
-  onChunk?: (chunk: any) => void // Callback for streaming updates
+  onChunk?: (chunk: any) => void
 ) => {
   // Create a default onChunk function if none is provided
   const processChunk = typeof onChunk === 'function' 
@@ -371,16 +372,11 @@ export const streamAnalyzeDatasets = async (
   
   const url = `${baseUrl}/stream_analyze`;
 
-  // If no dataset IDs, throw an error
-  if (!data.dataset_ids || data.dataset_ids.length === 0) {
-    console.error('No valid dataset IDs provided for analysis');
-    throw new Error('No valid dataset IDs provided for analysis');
-  }
-
-  // Build payload that matches what the Python function expects
+  // Use dataset_ids if provided, otherwise pass datasets
   const payload = {
     query: data.query,
-    dataset_ids: data.dataset_ids
+    datasets: data.datasets,    // Pass datasets if provided
+    dataset_ids: data.dataset_ids  // Pass dataset_ids if provided
   };
   
   console.log('Sending analysis request with payload:', payload);
