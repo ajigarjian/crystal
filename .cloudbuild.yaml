@@ -1,0 +1,8 @@
+steps:
+  - name: 'gcr.io/cloud-builders/apt-get'
+    args: ['update']
+  - name: 'gcr.io/cloud-builders/apt-get'
+    args: ['install', '-y', 'libatlas-base-dev', 'gfortran', 'python3-dev']
+  - name: 'python:3.12'
+    entrypoint: pip
+    args: ['install', 'pyarrow==8.0.0', '--no-binary=pyarrow'] 

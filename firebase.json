@@ -25,7 +25,7 @@
       "*.pyc"
     ],
     "predeploy": [
-      "pip install -r functions/requirements.txt"
+      "pip install -r functions/requirements.txt --no-cache-dir"
     ]
   },
   "emulators": {
