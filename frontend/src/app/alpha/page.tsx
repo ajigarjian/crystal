@@ -1143,14 +1143,13 @@ export default function DatasetsPage() {
               break;
               
             case 'findings':
-              // We can log this but don't need to process it specifically
               console.log("Received findings data");
+              // Process raw findings if needed
               break;
               
             case 'formatted_findings':
-              // Parse the formatted findings and update the summary data
               try {
-                // The data might be a string or an object, handle both cases
+                // Process the formatted findings
                 const formattedData = typeof chunk.data === 'string' 
                   ? parseFormattedFindings(chunk.data)
                   : chunk.data;
@@ -1161,14 +1160,44 @@ export default function DatasetsPage() {
                   keyFindings: formattedData.key_points || [],
                   sources: formattedData.sources || []
                 });
-                setIsSummaryLoading(false);
+                setIsSummaryLoading(false); // Hide skeleton when actual data arrives
               } catch (error) {
                 console.error("Error parsing formatted findings:", error);
               }
               break;
-            
+              
+            case 'web_search_results':
+              console.log("Received web search results");
+              // Process web search results if needed
+              break;
+              
+            case 'web_search_summary':
+              console.log("Received web search summary");
+              // Process web search summary if needed
+              break;
+              
+            case 'analysis_result':
+              console.log("Received analysis result");
+              // Process analysis result
+              break;
+              
+            case 'analysis':
+              console.log("Received analysis");
+              // Process analysis
+              break;
+              
+            case 'extracted_data':
+              console.log("Received extracted data");
+              // Process extracted data if needed
+              break;
+              
+            case 'formatted_data':
+              console.log("Received formatted data");
+              // Process formatted data if needed
+              break;
+              
             default:
-              console.log('Unknown analysis chunk type:', chunk.type, chunk);
+              console.log('Unknown analysis message type:', chunk.type, chunk);
           }
         }
       );
@@ -1629,58 +1658,6 @@ export default function DatasetsPage() {
     sources: { citation_id: string; title: string; organization: string }[];
   } | null>(null);
   const [isSummaryLoading, setIsSummaryLoading] = useState(false);
-
-  // Add this helper function to parse string-formatted findings if needed
-  function parseFormattedFindings(data: string) {
-    // Default structure
-    const result = {
-      summary: '',
-      key_points: [],
-      sources: []
-    };
-    
-    // Check if the data contains a "Search Summary" section
-    if (data.includes('### Search Summary')) {
-      const parts = data.split('### Search Summary');
-      // Extract the key findings from the first part
-      const keyPointsMatch = parts[0].match(/### Key Data Points\n([\s\S]*?)(?=\n---|\n###|$)/);
-      if (keyPointsMatch) {
-        // Convert bullet points to an array
-        result.key_points = keyPointsMatch[1]
-          .split('\n')
-          .filter(line => line.trim().startsWith('-'))
-          .map(line => line.trim());
-      }
-      
-      // The summary is in the second part
-      if (parts[1]) {
-        result.summary = parts[1].trim();
-      }
-    } else {
-      // If there's no clear structure, just use the whole text as summary
-      result.summary = data;
-    }
-    
-    // Try to extract sources from the text
-    const sourceMatches = data.match(/\[Source: (.*?)\]/g);
-    if (sourceMatches) {
-      // Create a unique list of sources
-      const uniqueSources = new Set();
-      sourceMatches.forEach(match => {
-        const source = match.replace('[Source: ', '').replace(']', '');
-        uniqueSources.add(source);
-      });
-      
-      // Convert to the expected format
-      result.sources = Array.from(uniqueSources).map((source, index) => ({
-        citation_id: `SRC-${index + 1}`,
-        title: source as string,
-        organization: 'Dataset'
-      }));
-    }
-    
-    return result;
-  }
 
   return (
     <>
@@ -2560,4 +2537,77 @@ export default function DatasetsPage() {
       )}
     </>
   );
+}
+
+function parseFormattedFindings(data: string) {
+  // Default structure for the result
+  const result = {
+    summary: '',
+    key_points: [] as string[],
+    sources: [] as { citation_id: string; title: string; organization: string }[]
+  };
+  
+  try {
+    // Split the data into sections using the markdown separator
+    const sections = data.split('---');
+    
+    if (sections.length >= 2) {
+      // First section contains Key Data Points
+      const keyPointsSection = sections[0].trim();
+      if (keyPointsSection.includes('### Key Data Points')) {
+        // Extract all bullet points from the key data points section
+        const keyPointsContent = keyPointsSection
+          .replace('### Key Data Points', '')
+          .trim();
+          
+        // Extract all bullet points (lines starting with -)
+        const bulletPoints = keyPointsContent
+          .split('\n')
+          .filter(line => line.trim().startsWith('-'))
+          .map(line => line.trim());
+          
+        result.key_points = bulletPoints;
+      }
+      
+      // Second section contains Search Summary
+      const summarySection = sections[1].trim();
+      if (summarySection.includes('### Search Summary')) {
+        // Extract the summary text
+        result.summary = summarySection
+          .replace('### Search Summary', '')
+          .trim();
+      }
+    } else {
+      // If data doesn't match expected format, use whole string as summary
+      result.summary = data;
+    }
+    
+    // Extract sources from the content using regex
+    // This finds all instances of [Source: something]
+    const sourceRegex = /\[Source: ([^\]]+)\]/g;
+    const matches = Array.from(data.matchAll(sourceRegex));
+    
+    // Create a set to avoid duplicate sources
+    const uniqueSources = new Set<string>();
+    
+    // Add all sources to the set
+    matches.forEach(match => {
+      if (match[1]) {
+        uniqueSources.add(match[1]);
+      }
+    });
+    
+    // Convert the set to the required format for sources
+    result.sources = Array.from(uniqueSources).map((source, index) => ({
+      citation_id: `SRC-${index + 1}`,
+      title: source,
+      organization: 'Dataset'
+    }));
+    
+  } catch (error) {
+    console.error('Error parsing formatted findings:', error);
+    // Return default empty structure on error
+  }
+  
+  return result;
 }
