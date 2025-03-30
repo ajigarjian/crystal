@@ -1,0 +1,42 @@
+version: '3'
+
+services:
+  firebase-emulator:
+    build:
+      context: .
+      dockerfile: Dockerfile.emulator
+    container_name: firebase-emulator
+    ports:
+      - "4000:4000"  # Emulator UI
+      - "4400:4400"  # Emulator Hub
+      - "5001:5001"  # Functions
+      - "8080:8080"  # Firestore
+      - "9150:9150"  # Firestore UI websocket
+    volumes:
+      - ./functions:/app/functions
+      - ./firebase.json:/app/firebase.json
+      - functions-node-modules:/app/functions/node_modules
+      - functions-python-venv:/app/functions/venv
+      - ~/.config/configstore:/root/.config/configstore
+      - ~/.config/firebase:/root/.config/firebase
+    environment:
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/functions/service-account.json
+      - FIREBASE_DEBUG=true
+      - DB_HOST=host.docker.internal  # Access to host machine
+      - DB_PORT=1234                  # Cloud SQL Proxy port on host 
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # For Docker to connect to host
+    mem_limit: 8g
+    mem_reservation: 4g
+    shm_size: 2g
+    restart: unless-stopped
+    healthcheck:
+      test: curl --fail http://localhost:4000 || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  functions-node-modules:
+  functions-python-venv:
