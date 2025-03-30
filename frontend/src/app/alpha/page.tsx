@@ -41,6 +41,10 @@ import { Progress } from "@/components/ui/progress";
 import { AlertCircle, CheckCircle2, FileText, Database, ArrowRight, Download, FileCheck, Loader2 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { streamSearchDatasets, warmFunctions, streamAnalyzeDatasets, submitFeedback } from "@/lib/firebase";
+
+import { SummaryReport } from "@/components/SummaryReport";
+import { SummaryReportSkeleton } from "@/components/SummaryReportSkeleton";
+
 import Script from "next/script";
 
 interface Resource {
@@ -552,16 +556,6 @@ export default function DatasetsPage() {
           
           // Process different message types
           switch (data.type) {
-            case 'status':
-              // Add new status message
-              const statusMessage: StatusMessage = {
-                id: Math.random().toString(36).substring(2, 9),
-                message: data.message,
-                timestamp: data.timestamp,
-                type: 'status'
-              };
-              setStatusMessages(prev => [...prev, statusMessage]);
-              break;
               
             case 'discovery':
               // Add new discovery message
@@ -817,6 +811,17 @@ export default function DatasetsPage() {
               setStatusMessages(prev => [...prev, assessmentMessage]);
               break;
             
+            case 'formatted_findings':
+              // Handle formatted findings
+              setSummaryData({
+                query: query,
+                summary: data.data.summary || '',
+                keyFindings: data.data.key_points || [],
+                sources: data.data.sources || []
+              });
+              setIsSummaryLoading(false); // Hide skeleton when actual data arrives
+              break;
+            
             default:
               console.log(`Unknown message type: ${data.type}`, data);
           }
@@ -840,6 +845,12 @@ export default function DatasetsPage() {
             return stage;
           });
         });
+      }
+      
+      // If we never received summary data but summary loading was started,
+      // make sure to clear the loading state
+      if (isSummaryLoading && !summaryData) {
+        setIsSummaryLoading(false);
       }
       
     } catch (err: any) {
@@ -933,6 +944,11 @@ export default function DatasetsPage() {
                 type: 'status'
               };
               setStatusMessages(prev => [...prev, statusMessage]);
+              
+              // Check if this status message indicates the start of summary generation
+              if (chunk.message && chunk.message.includes('Generating summary of findings')) {
+                setIsSummaryLoading(true);
+              }
               break;
               
             case 'dataset_status':
@@ -1579,6 +1595,15 @@ export default function DatasetsPage() {
         return 'Completed';
     }
   };
+
+  // Add these state variables to your component
+  const [summaryData, setSummaryData] = useState<{
+    query: string;
+    summary: string;
+    keyFindings: string[];
+    sources: { citation_id: string; title: string; organization: string }[];
+  } | null>(null);
+  const [isSummaryLoading, setIsSummaryLoading] = useState(false);
 
   return (
     <>
@@ -2442,6 +2467,20 @@ export default function DatasetsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Summary Report Section */}
+      {isSummaryLoading && (
+        <SummaryReportSkeleton query={query} />
+      )}
+
+      {!isSummaryLoading && summaryData && (
+        <SummaryReport
+          query={summaryData.query}
+          summary={summaryData.summary}
+          keyFindings={summaryData.keyFindings}
+          sources={summaryData.sources}
+        />
+      )}
     </>
   );
 }
