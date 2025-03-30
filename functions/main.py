@@ -395,7 +395,7 @@ def stream_analyze(request):
                 db = firestore.client()
                 
                 # Create a document with the analysis results
-                analysis_ref = db.collection('analyses').document()
+                analysis_ref = db.collection('queries').document()
                 
                 # Add the analysis data
                 analysis_ref.set({
