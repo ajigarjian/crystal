@@ -276,3 +276,179 @@ RESOURCE_REASONING: [brief explanation or "not applicable" if score < 0.4]
             'resource_format': None,
             'resource_reasoning': "Error occurred during resource selection"
         } 
+
+def get_best_resource(
+    query: str, 
+    dataset_metadata: Dict[str, Any]
+) -> Dict[str, Any]:
+    
+    resources = dataset_metadata.get("resources", [])
+    """
+    Identify the best resource from a dataset for the user's query.
+    
+    Args:
+        query: The original user query
+        dataset_metadata: Metadata about the dataset (title, description, etc.)
+        
+    Returns:
+        Dictionary containing:
+        {
+            'resource_id': str or None,
+            'resource_url': str or None,
+            'resource_format': str or None,
+            'reasoning': str,
+            'dataset_id': str or None  # Added dataset_id for folder creation
+        }
+    """
+    # Get dataset ID for folder creation
+    dataset_id = dataset_metadata.get('id') or dataset_metadata.get('dataset_id', 'unknown_dataset')
+    
+    # First check if any resource is already cached
+    for resource in resources:
+        if resource.get('is_cached') is True:
+            # Get the resource URL, ensuring it's in a format that can be downloaded
+            resource_url = resource.get('cache_uri')
+            
+            # If the URL is a GCS URL (gs://), convert it to an HTTPS URL for direct download
+            if resource_url and resource_url.startswith('gs://'):
+                # Convert gs:// URL to https://storage.googleapis.com/
+                bucket_name = resource_url.split('/')[2]
+                object_path = '/'.join(resource_url.split('/')[3:])
+                resource_url = f"https://storage.googleapis.com/{bucket_name}/{object_path}"
+            
+            return {
+                'resource_id': resource.get('id') or resource.get('resource_id'),
+                'resource_url': resource_url,
+                'resource_format': resource.get('format'),
+                'reasoning': "Selected already cached resource for faster processing",
+                'dataset_id': dataset_id
+            }
+    
+    # If no cached resource found, proceed with the original logic
+    # Create prompt for OpenAI
+    prompt = f'''Select the most appropriate resource from this dataset for the user's query.
+
+USER QUERY: "{query}"
+
+DATASET METADATA:
+{dataset_metadata}
+
+TASK:
+1. Analyze which resource would be most useful for answering the user's query
+2. Prefer machine-readable formats (CSV > JSON > XML > others)
+3. Consider resource names and descriptions for relevance to the query
+
+Format your response exactly as:
+RESOURCE: [resource number]
+REASONING: [brief explanation of your selection]
+'''
+    
+    system_message = "You are a data analyst who specializes in selecting the most appropriate data resources. Be concise and accurate."
+    
+    try:
+        response_text = chat_completion(
+            prompt=prompt,
+            system_message=system_message,
+            temperature=0.1
+        )
+        
+        # Parse the response
+        resource_match = re.search(r'RESOURCE:\s*(.*?)(?:\nREASONING:|$)', response_text, re.DOTALL)
+        reasoning_match = re.search(r'REASONING:\s*(.*)', response_text, re.DOTALL)
+        
+        resource_selection = resource_match.group(1).strip() if resource_match else "1"
+        reasoning = reasoning_match.group(1).strip() if reasoning_match else "Default selection"
+        
+        # Initialize resource information
+        resource_id = None
+        resource_url = None
+        resource_format = None
+        
+        # Try to find the selected resource
+        try:
+            # Check if it's a number (Resource 1, Resource 2, etc.)
+            if resource_selection.isdigit():
+                resource_index = int(resource_selection) - 1
+                if 0 <= resource_index < len(resources):
+                    selected_resource = resources[resource_index]
+                    resource_id = selected_resource.get('id') or selected_resource.get('resource_id')
+                    resource_url = selected_resource.get('url')
+                    resource_format = selected_resource.get('format')
+            # Or it might be "Resource X"
+            elif resource_selection.startswith("Resource ") and resource_selection[9:].isdigit():
+                resource_index = int(resource_selection[9:]) - 1
+                if 0 <= resource_index < len(resources):
+                    selected_resource = resources[resource_index]
+                    resource_id = selected_resource.get('id') or selected_resource.get('resource_id')
+                    resource_url = selected_resource.get('url')
+                    resource_format = selected_resource.get('format')
+        except (ValueError, IndexError):
+            pass
+        
+        # If we couldn't parse the resource selection, fall back to format preference
+        if resource_id is None:
+            # First try to find CSV
+            for resource in resources:
+                if resource.get('format', '').lower() == 'csv':
+                    resource_id = resource.get('id') or resource.get('resource_id')
+                    resource_url = resource.get('url')
+                    resource_format = 'csv'
+                    reasoning = "Selected CSV format (most machine-readable)"
+                    break
+                
+            # If no CSV, try JSON
+            if resource_id is None:
+                for resource in resources:
+                    if resource.get('format', '').lower() == 'json':
+                        resource_id = resource.get('id') or resource.get('resource_id')
+                        resource_url = resource.get('url')
+                        resource_format = 'json'
+                        reasoning = "Selected JSON format (machine-readable)"
+                        break
+                    
+            # If no JSON, try XML
+            if resource_id is None:
+                for resource in resources:
+                    if resource.get('format', '').lower() == 'xml':
+                        resource_id = resource.get('id') or resource.get('resource_id')
+                        resource_url = resource.get('url')
+                        resource_format = 'xml'
+                        reasoning = "Selected XML format (structured data)"
+                        break
+                    
+            # If still no resource found, use the first one if available
+            if resource_id is None and resources:
+                resource_id = resources[0].get('id') or resources[0].get('resource_id')
+                resource_url = resources[0].get('url')
+                resource_format = resources[0].get('format')
+                reasoning = "Selected first available resource as fallback"
+        
+        # Return the resource selection results with dataset_id
+        return {
+            'resource_id': resource_id,
+            'resource_url': resource_url,
+            'resource_format': resource_format,
+            'reasoning': reasoning,
+            'dataset_id': dataset_id
+        }
+    except Exception as e:
+        logger.error(f"Error in resource selection: {str(e)}")
+        # Fallback to first resource if available
+        if resources:
+            return {
+                'resource_id': resources[0].get('id') or resources[0].get('resource_id'),
+                'resource_url': resources[0].get('url'),
+                'resource_format': resources[0].get('format'),
+                'reasoning': f"Error occurred during selection, defaulted to first resource: {str(e)}",
+                'dataset_id': dataset_id
+            }
+        else:
+            return {
+                'resource_id': None,
+                'resource_url': None,
+                'resource_format': None,
+                'reasoning': f"Error occurred and no resources available: {str(e)}",
+                'dataset_id': dataset_id
+            }
+    
+

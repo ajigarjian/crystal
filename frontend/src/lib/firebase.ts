@@ -53,6 +53,7 @@ export const registerWaitlist = async (data: { email: string, first_name: string
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
       },
       body: JSON.stringify(data),
     });
@@ -111,6 +112,7 @@ export const streamSearchDatasets = async (
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
       },
       body: JSON.stringify(data),
     });
@@ -147,7 +149,12 @@ export const streamSearchDatasets = async (
         const line = lines[i].trim();
         if (line) {
           try {
-            const data = JSON.parse(line);
+            // Extract the JSON part if the line starts with 'data:'
+            const jsonStr = line.startsWith('data:') 
+              ? line.substring(5).trim() 
+              : line;
+            
+            const data = JSON.parse(jsonStr);
             // Call the callback with each chunk of data
             processChunk(data);
             chunks.push(data);
@@ -164,7 +171,12 @@ export const streamSearchDatasets = async (
     // Process any remaining data in the buffer
     if (buffer.trim()) {
       try {
-        const data = JSON.parse(buffer.trim());
+        // Extract the JSON part if the line starts with 'data:'
+        const jsonStr = buffer.trim().startsWith('data:') 
+          ? buffer.trim().substring(5).trim() 
+          : buffer.trim();
+        
+        const data = JSON.parse(jsonStr);
         processChunk(data);
         chunks.push(data);
       } catch (e) {
@@ -256,6 +268,7 @@ export const submitFeedback = async (data: {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
       },
       body: JSON.stringify(data),
     });
@@ -315,7 +328,7 @@ export const warmFunctions = async () => {
     const functionsToWarm = [
       'register_waitlist',
       'stream_search_datasets',
-      'stream_analyze_datasets',
+      'stream_analyze',
       'submit_feedback'
     ];
     
@@ -328,6 +341,7 @@ export const warmFunctions = async () => {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
           },
           body: JSON.stringify({ warming: true }),
         });
@@ -346,16 +360,16 @@ export const warmFunctions = async () => {
 export const streamAnalyzeDatasets = async (
   data: {
     query: string;
-    datasets: any[];
+    datasets?: Dataset[];     // Support datasets array
+    dataset_ids?: string[];   // Support dataset_ids array
   },
-  onChunk?: (chunk: any) => void // Callback for streaming updates
+  onChunk?: (chunk: any) => void
 ) => {
   // Create a default onChunk function if none is provided
   const processChunk = typeof onChunk === 'function' 
     ? onChunk 
     : (chunk: any) => {
         console.log('Received analysis chunk:', chunk);
-        // Default implementation just logs the chunk
       };
 
   // Get the region and project ID from the functions instance
@@ -365,22 +379,30 @@ export const streamAnalyzeDatasets = async (
   // Construct the URL for the HTTP function
   let baseUrl = '';
   if (process.env.NODE_ENV === 'development') {
-    // Use emulator URL in development
     baseUrl = `http://localhost:5001/${projectId}/${region}`;
   } else {
-    // Use production URL in production
     baseUrl = `https://${region}-${projectId}.cloudfunctions.net`;
   }
   
-  const url = `${baseUrl}/stream_analyze_datasets`;
+  const url = `${baseUrl}/stream_analyze`;
+
+  // Use dataset_ids if provided, otherwise pass datasets
+  const payload = {
+    query: data.query,
+    datasets: data.datasets,    // Pass datasets if provided
+    dataset_ids: data.dataset_ids  // Pass dataset_ids if provided
+  };
+  
+  console.log('Sending analysis request with payload:', payload);
   
   try {
     const response = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
       },
-      body: JSON.stringify(data),
+      body: JSON.stringify(payload),
     });
     
     if (!response.ok) {
@@ -389,60 +411,60 @@ export const streamAnalyzeDatasets = async (
       throw new Error(errorText || 'Failed to analyze datasets');
     }
     
-    // For streaming responses, we need to process the response as a stream
+    // For streaming responses, read as a stream
     const reader = response.body?.getReader();
     if (!reader) {
       throw new Error('Stream reader not available');
     }
     
-    // Process the stream and parse each chunk as JSON
     const decoder = new TextDecoder();
     let buffer = '';
-    const chunks = []; // Store processed chunks to return
+    const chunks = [];
     
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       
-      // Decode the chunk and add it to our buffer
       buffer += decoder.decode(value, { stream: true });
-      
-      // Split the buffer by newlines to get individual JSON objects
       const lines = buffer.split('\n');
-      
-      // Process all complete lines
       for (let i = 0; i < lines.length - 1; i++) {
         const line = lines[i].trim();
         if (line) {
           try {
-            const data = JSON.parse(line);
-            // Call the callback with each chunk of data
-            processChunk(data);
-            chunks.push(data);
+            // Extract the JSON part if the line starts with 'data:'
+            const jsonStr = line.startsWith('data:') 
+              ? line.substring(5).trim() 
+              : line;
+            
+            const parsed = JSON.parse(jsonStr);
+            processChunk(parsed);
+            chunks.push(parsed);
           } catch (e) {
             console.error('Error parsing JSON:', e, 'Line:', line);
           }
         }
       }
-      
-      // Keep the last (potentially incomplete) line in the buffer
       buffer = lines[lines.length - 1];
     }
     
-    // Process any remaining data in the buffer
     if (buffer.trim()) {
       try {
-        const data = JSON.parse(buffer.trim());
-        processChunk(data);
-        chunks.push(data);
+        // Extract the JSON part if the line starts with 'data:'
+        const jsonStr = buffer.trim().startsWith('data:') 
+          ? buffer.trim().substring(5).trim() 
+          : buffer.trim();
+        
+        const parsed = JSON.parse(jsonStr);
+        processChunk(parsed);
+        chunks.push(parsed);
       } catch (e) {
         console.error('Error parsing final JSON:', e);
       }
     }
     
-    return chunks; // Return all processed chunks
+    return chunks;
   } catch (error: any) {
-    console.error('Error calling stream_analyze_datasets:', error);
+    console.error('Error calling stream_analyze:', error);
     throw new Error(error.message || 'Failed to analyze datasets');
   }
 }; 

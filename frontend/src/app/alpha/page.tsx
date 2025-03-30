@@ -92,6 +92,8 @@ interface Dataset {
   primary_file?: string;
   preview?: DatasetPreview;
   isRemoving?: boolean;
+  progress?: number; // For progress bars
+  analysis_results?: any; // Store the analysis results
 }
 
 interface DatasetPreview {
@@ -114,6 +116,16 @@ interface StatusMessage {
   timestamp: number;
   type: 'status' | 'error' | 'discovery';
   count?: number;
+}
+
+// Define more specific types for analysis results
+interface AnalysisResult {
+  summary?: string;
+  key_points?: string[];
+  charts?: any[]; // Would be better to have a more specific type
+  tables?: any[]; // Would be better to have a more specific type
+  extracted_data?: Record<string, any>;
+  [key: string]: any; // Allow for flexibility in results
 }
 
 // Feedback Widget Component using shadcn components
@@ -852,7 +864,303 @@ export default function DatasetsPage() {
 
   // Handle dataset selection
   const handleDatasetSelect = (dataset: Dataset) => {
-    router.push(`/chat?dataset=${dataset.id}&query=${encodeURIComponent(query)}`);
+    // Call stream_analyze instead of redirecting to beta page
+    const datasetIds = [dataset.id];
+    startAnalysisWithDatasets(datasetIds);
+  };
+  
+  // Handle multi-dataset selection - for when user wants to analyze multiple datasets
+  const handleMultiDatasetSelect = () => {
+    // Get the selected datasets
+    const datasetIds = Object.entries(selectedDatasets)
+      .filter(([_, isSelected]) => isSelected)
+      .map(([id]) => id);
+      
+    if (datasetIds.length === 0) {
+      setError("Please select at least one dataset to analyze.");
+      return;
+    }
+    
+    startAnalysisWithDatasets(datasetIds);
+  };
+
+  // Function to start analysis with selected datasets
+  const startAnalysisWithDatasets = async (datasetIds: string[]) => {
+    try {
+      // Update UI state
+      setIsAnalyzing(true);
+      setError(null);
+      setAnalysisComplete(false);
+      setAnalysisResults(null);
+      
+      // Initialize processing datasets
+      const datasetsToAnalyze = datasets.filter(d => datasetIds.includes(d.id));
+      
+      // Mark selected datasets as queued
+      const initialProcessing = datasetsToAnalyze.map(dataset => ({
+        ...dataset,
+        status: 'queued' as const // Use const assertion to fix type issue
+      }));
+      
+      setProcessingDatasets(initialProcessing);
+      
+      // Add a status message that analysis is starting
+      const startMessage: StatusMessage = {
+        id: Math.random().toString(36).substring(2, 9),
+        message: `Starting analysis of ${datasetIds.length} datasets...`,
+        timestamp: Date.now(),
+        type: 'status'
+      };
+      setStatusMessages(prev => [...prev, startMessage]);
+      
+      // Call the Firebase function with streaming
+      const analysisChunks = await streamAnalyzeDatasets(
+        {
+          query: query,
+          dataset_ids: datasetIds
+        },
+        (chunk) => {
+          console.log('Analysis chunk received:', chunk);
+          
+          // Handle different chunk types
+          switch (chunk.type) {
+            case 'status':
+              // Global status update
+              const statusMessage: StatusMessage = {
+                id: Math.random().toString(36).substring(2, 9),
+                message: chunk.message,
+                timestamp: chunk.timestamp || Date.now(),
+                type: 'status'
+              };
+              setStatusMessages(prev => [...prev, statusMessage]);
+              break;
+              
+            case 'dataset_status':
+              // Update status for a specific dataset
+              setProcessingDatasets(prev => {
+                return prev.map(d => {
+                  if (d.id === chunk.dataset_id) {
+                    return {
+                      ...d,
+                      status: chunk.status,
+                      progress: chunk.progress // For progress bars
+                    };
+                  }
+                  return d;
+                });
+              });
+              
+              // Also add a status message
+              if (chunk.message) {
+                const datasetStatusMessage: StatusMessage = {
+                  id: Math.random().toString(36).substring(2, 9),
+                  message: chunk.message,
+                  timestamp: chunk.timestamp || Date.now(),
+                  type: 'status'
+                };
+                setStatusMessages(prev => [...prev, datasetStatusMessage]);
+              }
+              break;
+              
+            case 'download_start':
+              // Update dataset to downloading state
+              setProcessingDatasets(prev => {
+                return prev.map(d => {
+                  if (d.id === chunk.dataset_id) {
+                    return {
+                      ...d,
+                      status: 'downloading',
+                      progress: 0 // Initialize progress
+                    };
+                  }
+                  return d;
+                });
+              });
+              break;
+              
+            case 'download_progress':
+              // Update download progress
+              setProcessingDatasets(prev => {
+                return prev.map(d => {
+                  if (d.id === chunk.dataset_id) {
+                    return {
+                      ...d,
+                      progress: chunk.progress
+                    };
+                  }
+                  return d;
+                });
+              });
+              break;
+              
+            case 'download_complete':
+              // Mark download as complete
+              setProcessingDatasets(prev => {
+                return prev.map(d => {
+                  if (d.id === chunk.dataset_id) {
+                    return {
+                      ...d,
+                      status: 'downloaded',
+                      file_count: chunk.file_count || d.file_count,
+                      progress: 100
+                    };
+                  }
+                  return d;
+                });
+              });
+              
+              // Add status message
+              const downloadMessage: StatusMessage = {
+                id: Math.random().toString(36).substring(2, 9),
+                message: `Downloaded ${chunk.file_count || 'all'} files for dataset "${chunk.dataset_title || 'selected dataset'}"`,
+                timestamp: chunk.timestamp || Date.now(),
+                type: 'status'
+              };
+              setStatusMessages(prev => [...prev, downloadMessage]);
+              break;
+              
+            case 'analysis_start':
+              // Update dataset to analyzing state
+              setProcessingDatasets(prev => {
+                return prev.map(d => {
+                  if (d.id === chunk.dataset_id) {
+                    return {
+                      ...d,
+                      status: 'analyzing'
+                    };
+                  }
+                  return d;
+                });
+              });
+              
+              // Add status message
+              const analysisStartMessage: StatusMessage = {
+                id: Math.random().toString(36).substring(2, 9),
+                message: `Analyzing dataset "${chunk.dataset_title || 'selected dataset'}"...`,
+                timestamp: chunk.timestamp || Date.now(),
+                type: 'status'
+              };
+              setStatusMessages(prev => [...prev, analysisStartMessage]);
+              break;
+              
+            case 'analysis_result':
+              // Store analysis results
+              if (chunk.dataset_id) {
+                setProcessingDatasets(prev => {
+                  return prev.map(d => {
+                    if (d.id === chunk.dataset_id) {
+                      return {
+                        ...d,
+                        status: 'analyzed',
+                        analysis_results: chunk.results
+                      };
+                    }
+                    return d;
+                  });
+                });
+              }
+              
+              // Update global analysis results
+              setAnalysisResults(prev => {
+                const newResults = prev ? {...prev} : {};
+                if (chunk.dataset_id) {
+                  newResults[chunk.dataset_id] = chunk.results;
+                }
+                return newResults;
+              });
+              break;
+              
+            case 'complete':
+              // Analysis is complete
+              setAnalysisComplete(true);
+              setIsAnalyzing(false);
+              
+              // Add completion message
+              const completeMessage: StatusMessage = {
+                id: Math.random().toString(36).substring(2, 9),
+                message: chunk.message || "Analysis complete!",
+                timestamp: chunk.timestamp || Date.now(),
+                type: 'status'
+              };
+              setStatusMessages(prev => [...prev, completeMessage]);
+              
+              // Update all datasets to completed status if they're not already
+              setProcessingDatasets(prev => {
+                return prev.map(d => {
+                  if (d.status !== 'analyzed' && d.status !== 'error') {
+                    return {
+                      ...d,
+                      status: 'analyzed'
+                    };
+                  }
+                  return d;
+                });
+              });
+              break;
+              
+            case 'error':
+              // Handle errors
+              if (chunk.dataset_id) {
+                // Dataset-specific error
+                setProcessingDatasets(prev => {
+                  return prev.map(d => {
+                    if (d.id === chunk.dataset_id) {
+                      return {
+                        ...d,
+                        status: 'error',
+                        error: chunk.message
+                      };
+                    }
+                    return d;
+                  });
+                });
+              }
+              
+              // Add error message to status
+              const errorMessage: StatusMessage = {
+                id: Math.random().toString(36).substring(2, 9),
+                message: `Error: ${chunk.message}`,
+                timestamp: chunk.timestamp || Date.now(),
+                type: 'error'
+              };
+              setStatusMessages(prev => [...prev, errorMessage]);
+              break;
+              
+            default:
+              console.log('Unknown analysis chunk type:', chunk.type, chunk);
+          }
+        }
+      );
+      
+      // If we reached here with no completion message, manually set as complete
+      if (!analysisComplete) {
+        setAnalysisComplete(true);
+        setIsAnalyzing(false);
+        
+        const finalMessage: StatusMessage = {
+          id: Math.random().toString(36).substring(2, 9),
+          message: "Analysis complete!",
+          timestamp: Date.now(),
+          type: 'status'
+        };
+        setStatusMessages(prev => [...prev, finalMessage]);
+      }
+      
+      return analysisChunks;
+    } catch (err) {
+      console.error("Error in dataset analysis:", err);
+      setError(`Failed to analyze datasets: ${err instanceof Error ? err.message : String(err)}`);
+      setIsAnalyzing(false);
+      
+      // Add error to status messages
+      const errorMessage: StatusMessage = {
+        id: Math.random().toString(36).substring(2, 9),
+        message: `Error: Failed to analyze datasets: ${err instanceof Error ? err.message : String(err)}`,
+        timestamp: Date.now(),
+        type: 'error'
+      };
+      setStatusMessages(prev => [...prev, errorMessage]);
+    }
   };
 
   // Helper function to get image URL
@@ -1042,7 +1350,7 @@ export default function DatasetsPage() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [processingDatasets, setProcessingDatasets] = useState<Dataset[]>([]);
   const [analysisComplete, setAnalysisComplete] = useState(false);
-  const [analysisResults, setAnalysisResults] = useState<any>(null);
+  const [analysisResults, setAnalysisResults] = useState<Record<string, AnalysisResult> | null>(null);
 
   // Initialize datasets as selected by default
   useEffect(() => {
@@ -1195,6 +1503,12 @@ export default function DatasetsPage() {
       case 'queued':
       default:
         return 'bg-gray-100 text-gray-800 dark:bg-gray-800/30 dark:text-gray-300';
+      case 'relevant':
+        return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300';
+      case 'not_relevant':
+        return 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300';
+      case 'complete':  // Add this to handle 'complete' status
+        return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300';
     }
   };
 
@@ -1219,6 +1533,12 @@ export default function DatasetsPage() {
       case 'queued':
       default:
         return <FileText className="h-3 w-3" />;
+      case 'relevant':
+        return <CheckCircle2 className="h-3 w-3" />;
+      case 'not_relevant':
+        return <AlertCircle className="h-3 w-3" />;
+      case 'complete':  // Add this to handle 'complete' status
+        return <CheckCircle2 className="h-3 w-3" />;
     }
   };
 
@@ -1251,6 +1571,12 @@ export default function DatasetsPage() {
         return 'Queued';
       default:
         return status.charAt(0).toUpperCase() + status.slice(1);
+      case 'relevant':
+        return 'Relevant';
+      case 'not_relevant':
+        return 'Not Relevant';
+      case 'complete':  // Add this to handle 'complete' status
+        return 'Completed';
     }
   };
 

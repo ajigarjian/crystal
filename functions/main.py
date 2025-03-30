@@ -21,9 +21,7 @@ import numpy as np
 import concurrent.futures
 from threading import Lock
 import random
-
-from helpers.db_utils import execute_query, get_db_connection, get_connection_pool
-from helpers.stream_search_datasets import stream_search_datasets_helper
+import django
 
 from dotenv import load_dotenv
 
@@ -33,6 +31,38 @@ load_dotenv()
 # turn on emulator
 if os.getenv('FUNCTIONS_EMULATOR'):
     os.environ["FIRESTORE_EMULATOR_HOST"] = "localhost:8080"  # adjust port if needed
+
+# Configure Django settings
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'factchecker.settings')
+
+# Set up Django with error handling for database connection
+try:
+    django.setup()
+except Exception as django_setup_error:
+    logger = logging.getLogger(__name__)
+    logger.error(f"Error in django.setup(): {django_setup_error}")
+    
+    # If running in production and error might be related to database connection
+    if not os.getenv('FUNCTIONS_EMULATOR') and 'database' in str(django_setup_error).lower():
+        try:
+            # Import settings to access the fallback configuration
+            from factchecker import settings
+            
+            # Apply fallback database configuration
+            if hasattr(settings, 'DB_FALLBACK'):
+                logger.info("Attempting to use fallback database configuration")
+                settings.DATABASES = settings.DB_FALLBACK
+                
+                # Retry Django setup with fallback configuration
+                django.setup()
+        except Exception as fallback_error:
+            logger.error(f"Fallback configuration also failed: {fallback_error}")
+            raise
+
+# After Django is set up, import helpers that might use Django models
+from helpers.db_utils import execute_query, get_db_connection, get_connection_pool
+from helpers.stream_search_datasets import stream_search_datasets_helper
+from helpers.stream_analyze import stream_analyze_helper
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -163,7 +193,8 @@ def stream_search_datasets(request):
             "http://localhost:5173",
         ],
         cors_methods=["get", "post", "options"]
-    )
+    ),
+    memory=options.MemoryOption.MB_512
 )
 def register_waitlist(request):
     """HTTP Cloud Function that registers a user to the waitlist."""
@@ -270,53 +301,152 @@ def register_waitlist(request):
 
 @https_fn.on_request(
     cors=options.CorsOptions(
-        cors_origins=["*"],
-        cors_methods=["get", "post"],
-    )
+        cors_origins=[
+        "https://crystal-2f87e.web.app",
+        "https://askcrystal.info",
+        "http://localhost:3000",
+        "http://localhost:5173",
+        ],
+        cors_methods=["get", "post", "options"],
+    ),
+    memory=options.MemoryOption.GB_2,
+    timeout_sec=300
 )
-def test_db_connection(request):
-    """HTTP Cloud Function that tests database connection."""
-    try:
-        # Try to connect to the database
-        conn = get_db_connection()
-        
-        # Execute a simple query
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT 1 as connection_test")
-            result = cursor.fetchone()
-        
-        conn.close()
-        
+def stream_analyze(request):
+    """HTTP Cloud Function that streams dataset analysis results."""
+
+    # Initialize db
+    db = firestore.client()
+    
+    # Parse request data
+    request_json = request.get_json(silent=True)
+    
+    if not request_json:
         return https_fn.Response(
-            json.dumps({
-                "status": "success",
-                "message": "Database connection successful",
-                "result": result
-            }),
+            json.dumps({"error": "No JSON data provided"}),
+            status=400,
+            headers={"Content-Type": "application/json"}
+        )
+    
+    # Handle warming requests quickly
+    if request_json.get('warming'):
+        logger.info("Warming request received for stream_analyze")
+        return https_fn.Response(
+            json.dumps({"status": "warmed"}),
             status=200,
             headers={"Content-Type": "application/json"}
         )
-    except Exception as e:
-        logger.error(f"Database connection test failed: {e}")
+    
+    # Get the required parameters
+    # Support both formats: dataset_ids array or datasets array of objects
+    dataset_ids = []
+    
+    # If datasets array is provided (array of dataset objects)
+    if 'datasets' in request_json:
+        datasets = request_json.get('datasets', [])
+        logger.info(f"Received {len(datasets)} dataset objects")
+        
+        # Extract IDs from dataset objects
+        dataset_ids = [dataset.get('id') for dataset in datasets if dataset.get('id')]
+    else:
+        # Get dataset_ids directly if provided in that format
+        dataset_ids = request_json.get('dataset_ids', [])
+        
+    # For backward compatibility, check for single dataset_id as well
+    dataset_id = request_json.get('dataset_id', '')
+    if dataset_id and not dataset_ids:
+        dataset_ids = [dataset_id]
+    
+    logger.info(f"Processing dataset_ids: {dataset_ids}")
+    
+    query = request_json.get('query', '')
+    
+    # Optional file path parameter
+    file_path = request_json.get('file_path', None)
+    
+    # Validate required parameters
+    if not dataset_ids:
         return https_fn.Response(
-            json.dumps({
-                "status": "error",
-                "message": f"Database connection failed: {str(e)}"
-            }),
-            status=500,
+            json.dumps({"error": "At least one dataset ID is required"}),
+            status=400,
             headers={"Content-Type": "application/json"}
         )
+    
+    if not query:
+        return https_fn.Response(
+            json.dumps({"error": "Query is required"}),
+            status=400,
+            headers={"Content-Type": "application/json"}
+        )
+    
+    logger.info(f"Streaming analysis parameters: dataset_ids={dataset_ids}, query='{query}'")
+    
+    # Create a generator function that yields analysis results as they come in
+    def generate():
+        # Initialize a variable to store the final result
+        final_result = None
+        
+        # Process the streaming analysis
+        for chunk in stream_analyze_helper(
+            dataset_ids=dataset_ids,
+            query=query,
+            file_path=file_path
+        ):
+            # If this is a JSON object and it's the 'complete' type, store it as the final result
+            try:
+                chunk_data = json.loads(chunk.strip())
+                if chunk_data.get('type') == 'complete':
+                    final_result = chunk_data.get('data', {})
+            except:
+                pass
+            
+            # Yield the chunk
+            yield chunk + "\n"  # Add newline to ensure proper parsing on client side
+        
+        # If we have a final result, store it in Firestore for later retrieval
+        if final_result:
+            try:
+                # Get a reference to the Firestore database
+                db = firestore.client()
+                
+                # Create a document with the analysis results
+                analysis_ref = db.collection('queries').document()
+                
+                # Add the analysis data
+                analysis_ref.set({
+                    'dataset_ids': dataset_ids,
+                    'query': query,
+                    'timestamp': firestore.SERVER_TIMESTAMP,
+                    'results': final_result
+                })
+                
+                logger.info(f"Stored analysis results in Firestore with ID: {analysis_ref.id}")
+            except Exception as e:
+                logger.error(f"Error storing analysis results in Firestore: {e}")
+    
+    # Create and return the streaming response
+    return https_fn.Response(
+        generate(),
+        status=200,
+        headers={
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
 
 @https_fn.on_request(
     cors=options.CorsOptions(
         cors_origins=[
-            "https://crystal-2f87e.web.app",
-            "https://askcrystal.info",
-            "http://localhost:3000",
-            "http://localhost:5173",
+        "https://crystal-2f87e.web.app",
+        "https://askcrystal.info",
+        "http://localhost:3000",
+        "http://localhost:5173",
         ],
-        cors_methods=["get", "post", "options"]
-    )
+        cors_methods=["get", "post", "options"],
+    ),
+    memory=options.MemoryOption.MB_512
 )
 def submit_feedback(request):
     """HTTP Cloud Function that submits user feedback to the database using raw SQL."""

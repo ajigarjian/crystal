@@ -1,6 +1,23 @@
 #!/usr/bin/env python3
 import os
 import sys
+import logging
+
+# Make sure "functions" is on your python path if "factchecker" is inside "functions/"
+# If your layout is something like:
+#   functions/
+#       factchecker/
+#           __init__.py
+#           settings.py
+this_dir = os.path.dirname(__file__)
+parent_dir = os.path.join(this_dir, "..")
+sys.path.append(parent_dir)            # parent of scripts/
+
+# Also add the functions directory to the path so 'factchecker' can be found directly
+# This is needed because Django settings.py has 'factchecker' in INSTALLED_APPS
+functions_dir = os.path.join(parent_dir, 'functions')
+sys.path.append(functions_dir)
+
 import django
 import json
 import requests
@@ -8,26 +25,30 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 import tempfile
-import logging
 import shutil
 from google.cloud import storage
 from io import BytesIO
 import time
 import urllib.parse
 from datetime import datetime, timezone
+import concurrent.futures
+from functools import partial
+
+# Point DJANGO_SETTINGS_MODULE to the correct module path where settings.py lives.
+# If your settings are at "functions/factchecker/settings.py", do:
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'functions.factchecker.settings')
+
+# We've already added the necessary paths earlier
+
+# Now that paths and environment are set up, initialize Django
+django.setup()
+
+# Only after django.setup(), import your Django models
+from factchecker.models import DatasetResource, DatasetCatalog
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-
-# Set the DJANGO_SETTINGS_MODULE environment variable
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'factchecker.settings')
-
-# Initialize Django
-django.setup()
-
-# Import models after Django setup
-from factchecker.models import DatasetResource, DatasetCatalog
 
 # Constants
 DATA_GOV_API_URL = "https://catalog.data.gov/api/3/action/package_search"
@@ -562,12 +583,13 @@ class DataGovCacher:
                 logger.error(f"Error creating resource record: {str(e)[:200]}")
                 return None
 
-    def process_datasets(self, limit=250):
+    def process_datasets(self, limit=250, max_workers=10):
         """
-        Process the top datasets from data.gov.
+        Process the top datasets from data.gov in parallel.
         
         Args:
             limit: Number of datasets to process (default: 250)
+            max_workers: Maximum number of parallel workers (default: 10)
             
         Returns:
             Number of successfully cached resources
@@ -581,75 +603,104 @@ class DataGovCacher:
         
         cached_count = 0
         
-        # Process each dataset
-        for dataset in datasets:
-            dataset_id = dataset.get('id', 'unknown')
-            resources = dataset.get('resources', [])
+        # Process datasets in parallel
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all tasks
+            future_to_dataset = {
+                executor.submit(self.process_single_dataset, dataset): dataset 
+                for dataset in datasets
+            }
             
-            logger.info(f"Processing dataset {dataset_id} with {len(resources)} resources")
-            
-            # Save dataset to database if not exists
-            dataset_obj = self.save_dataset_to_db_if_not_exists(dataset)
-            if not dataset_obj:
-                logger.warning(f"Skipping dataset {dataset_id} - could not save to database")
-                continue
-            
-            # Find the largest suitable resource
-            resource = self.find_largest_csv(resources)
-            if not resource:
-                logger.info(f"No suitable resources found for dataset {dataset_id}")
-                continue
-            
-            # Save resource to database if not exists
-            resource_obj = self.save_resource_to_db_if_not_exists(resource, dataset_obj)
-            if not resource_obj:
-                logger.warning(f"Skipping resource {resource.get('id', 'unknown')} - could not save to database")
-                continue
-            
-            # Check if resource is already cached
-            if resource_obj.is_cached and resource_obj.cache_uri:
-                logger.info(f"Resource {resource.get('id', 'unknown')} is already cached at {resource_obj.cache_uri}")
-                cached_count += 1
-                continue
-            
-            # Download and convert to parquet
-            temp_path = None
-            try:
-                success, temp_path = self.download_and_convert_to_parquet(resource)
-                if not success or not temp_path:
-                    logger.warning(f"Failed to download/convert resource {resource.get('id', 'unknown')}")
-                    # Mark resource as having a download error
-                    self.mark_resource_download_error(resource.get('id', 'unknown'))
-                    continue
+            # Process results as they complete
+            for future in concurrent.futures.as_completed(future_to_dataset):
+                dataset = future_to_dataset[future]
+                dataset_id = dataset.get('id', 'unknown')
                 
-                # Upload to GCP bucket
-                cache_uri = self.upload_to_gcp(temp_path, resource.get('id', 'unknown'))
-                if not cache_uri:
-                    logger.warning(f"Failed to upload resource {resource.get('id', 'unknown')} to GCP")
-                    # Mark resource as having a download error
-                    self.mark_resource_download_error(resource.get('id', 'unknown'))
-                    continue
-                
-                # Update resource in database
-                if self.update_resource_in_db(resource.get('id', 'unknown'), cache_uri):
-                    cached_count += 1
-                    logger.info(f"Successfully cached resource {resource.get('id', 'unknown')}")
-            except Exception as e:
-                # Mark resource as having a download error
-                logger.error(f"Error processing resource {resource.get('id', 'unknown')}: {str(e)[:200]}")
-                self.mark_resource_download_error(resource.get('id', 'unknown'))
-            finally:
-                # Clean up temp files
-                if temp_path and os.path.exists(os.path.dirname(temp_path)):
-                    try:
-                        shutil.rmtree(os.path.dirname(temp_path), ignore_errors=True)
-                    except Exception as e:
-                        logger.warning(f"Error cleaning up temp directory: {e}")
-            
-            # Sleep briefly to avoid hitting rate limits
-            time.sleep(1)
+                try:
+                    success = future.result()
+                    if success:
+                        cached_count += 1
+                        logger.info(f"Successfully processed dataset {dataset_id}")
+                    else:
+                        logger.info(f"No suitable resources found or processing failed for dataset {dataset_id}")
+                except Exception as e:
+                    logger.error(f"Exception processing dataset {dataset_id}: {str(e)[:200]}")
         
         return cached_count
+    
+    def process_single_dataset(self, dataset):
+        """
+        Process a single dataset from data.gov.
+        
+        Args:
+            dataset: Dataset object from data.gov
+            
+        Returns:
+            Boolean indicating if a resource was successfully cached
+        """
+        dataset_id = dataset.get('id', 'unknown')
+        resources = dataset.get('resources', [])
+        
+        logger.info(f"Processing dataset {dataset_id} with {len(resources)} resources")
+        
+        # Save dataset to database if not exists
+        dataset_obj = self.save_dataset_to_db_if_not_exists(dataset)
+        if not dataset_obj:
+            logger.warning(f"Skipping dataset {dataset_id} - could not save to database")
+            return False
+        
+        # Find the largest suitable resource
+        resource = self.find_largest_csv(resources)
+        if not resource:
+            logger.info(f"No suitable resources found for dataset {dataset_id}")
+            return False
+        
+        # Save resource to database if not exists
+        resource_obj = self.save_resource_to_db_if_not_exists(resource, dataset_obj)
+        if not resource_obj:
+            logger.warning(f"Skipping resource {resource.get('id', 'unknown')} - could not save to database")
+            return False
+        
+        # Check if resource is already cached
+        if resource_obj.is_cached and resource_obj.cache_uri:
+            logger.info(f"Resource {resource.get('id', 'unknown')} is already cached at {resource_obj.cache_uri}")
+            return True
+        
+        # Download and convert to parquet
+        temp_path = None
+        try:
+            success, temp_path = self.download_and_convert_to_parquet(resource)
+            if not success or not temp_path:
+                logger.warning(f"Failed to download/convert resource {resource.get('id', 'unknown')}")
+                # Mark resource as having a download error
+                self.mark_resource_download_error(resource.get('id', 'unknown'))
+                return False
+            
+            # Upload to GCP bucket
+            cache_uri = self.upload_to_gcp(temp_path, resource.get('id', 'unknown'))
+            if not cache_uri:
+                logger.warning(f"Failed to upload resource {resource.get('id', 'unknown')} to GCP")
+                # Mark resource as having a download error
+                self.mark_resource_download_error(resource.get('id', 'unknown'))
+                return False
+            
+            # Update resource in database
+            if self.update_resource_in_db(resource.get('id', 'unknown'), cache_uri):
+                logger.info(f"Successfully cached resource {resource.get('id', 'unknown')}")
+                return True
+            return False
+        except Exception as e:
+            # Mark resource as having a download error
+            logger.error(f"Error processing resource {resource.get('id', 'unknown')}: {str(e)[:200]}")
+            self.mark_resource_download_error(resource.get('id', 'unknown'))
+            return False
+        finally:
+            # Clean up temp files
+            if temp_path and os.path.exists(os.path.dirname(temp_path)):
+                try:
+                    shutil.rmtree(os.path.dirname(temp_path), ignore_errors=True)
+                except Exception as e:
+                    logger.warning(f"Error cleaning up temp directory: {e}")
 
 def main():
     """Main function to run the data.gov cacher."""
@@ -657,8 +708,39 @@ def main():
     
     cacher = DataGovCacher()
     
-    # Process datasets
-    cached_count = cacher.process_datasets()
+    # Process datasets 250-500 with parallel execution (up to 10 workers)
+    # First get datasets 0-500
+    all_datasets = cacher.query_top_datasets(limit=500)
+    
+    # Take only datasets from index 250 to 499
+    datasets_to_process = all_datasets[250:500] if len(all_datasets) > 250 else []
+    
+    logger.info(f"Processing datasets 250-500 ({len(datasets_to_process)} datasets)")
+    
+    # Process the selected datasets in parallel
+    cached_count = 0
+    if datasets_to_process:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            # Submit all tasks
+            future_to_dataset = {
+                executor.submit(cacher.process_single_dataset, dataset): dataset 
+                for dataset in datasets_to_process
+            }
+            
+            # Process results as they complete
+            for future in concurrent.futures.as_completed(future_to_dataset):
+                dataset = future_to_dataset[future]
+                dataset_id = dataset.get('id', 'unknown')
+                
+                try:
+                    success = future.result()
+                    if success:
+                        cached_count += 1
+                        logger.info(f"Successfully processed dataset {dataset_id}")
+                    else:
+                        logger.info(f"No suitable resources found or processing failed for dataset {dataset_id}")
+                except Exception as e:
+                    logger.error(f"Exception processing dataset {dataset_id}: {str(e)[:200]}")
     
     logger.info(f"Completed processing. Successfully cached {cached_count} resources.")
 

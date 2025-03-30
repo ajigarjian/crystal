@@ -13,7 +13,7 @@
   "functions": {
     "source": "functions",
     "runtime": "python312",
-    "timeoutSeconds": 180,
+    "timeoutSeconds": 300,
     "memory": "512MB",
     "ignore": [
       "venv",
@@ -25,12 +25,13 @@
       "*.pyc"
     ],
     "predeploy": [
-      "pip install -r functions/requirements.txt"
+      "pip install -r functions/requirements.txt --no-cache-dir"
     ]
   },
   "emulators": {
     "functions": {
-      "port": 5001
+      "port": 5001,
+      "timeoutSeconds": 300
     },
     "firestore": {
       "port": 8080
