@@ -120,7 +120,7 @@ def search_vector_datasets(query, similarity_threshold, max_results, start_time)
 
 def search_keyword_datasets(query, gov_api_key, keyword_threshold, start_time):
     """Search datasets using keyword search and yield results"""
-    yield create_status_message('I\'m checking additional data.gov datasets...', start_time)
+    yield create_status_message('I\'m checking additional sources...', start_time)
     
     try:
         # Get keyword search results
@@ -481,13 +481,13 @@ def stream_search_datasets_helper(query, similarity_threshold=0.3, search_method
                 'execution_time': search_execution_time,
                 'total_count': total_count
             },
-            'message': f'I\'ve completed my search! I found {total_count} datasets in {search_execution_time:.1f} seconds.',
+            'message': f'I\'ve found some potential datasets. I found {total_count} datasets that might be relevant.',
             'timestamp': search_execution_time
         }, cls=NumpyEncoder) + '\n'
         
         # Now begin pre-download assessment of the datasets
         yield create_status_message(
-            'I\'m now assessing the relevance of the discovered datasets...',
+            'I\'m removing irrelevant datasets...',
             start_time
         )
         
@@ -527,7 +527,7 @@ def stream_search_datasets_helper(query, similarity_threshold=0.3, search_method
                 'processed_count': len(all_datasets),
                 'relevant_count': len(relevant_datasets)
             },
-            'message': f'I\'ve completed my analysis! I assessed {len(all_datasets)} datasets in {final_execution_time:.1f} seconds.',
+            'message': f'I\'ve completed my search! I found {len(all_datasets)} datasets in {final_execution_time:.1f} seconds.',
             'timestamp': final_execution_time
         }, cls=NumpyEncoder) + '\n'
         
