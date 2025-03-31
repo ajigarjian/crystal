@@ -276,3 +276,86 @@ def get_usable_resources_batch(dataset_ids):
     except Exception as e:
         logger.error(f"Error getting batch resources for datasets: {e}")
         return {} 
+        
+def check_usage_limit(ip_address, function_name):
+    """
+    Check if the IP address has exceeded the usage limit for the given function.
+    Uses Firestore for tracking instead of PostgreSQL.
+    
+    Args:
+        ip_address (str): The IP address of the request
+        function_name (str): The name of the function ('stream_search_datasets' or 'stream_analyze')
+        
+    Returns:
+        tuple: (bool, str) - (exceeded_limit, error_message)
+            - exceeded_limit: True if limit is exceeded, False otherwise
+            - error_message: Error message if limit exceeded, None otherwise
+    """
+    import os
+    from firebase_admin import firestore
+    
+    # Skip limit checking in local development environment
+    if os.getenv('FUNCTIONS_EMULATOR') or ip_address in ('127.0.0.1', '::1', 'localhost'):
+        return False, None
+    
+    # Define limits for each function
+    LIMITS = {
+        'stream_search_datasets': 3,  # test for 3
+        'stream_analyze': 10
+    }
+    
+    # Get the limit for this function
+    limit = LIMITS.get(function_name, 10)  # Default to 10 if function not in limits
+    
+    try:
+        # Get Firestore client
+        db = firestore.client()
+        
+        # Create a document reference for this IP and function
+        usage_ref = db.collection('usage_limits').document(f"{ip_address}_{function_name}")
+        
+        # Get the current document
+        doc = usage_ref.get()
+        
+        if not doc.exists:
+            # Document doesn't exist, create it
+            usage_ref.set({
+                'ip_address': ip_address,
+                'function_name': function_name,
+                'request_count': 1,
+                'first_request_at': firestore.SERVER_TIMESTAMP,
+                'last_request_at': firestore.SERVER_TIMESTAMP
+            })
+            return False, None
+        
+        # Document exists, get current count
+        data = doc.to_dict()
+        current_count = data.get('request_count', 0)
+        
+        # Check if limit is exceeded
+        if current_count >= limit:
+            error_message = (
+                "Thank you for using Crystal! To ensure everyone gets a fair chance to use our Alpha "
+                "version, we've set a limit of {} requests per user for this feature. "
+                "If you need a higher limit, please submit feedback with your email and we'll get back to you."
+            ).format(limit)
+            
+            # Update the timestamp even when exceeding limit
+            usage_ref.update({
+                'last_request_at': firestore.SERVER_TIMESTAMP
+            })
+            
+            return True, error_message
+        
+        # Increment the counter and update timestamp
+        usage_ref.update({
+            'request_count': current_count + 1,
+            'last_request_at': firestore.SERVER_TIMESTAMP
+        })
+        
+        return False, None
+    
+    except Exception as e:
+        # If there's an error, log it but don't block the request
+        logger.error(f"Error checking usage limit: {e}")
+        return False, None

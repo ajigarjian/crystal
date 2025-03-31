@@ -118,8 +118,20 @@ export const streamSearchDatasets = async (
     });
     
     if (!response.ok) {
-      const errorText = await response.text();
+      let errorText = await response.text();
       console.error('Error response:', errorText);
+      
+      // Try to parse JSON error message for usage limits
+      try {
+        const errorData = JSON.parse(errorText);
+        if (errorData.type === 'usage_limit_exceeded') {
+          // This is a usage limit error - use the provided message
+          throw new Error(errorData.error || `Usage limit exceeded for ${errorData.limit_type}`);
+        }
+      } catch (parseError) {
+        // If parsing fails, continue with the text error
+      }
+      
       throw new Error(errorText || 'Failed to search datasets');
     }
     
@@ -410,8 +422,20 @@ export const streamAnalyzeDatasets = async (
     });
     
     if (!response.ok) {
-      const errorText = await response.text();
+      let errorText = await response.text();
       console.error('Error response:', errorText);
+      
+      // Try to parse JSON error message for usage limits
+      try {
+        const errorData = JSON.parse(errorText);
+        if (errorData.type === 'usage_limit_exceeded') {
+          // This is a usage limit error - use the provided message
+          throw new Error(errorData.error || `Usage limit exceeded for ${errorData.limit_type}`);
+        }
+      } catch (parseError) {
+        // If parsing fails, continue with the text error
+      }
+      
       throw new Error(errorText || 'Failed to analyze datasets');
     }
     

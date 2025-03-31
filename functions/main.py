@@ -99,7 +99,7 @@ def stream_search_datasets(request):
             headers={"Content-Type": "application/json"}
         )
     
-        # Handle warming requests quickly
+    # Handle warming requests quickly
     if request_json.get('warming'):
         logger.info("Warming request received for stream_search_datasets")
         return https_fn.Response(
@@ -115,6 +115,28 @@ def stream_search_datasets(request):
         return https_fn.Response(
             json.dumps({"error": "Query is required"}),
             status=400,
+            headers={"Content-Type": "application/json"}
+        )
+        
+    # Check IP-based usage limits
+    from helpers.db_utils import check_usage_limit
+    
+    # Get the client IP address
+    ip_address = request.headers.get('X-Forwarded-For', '').split(',')[0].strip()
+    if not ip_address:
+        ip_address = request.remote_addr
+    
+    # Check if the IP has exceeded the usage limit
+    exceeded, error_message = check_usage_limit(ip_address, 'stream_search_datasets')
+    if exceeded:
+        logger.info(f"Usage limit exceeded for IP {ip_address} on stream_search_datasets")
+        return https_fn.Response(
+            json.dumps({
+                "error": error_message,
+                "type": "usage_limit_exceeded",
+                "limit_type": "stream_search_datasets"
+            }),
+            status=429,  # Too Many Requests
             headers={"Content-Type": "application/json"}
         )
     
@@ -381,6 +403,28 @@ def stream_analyze(request):
         return https_fn.Response(
             json.dumps({"error": "Query is required"}),
             status=400,
+            headers={"Content-Type": "application/json"}
+        )
+        
+    # Check IP-based usage limits
+    from helpers.db_utils import check_usage_limit
+    
+    # Get the client IP address
+    ip_address = request.headers.get('X-Forwarded-For', '').split(',')[0].strip()
+    if not ip_address:
+        ip_address = request.remote_addr
+    
+    # Check if the IP has exceeded the usage limit
+    exceeded, error_message = check_usage_limit(ip_address, 'stream_analyze')
+    if exceeded:
+        logger.info(f"Usage limit exceeded for IP {ip_address} on stream_analyze")
+        return https_fn.Response(
+            json.dumps({
+                "error": error_message,
+                "type": "usage_limit_exceeded",
+                "limit_type": "stream_analyze"
+            }),
+            status=429,  # Too Many Requests
             headers={"Content-Type": "application/json"}
         )
     

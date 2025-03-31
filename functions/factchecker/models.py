@@ -381,6 +381,7 @@ class CensusQueryMapping(models.Model):
     def __str__(self):
         return f"{self.query_pattern} → {self.variable.variable_name}"
 
+
 class Feedback(models.Model):
     """Model to store user feedback without requiring authentication"""
     
