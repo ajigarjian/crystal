@@ -573,11 +573,12 @@ def stream_analyze_helper(dataset_ids, query, file_path=None):
                     extracted_data["organization_name"] = dataset.get('organization_name', "")
                     
                     # Now call format_extracted_data with the updated extracted_data
-                    formatted_data = format_extracted_data(
-                        extracted_data,
-                        analysis_result,
-                        query
-                    )
+                    # Remove this premature call to format_extracted_data since analysis_result doesn't exist yet
+                    # formatted_data = format_extracted_data(
+                    #     extracted_data,
+                    #     analysis_result,
+                    #     query
+                    # )
                     
                     # Log the organization info we're adding
                     logger.info(f"Adding organization info to extracted data: " + 
