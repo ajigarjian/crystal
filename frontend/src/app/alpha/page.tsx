@@ -1742,6 +1742,9 @@ export default function DatasetsPage() {
     }
   };
 
+  // Add this state variable with your other state declarations
+  const [showAllStatusHistory, setShowAllStatusHistory] = useState(false);
+
   return (
     <>
       {/* Initial hero state - when no search has been performed */}
@@ -1936,83 +1939,36 @@ export default function DatasetsPage() {
           {loading && (
             <div className="space-y-4">
               {/* Status messages */}
-              <div className="p-3 bg-neutral-50 dark:bg-neutral-900 rounded-md border border-neutral-200 dark:border-neutral-800">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center">
-                    <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse mr-2"></div>
-                    <h3 className="font-medium">Search Progress</h3>
-                  </div>
-                  {shouldShowAllButton(statusMessages) && (
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      className="h-6 text-xs"
-                      onClick={() => setShowAllMessages(prev => !prev)}
-                    >
-                      {showAllMessages ? "Show Less" : "Show All"}
-                    </Button>
+              
+              
+              {/* Replace the simple pulsing status message with a clickable, expandable one */}
+              <div className="relative">
+                <div 
+                  onClick={() => setShowAllStatusHistory(prev => !prev)} 
+                  className="text-sm text-neutral-600 dark:text-neutral-400 animate-pulse cursor-pointer flex items-center"
+                >
+                  {statusMessages.length > 0 
+                    ? statusMessages[statusMessages.length - 1].message
+                    : "Finding relevant datasets..."}
+                  {statusMessages.length > 1 && (
+                    <ChevronDown className={`h-4 w-4 ml-1 transition-transform ${showAllStatusHistory ? 'rotate-180' : ''}`} />
                   )}
                 </div>
                 
-                <div className="space-y-1 max-h-[200px] overflow-y-auto pr-1 status-message-container">
-                  {(showAllMessages ? statusMessages : statusMessages.slice(-3)).map((msg) => (
-                    <div 
-                      key={msg.id}
-                      className={`text-sm ${msg.type === 'error' ? 'text-red-500' : 'text-neutral-600 dark:text-neutral-400'} mb-2`}
-                    >
-                      {msg.message && typeof msg.message === 'string' && msg.message.includes("Assessing dataset") ? (
-                        // Format assessment messages in a more conversational style
-                        <div dangerouslySetInnerHTML={{ 
-                          __html: msg.message.replace(/Assessing dataset \d+\/\d+: (.+)/, (match, datasetName) => {
-                            // Extract organization name from the message if available
-                            const orgMatch = msg.message.match(/organization_name":\s*"([^"]+)"/);
-                            const orgName = orgMatch ? orgMatch[1] : "";
-                            
-                            if (orgName) {
-                              return `I'm assessing the dataset <strong>${datasetName}</strong> from <strong>${orgName}</strong>`;
-                            } else {
-                              return `I'm assessing the dataset <strong>${datasetName}</strong>`;
-                            }
-                          })
-                        }} />
-                      ) : msg.message && typeof msg.message === 'string' && msg.message.includes("Pre-assessment:") ? (
-                        // Format pre-assessment messages
-                        <div dangerouslySetInnerHTML={{ 
-                          __html: msg.message.replace(
-                            /Pre-assessment: Dataset is (relevant|not relevant) \(Score: (.+)\)(\s*)Reasoning: (.+)/,
-                            function(match, relevance, score, space, reasoning) {
-                              // Convert first letter of reasoning to lowercase
-                              const lowerCaseReasoning = reasoning.charAt(0).toLowerCase() + reasoning.slice(1);
-                              return `It appears to be <strong>${relevance}</strong> because ${lowerCaseReasoning} I'll download the files for additional insight.`;
-                            }
-                          )
-                        }} />
-                      ) : msg.message && typeof msg.message === 'string' && msg.message.includes("Final assessment:") ? (
-                        // Format final assessment messages
-                        <div dangerouslySetInnerHTML={{ 
-                          __html: msg.message.replace(
-                            /Final assessment: Dataset is (relevant|not relevant) \(Score: (.+)\)(\s*)Reasoning: (.+)/,
-                            function(match, relevance, score, space, reasoning) {
-                              // Convert first letter of reasoning to lowercase
-                              const lowerCaseReasoning = reasoning.charAt(0).toLowerCase() + reasoning.slice(1);
-                              return `Based on the actual files, this dataset is <strong>${relevance}</strong> because ${lowerCaseReasoning}`;
-                            }
-                          )
-                        }} />
-                      ) : (
-                        // Keep other messages as is or handle undefined
-                        msg.message || ""
-                      )}
-                    </div>
-                  ))}
-                </div>
+                {/* Expanded history view */}
+                {showAllStatusHistory && statusMessages.length > 1 && (
+                  <div className="mt-2 pl-4 border-l-2 border-gray-300 dark:border-gray-700 space-y-2 max-h-60 overflow-y-auto">
+                    {statusMessages.slice(0, -1).map((msg, index) => (
+                      <div 
+                        key={msg.id}
+                        className={`text-sm ${msg.type === 'error' ? 'text-red-500' : 'text-neutral-500 dark:text-neutral-400'}`}
+                      >
+                        {msg.message}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-              
-              <p className="text-sm text-neutral-600 dark:text-neutral-400 animate-pulse">
-                {datasets.length > 0 
-                  ? `Found ${datasets.length} datasets so far...`
-                  : "Finding relevant datasets..."}
-              </p>
               
               {/* Show found datasets while still loading */}
               {datasets.length > 0 && (
@@ -2206,24 +2162,6 @@ export default function DatasetsPage() {
                         Found {datasets.length} relevant datasets for your query
                         {executionTime !== null && ` in ${executionTime.toFixed(2)} seconds`}.
                       </p>
-                      <Button 
-                        variant="ghost" 
-                        size="sm" 
-                        className="flex items-center gap-1 text-xs text-neutral-500 hover:text-green-700"
-                        onClick={toggleProcessDetails}
-                      >
-                        {showProcessDetails ? (
-                          <>
-                            <span>Hide Search Process</span>
-                            <ChevronUp className="h-4 w-4" />
-                          </>
-                        ) : (
-                          <>
-                            <span>View Search Process</span>
-                            <ChevronDown className="h-4 w-4" />
-                          </>
-                        )}
-                      </Button>
                     </div>
                     
                     {/* Collapsible process details */}
@@ -2261,19 +2199,7 @@ export default function DatasetsPage() {
                         
                         {/* Status messages */}
                         <div className="p-3 bg-white dark:bg-neutral-800">
-                          <div className="flex items-center justify-between mb-2">
-                            <h3 className="font-medium text-sm">Search Progress</h3>
-                            {shouldShowAllButton(statusMessages) && (
-                              <Button 
-                                variant="ghost" 
-                                size="sm" 
-                                className="h-6 text-xs"
-                                onClick={() => setShowAllMessages(prev => !prev)}
-                              >
-                                {showAllMessages ? "Show Less" : "Show All"}
-                              </Button>
-                            )}
-                          </div>
+                          
                           <div className="space-y-1 max-h-[300px] overflow-y-auto pr-1 status-message-container">
                             {(showAllMessages ? statusMessages : statusMessages.slice(-3)).map((msg) => (
                               <div 
@@ -2338,9 +2264,8 @@ export default function DatasetsPage() {
                         <TableRow>
                           <TableHead className="w-[40px]"></TableHead>
                           {/* Increase the width of the Dataset column */}
-                          <TableHead className="max-w-[330px] w-[330px]">Dataset</TableHead>
-                          {/* Files column removed */}
-                          <TableHead className="w-[100px] text-center">Relevance</TableHead>
+                          <TableHead className="max-w-[430px] w-[430px]">Dataset</TableHead>
+                          {/* Relevance column removed */}
                           <TableHead className="w-[120px] text-center">Status</TableHead>
                           <TableHead className="w-[100px] text-center">Include in Analysis</TableHead>
                         </TableRow>
@@ -2356,8 +2281,13 @@ export default function DatasetsPage() {
                           return (
                             <TableRow 
                               key={dataset.id}
-                              className="cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
+                              className={`
+                                ${isAnalyzing ? 'opacity-70 pointer-events-none select-none' : 'cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800/50'}
+                              `}
                               onClick={(e) => {
+                                // Only allow clicking if not analyzing
+                                if (isAnalyzing) return;
+                                
                                 // Prevent toggling if clicking on a button, checkbox, or interactive element
                                 if (e.target instanceof HTMLElement && 
                                     (e.target.closest('button') || 
@@ -2389,32 +2319,28 @@ export default function DatasetsPage() {
                                 </div>
                               </TableCell>
                               
-                              <TableCell className="py-2 max-w-[330px] w-[330px]">
+                              <TableCell className="py-2 max-w-[430px] w-[430px]">
                                 <div className="overflow-hidden">
-                                  <div className="flex items-center">
+                                  <div className="flex items-center space-x-2">
                                     <p className="font-medium text-sm truncate" title={dataset.title}>{dataset.title}</p>
+                                    {/* Add relevance chip next to title */}
+                                    {relevanceScore > 0.7 ? (
+                                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300 whitespace-nowrap">
+                                        <CheckCircle2 className="h-3 w-3 mr-1" />
+                                        {Math.round(relevanceScore * 100)}%
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300 whitespace-nowrap">
+                                        {Math.round(relevanceScore * 100)}%
+                                      </span>
+                                    )}
                                   </div>
-                                  <p className="text-xs text-neutral-500 truncate" title={getOrganizationName(dataset)}>
-                                    {getOrganizationName(dataset)}
-                                  </p>
-                                  {/* Optionally: We can add file count as a small badge here if still needed */}
+                                  <div className="flex justify-between items-center">
+                                    <p className="text-xs text-neutral-500 truncate" title={getOrganizationName(dataset)}>
+                                      {getOrganizationName(dataset)}
+                                    </p>
+                                  </div>
                                 </div>
-                              </TableCell>
-                              
-                              {/* Files column removed */}
-                              
-                              {/* Keep the remaining columns */}
-                              <TableCell className="text-center">
-                                {relevanceScore > 0.7 ? (
-                                  <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300">
-                                    <CheckCircle2 className="h-3 w-3 mr-1" />
-                                    {Math.round(relevanceScore * 100)}%
-                                  </span>
-                                ) : (
-                                  <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300">
-                                    {Math.round(relevanceScore * 100)}%
-                                  </span>
-                                )}
                               </TableCell>
                               
                               <TableCell className="text-center">
@@ -2449,6 +2375,7 @@ export default function DatasetsPage() {
                                         checked={selectedDatasets[dataset.id] === true}
                                         disabled={isAnalyzing}
                                         onCheckedChange={(checked) => {
+                                          if (isAnalyzing) return; // Extra protection
                                           setSelectedDatasets(prev => ({
                                             ...prev,
                                             [dataset.id]: checked === true
@@ -2471,7 +2398,6 @@ export default function DatasetsPage() {
                   {/* Analysis Results Section */}
                   {(isAnalyzing || analysisComplete) && (
                     <div className="mt-6 space-y-4">
-                      <h2 className="text-xl font-semibold">Analysis Results</h2>
                       
                       <Tabs 
                         defaultValue="datasets" 
