@@ -2325,6 +2325,23 @@ export default function DatasetsPage() {
                             <TableRow 
                               key={dataset.id}
                               className="cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
+                              onClick={(e) => {
+                                // Prevent toggling if clicking on a button, checkbox, or interactive element
+                                if (e.target instanceof HTMLElement && 
+                                    (e.target.closest('button') || 
+                                     e.target.tagName === 'INPUT' ||
+                                     e.target.closest('input') ||
+                                     e.target.closest('label') ||
+                                     e.target.closest('.checkbox-container'))) {
+                                  return;
+                                }
+                                
+                                // Toggle the checkbox for this dataset
+                                setSelectedDatasets(prev => ({
+                                  ...prev,
+                                  [dataset.id]: !(prev[dataset.id] === true)
+                                }));
+                              }}
                             >
                               <TableCell className="p-2">
                                 <div className="h-8 w-8 rounded overflow-hidden bg-neutral-200 flex-shrink-0">
@@ -2339,7 +2356,7 @@ export default function DatasetsPage() {
                                   />
                                 </div>
                               </TableCell>
-                              <TableCell className="py-2 max-w-[250px] w-[250px]" onClick={() => handleDatasetSelect(dataset)}>
+                              <TableCell className="py-2 max-w-[250px] w-[250px]">
                                 <div className="overflow-hidden">
                                   <div className="flex items-center">
                                     <p className="font-medium text-sm truncate" title={dataset.title}>{dataset.title}</p>
@@ -2347,7 +2364,6 @@ export default function DatasetsPage() {
                                   <p className="text-xs text-neutral-500 truncate" title={getOrganizationName(dataset)}>
                                     {getOrganizationName(dataset)}
                                   </p>
-                                  {/* Remove badge from here */}
                                 </div>
                               </TableCell>
                               <TableCell className="text-center">
