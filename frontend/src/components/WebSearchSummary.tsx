@@ -15,17 +15,21 @@ export interface WebSearchSummaryData {
   query: string;
   has_relevant_results: boolean;
   summary: string;
-  sources: Record<string, any>;
+  sources: Record<string, WebSearchSource>;
   top_sources: WebSearchSource[];
   total_relevant_sources: number;
   source_citations: boolean;
 }
 
 interface WebSearchSummaryProps {
-  data: WebSearchSummaryData;
+  data?: WebSearchSummaryData;
 }
 
 export function WebSearchSummary({ data }: WebSearchSummaryProps) {
+  if (!data) {
+    return null;
+  }
+
   // Function to replace [1], [2] citations with source titles
   const formatSummaryWithSourceTitles = (summary: string) => {
     if (!summary) return "";
@@ -35,11 +39,11 @@ export function WebSearchSummary({ data }: WebSearchSummaryProps) {
     // Replace [1], [2], etc. with actual source titles
     Object.keys(data.sources || {}).forEach((key) => {
       const source = data.sources[key];
-      const title = source.title || "Source";
+      const title = source?.title || "Source";
       
       // Use regex to replace [key] with source title
       const regex = new RegExp(`\\[${key}\\]`, 'g');
-      formattedSummary = formattedSummary.replace(regex, `<a href="${source.url}" target="_blank" rel="noopener noreferrer" class="font-medium text-blue-600 hover:underline inline-flex items-center">${title} <span class="inline-block ml-0.5"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-external-link"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></span></a>`);
+      formattedSummary = formattedSummary.replace(regex, `<a href="${source?.url || '#'}" target="_blank" rel="noopener noreferrer" class="font-medium text-blue-600 hover:underline inline-flex items-center">${title} <span class="inline-block ml-0.5"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-external-link"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></span></a>`);
     });
     
     return formattedSummary;
@@ -73,14 +77,14 @@ export function WebSearchSummary({ data }: WebSearchSummaryProps) {
         <CardHeader>
           <CardTitle className="text-xl">Web Research Summary</CardTitle>
           <CardDescription>
-            Based on {data.total_relevant_sources} web sources related to your query
+            Based on {data.total_relevant_sources || 0} web sources related to your query
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div 
             className="prose prose-sm dark:prose-invert max-w-none"
             dangerouslySetInnerHTML={{ 
-              __html: formatSummaryWithSourceTitles(data.summary) 
+              __html: formatSummaryWithSourceTitles(data.summary || '') 
             }}
           />
         </CardContent>
@@ -90,12 +94,12 @@ export function WebSearchSummary({ data }: WebSearchSummaryProps) {
         <CardHeader>
           <CardTitle className="text-lg">Sources</CardTitle>
           <CardDescription>
-            Top {data.top_sources.length} sources used for this summary
+            Top {(data.top_sources || []).length} sources used for this summary
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            {data.top_sources.map((source, index) => (
+            {(data.top_sources || []).map((source, index) => (
               <div key={index} className="border rounded-md p-3 flex items-start gap-2">
                 <div className="flex-1">
                   <div className="flex items-center">
