@@ -527,7 +527,7 @@ def stream_search_datasets_helper(query, similarity_threshold=0.3, search_method
                 'processed_count': len(all_datasets),
                 'relevant_count': len(relevant_datasets)
             },
-            'message': f'I\'ve completed my search! I found {len(all_datasets)} datasets in {final_execution_time:.1f} seconds.',
+            'message': f'I\'ve completed my search! I found {len(relevant_datasets)} datasets in {final_execution_time:.1f} seconds.',
             'timestamp': final_execution_time
         }, cls=NumpyEncoder) + '\n'
         
