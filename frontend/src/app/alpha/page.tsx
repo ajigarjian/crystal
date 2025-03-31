@@ -2508,7 +2508,8 @@ export default function DatasetsPage() {
                 </>
               ) : (
                 <div className="text-center py-10">
-                  <p className="text-neutral-500">No relevant datasets found for your query. Try a different question.</p>
+                  <p className="text-neutral-500">Sorry, we don't seem to have any datasets for this query yet. </p>
+                  <p className="text-neutral-500">We're working hard to add more sources, please click "Feedback" to tell us!</p>
                 </div>
               )}
             </div>
