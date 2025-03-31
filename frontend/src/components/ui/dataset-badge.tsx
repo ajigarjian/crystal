@@ -1,20 +1,27 @@
+"use client";
+
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Star } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { PREFERRED_DATASET_ID_SET } from "@/lib/constants";
 
-interface DatasetBadgeProps {
-  datasetId: string;
-}
-
-export function PreferredDatasetBadge({ datasetId }: DatasetBadgeProps) {
+export function PreferredDatasetBadge({ datasetId }: { datasetId: string }) {
+  // Only show the badge if the dataset is in the preferred set
   if (!PREFERRED_DATASET_ID_SET.has(datasetId)) {
     return null;
   }
-  
+
   return (
-    <Badge className="bg-amber-400 text-amber-900 hover:bg-amber-500 ml-2 flex items-center gap-1">
-      <Star className="h-3 w-3" />
-      <span>Preferred</span>
-    </Badge>
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div className="cursor-help absolute -right-6">
+            <Star className="h-4 w-4 text-amber-400 fill-amber-400" />
+          </div>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p className="text-sm">Preferred for speed and relevance</p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
-} 
+}

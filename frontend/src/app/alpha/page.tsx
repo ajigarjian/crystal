@@ -452,13 +452,6 @@ export default function DatasetsPage() {
       setSearchPerformed(true);
       setExecutionTime(null);
       setQueryVariations([]);
-      setSearchStages([
-        { stage: "Analyzing query", complete: false, startTime: Date.now() },
-        { stage: "Generating query variations", complete: false },
-        { stage: "Vector search", complete: false },
-        { stage: "Keyword search", complete: false },
-        { stage: "Combining results", complete: false }
-      ]);
       
       console.log(`Streaming search for datasets: "${queryText}"`);
       
@@ -621,18 +614,49 @@ export default function DatasetsPage() {
                     ...data.data
                   };
                   
-                  // If the dataset has been assessed as not relevant, mark it for removal
+                  // If the dataset has been assessed as not relevant, update status and then mark for removal
                   if (data.data.relevance && data.data.relevance.is_relevant === false) {
-                    updatedDatasets[datasetIndex].isRemoving = true;
-                    
-                    // Remove the dataset after animation completes
+                    // Update the status to 'not_relevant' in a separate state update
+                    // This ensures a complete render cycle before starting the removal process
+                    setDatasets(currentDatasets => {
+                      return currentDatasets.map(d => {
+                          if (d.id === data.data.id) {
+                            return {
+                              ...d,
+                            status: 'not_relevant'  // Set the status
+                            };
+                          }
+                          return d;
+                        });
+                      });
+                      
+                    // Then after a delay, start the removal process in a separate update
+                      setTimeout(() => {
+                      setDatasets(current => {
+                        return current.map(d => {
+                          if (d.id === data.data.id) {
+                    return {
+                      ...d,
+                              isRemoving: true  // Start the removal animation
+                    };
+                  }
+                  return d;
+                });
+              });
+              
+                      // After animation completes, remove the dataset
                     setTimeout(() => {
-                      setDatasets(current => current.filter(d => d.id !== data.data.id));
-                    }, 500); // Match this with your CSS transition duration
+                        setDatasets(current => current.filter(d => d.id !== data.data.id));
+                      }, 1000); // Animation duration
+                    }, 1500); // Show "Not relevant" status for 1.5 seconds
                   } 
                   // If the dataset is being assessed, show the assessing state
                   else if (data.data.status === 'assessing') {
                     updatedDatasets[datasetIndex].status = 'assessing';
+                  }
+                  // If the dataset is relevant, update its status
+                  else if (data.data.relevance && data.data.relevance.is_relevant === true) {
+                    updatedDatasets[datasetIndex].status = 'relevant';
                   }
                   
                   return updatedDatasets;
@@ -648,16 +672,31 @@ export default function DatasetsPage() {
               setLoading(false);
               setExecutionTime(data.data.execution_time);
               
-              // Sort datasets by relevance score when search is complete
-              // AND filter out any datasets that were marked as not relevant
+              // After the search is complete, sort datasets with preferred datasets first, then by relevance
+              // This appears in the 'complete' case of processing streaming query results
               setDatasets(prev => {
-                return [...prev]
-                  .filter(dataset => !dataset.relevance || dataset.relevance.is_relevant !== false)
-                  .sort((a, b) => {
-                    const scoreA = a.relevance?.relevance_score || a.similarity || 0;
-                    const scoreB = b.relevance?.relevance_score || b.similarity || 0;
-                    return scoreB - scoreA; // Sort in descending order
-                  });
+                // Filter out any datasets that were marked as not relevant
+                const filteredDatasets = [...prev]
+                  .filter(dataset => !dataset.relevance || dataset.relevance.is_relevant !== false);
+                
+                // Sort with a compound sorting rule:
+                // 1. Preferred datasets first (using PREFERRED_DATASET_ID_SET)
+                // 2. Then by relevance score (descending)
+                return filteredDatasets.sort((a, b) => {
+                  // First check if either dataset is preferred
+                  const aIsPreferred = PREFERRED_DATASET_ID_SET.has(a.id);
+                  const bIsPreferred = PREFERRED_DATASET_ID_SET.has(b.id);
+                  
+                  // If their preferred status differs, preferred ones come first
+                  if (aIsPreferred !== bIsPreferred) {
+                    return aIsPreferred ? -1 : 1;
+                  }
+                  
+                  // If both have same preferred status, sort by relevance score
+                  const scoreA = a.relevance?.relevance_score || a.similarity || 0;
+                  const scoreB = b.relevance?.relevance_score || b.similarity || 0;
+                  return scoreB - scoreA; // Sort in descending order
+                });
               });
               
               // Add the completion message to status messages
@@ -1275,9 +1314,16 @@ export default function DatasetsPage() {
     
     const firstLetter = orgName ? orgName.charAt(0).toUpperCase() : "D";
     const colors = ["4F46E5", "10B981", "EF4444", "F59E0B", "6366F1"];
-    const randomColor = colors[Math.floor(Math.random() * colors.length)];
     
-    return `https://placehold.co/32x32/${randomColor}/ffffff?text=${firstLetter}`;
+    // Use the dataset ID to deterministically select a color
+    // This ensures the same color is always used for the same dataset
+    const colorIndex = dataset.id ? 
+      Math.abs(dataset.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0)) % colors.length : 
+      0;
+    
+    const color = colors[colorIndex];
+    
+    return `https://placehold.co/32x32/${color}/ffffff?text=${firstLetter}`;
   };
 
   // Helper function to get organization name
@@ -1300,21 +1346,11 @@ export default function DatasetsPage() {
     }
   };
 
-  // Toggle process details visibility
-  const toggleProcessDetails = () => {
-    setShowProcessDetails(!showProcessDetails);
-  };
-
   // Format milliseconds to readable duration
   const formatDuration = (startTime?: number, endTime?: number) => {
     if (!startTime || !endTime) return "—";
     const duration = endTime - startTime;
     return `${(duration / 1000).toFixed(2)}s`;
-  };
-
-  // New function to check if we should show the "Show All" button
-  const shouldShowAllButton = (messages: StatusMessage[]) => {
-    return messages.length > 3;
   };
 
   // New function to handle dataset preview
@@ -1331,32 +1367,8 @@ export default function DatasetsPage() {
       case 'starting':
         return { 
           icon: <Loader2 className="h-4 w-4 animate-spin text-yellow-500" />, 
-          text: "Starting analysis...",
+          text: "Checking validity...",
           color: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300"
-        };
-      case 'downloading':
-        return { 
-          icon: <Download className="h-4 w-4 animate-pulse text-blue-500" />, 
-          text: "Downloading files...",
-          color: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300"
-        };
-      case 'downloaded':
-        return { 
-          icon: <FileCheck className="h-4 w-4 text-blue-500" />, 
-          text: `Downloaded ${dataset.file_count || 0} files`,
-          color: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300"
-        };
-      case 'analyzing_files':
-        return { 
-          icon: <Loader2 className="h-4 w-4 animate-spin text-indigo-500" />, 
-          text: "Analyzing files...",
-          color: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300"
-        };
-      case 'loading':
-        return { 
-          icon: <Loader2 className="h-4 w-4 animate-spin text-indigo-500" />, 
-          text: "Loading data...",
-          color: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300"
         };
       case 'assessing':
         return { 
@@ -1367,13 +1379,13 @@ export default function DatasetsPage() {
       case 'relevant':
         return { 
           icon: <CheckCircle2 className="h-4 w-4 text-green-500" />, 
-          text: `Relevant (${dataset.relevance?.relevance_score.toFixed(2)})`,
+          text: `Relevant`,
           color: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300"
         };
       case 'not_relevant':
         return { 
           icon: <AlertCircle className="h-4 w-4 text-orange-500" />, 
-          text: `Not relevant (${dataset.relevance?.relevance_score.toFixed(2)})`,
+          text: `Not relevant`,
           color: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300"
         };
       case 'skipped':
@@ -1713,6 +1725,9 @@ export default function DatasetsPage() {
     }
   };
 
+  // Add this state variable with your other state declarations
+  const [showAllStatusHistory, setShowAllStatusHistory] = useState(false);
+
   return (
     <>
       {/* Initial hero state - when no search has been performed */}
@@ -1907,83 +1922,36 @@ export default function DatasetsPage() {
           {loading && (
             <div className="space-y-4">
               {/* Status messages */}
-              <div className="p-3 bg-neutral-50 dark:bg-neutral-900 rounded-md border border-neutral-200 dark:border-neutral-800">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center">
-                    <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse mr-2"></div>
-                    <h3 className="font-medium">Search Progress</h3>
-                  </div>
-                  {shouldShowAllButton(statusMessages) && (
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      className="h-6 text-xs"
-                      onClick={() => setShowAllMessages(prev => !prev)}
-                    >
-                      {showAllMessages ? "Show Less" : "Show All"}
-                    </Button>
+              
+              
+              {/* Replace the simple pulsing status message with a clickable, expandable one */}
+              <div className="relative">
+                <div 
+                  onClick={() => setShowAllStatusHistory(prev => !prev)} 
+                  className="text-sm text-neutral-600 dark:text-neutral-400 animate-pulse cursor-pointer flex items-center"
+                >
+                  {statusMessages.length > 0 
+                    ? statusMessages[statusMessages.length - 1].message
+                    : "Finding relevant datasets..."}
+                  {statusMessages.length > 1 && (
+                    <ChevronDown className={`h-4 w-4 ml-1 transition-transform ${showAllStatusHistory ? 'rotate-180' : ''}`} />
                   )}
                 </div>
                 
-                <div className="space-y-1 max-h-[200px] overflow-y-auto pr-1 status-message-container">
-                  {(showAllMessages ? statusMessages : statusMessages.slice(-3)).map((msg) => (
-                    <div 
-                      key={msg.id}
-                      className={`text-sm ${msg.type === 'error' ? 'text-red-500' : 'text-neutral-600 dark:text-neutral-400'} mb-2`}
-                    >
-                      {msg.message && typeof msg.message === 'string' && msg.message.includes("Assessing dataset") ? (
-                        // Format assessment messages in a more conversational style
-                        <div dangerouslySetInnerHTML={{ 
-                          __html: msg.message.replace(/Assessing dataset \d+\/\d+: (.+)/, (match, datasetName) => {
-                            // Extract organization name from the message if available
-                            const orgMatch = msg.message.match(/organization_name":\s*"([^"]+)"/);
-                            const orgName = orgMatch ? orgMatch[1] : "";
-                            
-                            if (orgName) {
-                              return `I'm assessing the dataset <strong>${datasetName}</strong> from <strong>${orgName}</strong>`;
-                            } else {
-                              return `I'm assessing the dataset <strong>${datasetName}</strong>`;
-                            }
-                          })
-                        }} />
-                      ) : msg.message && typeof msg.message === 'string' && msg.message.includes("Pre-assessment:") ? (
-                        // Format pre-assessment messages
-                        <div dangerouslySetInnerHTML={{ 
-                          __html: msg.message.replace(
-                            /Pre-assessment: Dataset is (relevant|not relevant) \(Score: (.+)\)(\s*)Reasoning: (.+)/,
-                            function(match, relevance, score, space, reasoning) {
-                              // Convert first letter of reasoning to lowercase
-                              const lowerCaseReasoning = reasoning.charAt(0).toLowerCase() + reasoning.slice(1);
-                              return `It appears to be <strong>${relevance}</strong> because ${lowerCaseReasoning} I'll download the files for additional insight.`;
-                            }
-                          )
-                        }} />
-                      ) : msg.message && typeof msg.message === 'string' && msg.message.includes("Final assessment:") ? (
-                        // Format final assessment messages
-                        <div dangerouslySetInnerHTML={{ 
-                          __html: msg.message.replace(
-                            /Final assessment: Dataset is (relevant|not relevant) \(Score: (.+)\)(\s*)Reasoning: (.+)/,
-                            function(match, relevance, score, space, reasoning) {
-                              // Convert first letter of reasoning to lowercase
-                              const lowerCaseReasoning = reasoning.charAt(0).toLowerCase() + reasoning.slice(1);
-                              return `Based on the actual files, this dataset is <strong>${relevance}</strong> because ${lowerCaseReasoning}`;
-                            }
-                          )
-                        }} />
-                      ) : (
-                        // Keep other messages as is or handle undefined
-                        msg.message || ""
-                      )}
-                    </div>
-                  ))}
-                </div>
+                {/* Expanded history view */}
+                {showAllStatusHistory && statusMessages.length > 1 && (
+                  <div className="mt-2 pl-4 border-l-2 border-gray-300 dark:border-gray-700 space-y-2 max-h-60 overflow-y-auto">
+                    {statusMessages.slice(0, -1).map((msg, index) => (
+                      <div 
+                        key={msg.id}
+                        className={`text-sm ${msg.type === 'error' ? 'text-red-500' : 'text-neutral-500 dark:text-neutral-400'}`}
+                      >
+                        {msg.message}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-              
-              <p className="text-sm text-neutral-600 dark:text-neutral-400 animate-pulse">
-                {datasets.length > 0 
-                  ? `Found ${datasets.length} datasets so far...`
-                  : "Finding relevant datasets..."}
-              </p>
               
               {/* Show found datasets while still loading */}
               {datasets.length > 0 && (
@@ -1996,14 +1964,16 @@ export default function DatasetsPage() {
                       <Card 
                         key={dataset.id}
                         className={`overflow-hidden hover:shadow-md transition-shadow cursor-pointer 
-                                   hover:border-green-200 flex flex-col border-neutral-200 
+                                   hover:border-green-200 flex flex-col border-neutral-200 relative
                                    ${dataset.isRemoving ? 'removing' : 'animate-fadeIn'}`}
                         onClick={() => handleDatasetSelect(dataset)}
                         style={style}
                       >
                         {/* Status indicator - if processing */}
                         {statusInfo && (
-                          <div className={`absolute top-2 right-2 z-10 rounded-full px-2 py-0.5 flex items-center text-xs ${statusInfo.color}`}>
+                          <div className={`absolute top-2 right-2 z-10 rounded-full px-2 py-0.5 flex items-center text-xs 
+                                           ${statusInfo.color} transition-opacity duration-500
+                                           ${dataset.isRemoving ? 'opacity-0' : 'opacity-100'}`}>
                             {statusInfo.icon}
                             <span className="ml-1">{statusInfo.text}</span>
                           </div>
@@ -2175,129 +2145,7 @@ export default function DatasetsPage() {
                         Found {datasets.length} relevant datasets for your query
                         {executionTime !== null && ` in ${executionTime.toFixed(2)} seconds`}.
                       </p>
-                      <Button 
-                        variant="ghost" 
-                        size="sm" 
-                        className="flex items-center gap-1 text-xs text-neutral-500 hover:text-green-700"
-                        onClick={toggleProcessDetails}
-                      >
-                        {showProcessDetails ? (
-                          <>
-                            <span>Hide Search Process</span>
-                            <ChevronUp className="h-4 w-4" />
-                          </>
-                        ) : (
-                          <>
-                            <span>View Search Process</span>
-                            <ChevronDown className="h-4 w-4" />
-                          </>
-                        )}
-                      </Button>
                     </div>
-                    
-                    {/* Collapsible process details */}
-                    {showProcessDetails && (
-                      <div className="mt-2 border rounded-md overflow-hidden border-green-100 dark:border-green-900">
-                        {/* AI thinking process */}
-                        <div className="border-b p-3 bg-green-50 dark:bg-green-900/30">
-                          <h3 className="font-medium text-sm mb-2 text-green-900 dark:text-green-400">Search Strategy</h3>
-                          
-                          {/* Search stages with timing */}
-                          <div className="space-y-2 mb-3">
-                            {searchStages.map((stage, index) => (
-                              <div key={index} className="flex items-center justify-between text-sm">
-                                <div className="flex items-center gap-2">
-                                  {stage.complete ? (
-                                    <svg className="h-4 w-4 text-green-600" viewBox="0 0 20 20" fill="currentColor">
-                                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                                    </svg>
-                                  ) : (
-                                    <div className="h-4 w-4 rounded-full border-2 border-green-300 animate-pulse"></div>
-                                  )}
-                                  <span className={stage.complete ? "text-green-900 dark:text-green-300" : "text-neutral-500 dark:text-neutral-400"}>
-                                    {stage.stage}
-                                  </span>
-                                </div>
-                                <span className="text-xs text-green-700 dark:text-green-400">
-                                  {formatDuration(stage.startTime, stage.endTime)}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                          
-                
-                        </div>
-                        
-                        {/* Status messages */}
-                        <div className="p-3 bg-white dark:bg-neutral-800">
-                          <div className="flex items-center justify-between mb-2">
-                            <h3 className="font-medium text-sm">Search Progress</h3>
-                            {shouldShowAllButton(statusMessages) && (
-                              <Button 
-                                variant="ghost" 
-                                size="sm" 
-                                className="h-6 text-xs"
-                                onClick={() => setShowAllMessages(prev => !prev)}
-                              >
-                                {showAllMessages ? "Show Less" : "Show All"}
-                              </Button>
-                            )}
-                          </div>
-                          <div className="space-y-1 max-h-[300px] overflow-y-auto pr-1 status-message-container">
-                            {(showAllMessages ? statusMessages : statusMessages.slice(-3)).map((msg) => (
-                              <div 
-                                key={msg.id}
-                                className={`text-sm ${msg.type === 'error' ? 'text-red-500' : 'text-neutral-600 dark:text-neutral-400'} mb-2`}
-                              >
-                                {msg.message && typeof msg.message === 'string' && msg.message.includes("Assessing dataset") ? (
-                                  // Format assessment messages in a more conversational style
-                                  <div dangerouslySetInnerHTML={{ 
-                                    __html: msg.message.replace(/Assessing dataset \d+\/\d+: (.+)/, (match, datasetName) => {
-                                      // Extract organization name from the message if available
-                                      const orgMatch = msg.message.match(/organization_name":\s*"([^"]+)"/);
-                                      const orgName = orgMatch ? orgMatch[1] : "";
-                                      
-                                      if (orgName) {
-                                        return `I'm assessing the dataset <strong>${datasetName}</strong> from <strong>${orgName}</strong>`;
-                                      } else {
-                                        return `I'm assessing the dataset <strong>${datasetName}</strong>`;
-                                      }
-                                    })
-                                  }} />
-                                ) : msg.message && typeof msg.message === 'string' && msg.message.includes("Pre-assessment:") ? (
-                                  // Format pre-assessment messages
-                                  <div dangerouslySetInnerHTML={{ 
-                                    __html: msg.message.replace(
-                                      /Pre-assessment: Dataset is (relevant|not relevant) \(Score: (.+)\)(\s*)Reasoning: (.+)/,
-                                      function(match, relevance, score, space, reasoning) {
-                                        // Convert first letter of reasoning to lowercase
-                                        const lowerCaseReasoning = reasoning.charAt(0).toLowerCase() + reasoning.slice(1);
-                                        return `It appears to be <strong>${relevance}</strong> because ${lowerCaseReasoning} I'll download the files for additional insight.`;
-                                      }
-                                    )
-                                  }} />
-                                ) : msg.message && typeof msg.message === 'string' && msg.message.includes("Final assessment:") ? (
-                                  // Format final assessment messages
-                                  <div dangerouslySetInnerHTML={{ 
-                                    __html: msg.message.replace(
-                                      /Final assessment: Dataset is (relevant|not relevant) \(Score: (.+)\)(\s*)Reasoning: (.+)/,
-                                      function(match, relevance, score, space, reasoning) {
-                                        // Convert first letter of reasoning to lowercase
-                                        const lowerCaseReasoning = reasoning.charAt(0).toLowerCase() + reasoning.slice(1);
-                                        return `Based on the actual files, this dataset is <strong>${relevance}</strong> because ${lowerCaseReasoning}`;
-                                      }
-                                    )
-                                  }} />
-                                ) : (
-                                  // Keep other messages as is or handle undefined
-                                  msg.message || ""
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    )}
                   </div>
                   
                   {/* New Table View for Datasets */}
@@ -2306,9 +2154,9 @@ export default function DatasetsPage() {
                       <TableHeader>
                         <TableRow>
                           <TableHead className="w-[40px]"></TableHead>
-                          <TableHead className="max-w-[250px] w-[250px]">Dataset</TableHead>
-                          <TableHead className="w-[80px] text-center">Files</TableHead>
-                          <TableHead className="w-[100px] text-center">Relevance</TableHead>
+                          {/* Increase the width of the Dataset column */}
+                          <TableHead className="max-w-[430px] w-[430px]">Dataset</TableHead>
+                          {/* Relevance column removed */}
                           <TableHead className="w-[120px] text-center">Status</TableHead>
                           <TableHead className="w-[100px] text-center">Include in Analysis</TableHead>
                         </TableRow>
@@ -2324,7 +2172,29 @@ export default function DatasetsPage() {
                           return (
                             <TableRow 
                               key={dataset.id}
-                              className="cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
+                              className={`
+                                ${isAnalyzing ? 'opacity-70 pointer-events-none select-none' : 'cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800/50'}
+                              `}
+                              onClick={(e) => {
+                                // Only allow clicking if not analyzing
+                                if (isAnalyzing) return;
+                                
+                                // Prevent toggling if clicking on a button, checkbox, or interactive element
+                                if (e.target instanceof HTMLElement && 
+                                    (e.target.closest('button') || 
+                                     e.target.tagName === 'INPUT' ||
+                                     e.target.closest('input') ||
+                                     e.target.closest('label') ||
+                                     e.target.closest('.checkbox-container'))) {
+                                  return;
+                                }
+                                
+                                // Toggle the checkbox for this dataset
+                                setSelectedDatasets(prev => ({
+                                  ...prev,
+                                  [dataset.id]: !(prev[dataset.id] === true)
+                                }));
+                              }}
                             >
                               <TableCell className="p-2">
                                 <div className="h-8 w-8 rounded overflow-hidden bg-neutral-200 flex-shrink-0">
@@ -2339,38 +2209,31 @@ export default function DatasetsPage() {
                                   />
                                 </div>
                               </TableCell>
-                              <TableCell className="py-2 max-w-[250px] w-[250px]" onClick={() => handleDatasetSelect(dataset)}>
+                              
+                              <TableCell className="py-2 max-w-[430px] w-[430px]">
                                 <div className="overflow-hidden">
-                                  <div className="flex items-center">
+                                  <div className="flex items-center space-x-2">
                                     <p className="font-medium text-sm truncate" title={dataset.title}>{dataset.title}</p>
+                                    {/* Add relevance chip next to title */}
+                                    {relevanceScore > 0.7 ? (
+                                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300 whitespace-nowrap">
+                                        <CheckCircle2 className="h-3 w-3 mr-1" />
+                                        {Math.round(relevanceScore * 100)}%
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300 whitespace-nowrap">
+                                        {Math.round(relevanceScore * 100)}%
+                                      </span>
+                                    )}
                                   </div>
-                                  <p className="text-xs text-neutral-500 truncate" title={getOrganizationName(dataset)}>
-                                    {getOrganizationName(dataset)}
-                                  </p>
-                                  {/* Remove badge from here */}
+                                  <div className="flex justify-between items-center">
+                                    <p className="text-xs text-neutral-500 truncate" title={getOrganizationName(dataset)}>
+                                      {getOrganizationName(dataset)}
+                                    </p>
+                                  </div>
                                 </div>
                               </TableCell>
-                              <TableCell className="text-center">
-                                {dataset.file_count ? (
-                                  <span className="text-xs">{dataset.file_count}</span>
-                                ) : (
-                                  <span className="text-xs text-neutral-400">—</span>
-                                )}
-                              </TableCell>
-                              <TableCell className="text-center">
-                                <div className="flex items-center justify-center">
-                                  {relevanceScore > 0.7 ? (
-                                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300">
-                                      <CheckCircle2 className="h-3 w-3 mr-1" />
-                                      {Math.round(relevanceScore * 100)}%
-                                    </span>
-                                  ) : (
-                                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300">
-                                      {Math.round(relevanceScore * 100)}%
-                                    </span>
-                                  )}
-                                </div>
-                              </TableCell>
+                              
                               <TableCell className="text-center">
                                 {processingStatus ? (
                                   <div className="flex flex-col items-center justify-center">
@@ -2394,14 +2257,16 @@ export default function DatasetsPage() {
                                   </span>
                                 )}
                               </TableCell>
+                              
                               <TableCell className="text-center">
                                 <div className="flex items-center justify-center">
-                                  <div className="flex items-center gap-2">
+                                  <div className="relative flex items-center">
                                     <div className="w-4 h-4 flex items-center justify-center">
                                       <Checkbox
                                         checked={selectedDatasets[dataset.id] === true}
                                         disabled={isAnalyzing}
                                         onCheckedChange={(checked) => {
+                                          if (isAnalyzing) return; // Extra protection
                                           setSelectedDatasets(prev => ({
                                             ...prev,
                                             [dataset.id]: checked === true
@@ -2424,7 +2289,6 @@ export default function DatasetsPage() {
                   {/* Analysis Results Section */}
                   {(isAnalyzing || analysisComplete) && (
                     <div className="mt-6 space-y-4">
-                      <h2 className="text-xl font-semibold">Analysis Results</h2>
                       
                       <Tabs 
                         defaultValue="datasets" 

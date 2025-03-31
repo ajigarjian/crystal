@@ -120,7 +120,7 @@ def search_vector_datasets(query, similarity_threshold, max_results, start_time)
 
 def search_keyword_datasets(query, gov_api_key, keyword_threshold, start_time):
     """Search datasets using keyword search and yield results"""
-    yield create_status_message('I\'m checking additional data.gov datasets...', start_time)
+    yield create_status_message('I\'m checking additional sources...', start_time)
     
     try:
         # Get keyword search results
@@ -353,8 +353,10 @@ def stream_search_datasets_helper(query, similarity_threshold=0.3, search_method
                             # Get the query variations used and yield them as a status message
                             if isinstance(vector_results, list) and len(vector_results) > 0 and 'query_variation' in vector_results[0]:
                                 query_variations = list(set(result['query_variation'] for result in vector_results))
+                                # Add quotes around each query variation
+                                quoted_variations = [f'"{variation}"' for variation in query_variations]
                                 yield create_status_message(
-                                    f"Trying related search terms: {', '.join(query_variations)}",
+                                    f"Trying related search terms: {', '.join(quoted_variations)}",
                                     start_time
                                 )
                             
@@ -481,13 +483,13 @@ def stream_search_datasets_helper(query, similarity_threshold=0.3, search_method
                 'execution_time': search_execution_time,
                 'total_count': total_count
             },
-            'message': f'I\'ve completed my search! I found {total_count} datasets in {search_execution_time:.1f} seconds.',
+            'message': f'I\'ve found some potential datasets. I found {total_count} datasets that might be relevant.',
             'timestamp': search_execution_time
         }, cls=NumpyEncoder) + '\n'
         
         # Now begin pre-download assessment of the datasets
         yield create_status_message(
-            'I\'m now assessing the relevance of the discovered datasets...',
+            'I\'m removing irrelevant datasets...',
             start_time
         )
         
@@ -527,7 +529,7 @@ def stream_search_datasets_helper(query, similarity_threshold=0.3, search_method
                 'processed_count': len(all_datasets),
                 'relevant_count': len(relevant_datasets)
             },
-            'message': f'I\'ve completed my analysis! I assessed {len(all_datasets)} datasets in {final_execution_time:.1f} seconds.',
+            'message': f'I\'ve completed my search! I found {len(relevant_datasets)} datasets in {final_execution_time:.1f} seconds.',
             'timestamp': final_execution_time
         }, cls=NumpyEncoder) + '\n'
         
