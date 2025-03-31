@@ -672,6 +672,9 @@ export default function DatasetsPage() {
               setLoading(false);
               setExecutionTime(data.data.execution_time);
               
+              // UPDATE THE DATASET COUNT to match what the backend says is relevant
+              setDatasetCount(data.data.relevant_count);
+              
               // After the search is complete, sort datasets with preferred datasets first, then by relevance
               // This appears in the 'complete' case of processing streaming query results
               setDatasets(prev => {
@@ -899,24 +902,24 @@ export default function DatasetsPage() {
             
             case 'findings':
               // Store summary findings data
-              if (chunk.data) {
+              if (data.data) {
                 // Use the key_data_points array directly
                 setSummaryData({
-                  summary: chunk.data.summary || '',
-                  key_data_points: chunk.data.key_data_points || [],
-                  sources: chunk.data.sources || []
+                  summary: data.data.summary || '',
+                  key_data_points: data.data.key_data_points || [],
+                  sources: data.data.sources || []
                 });
                 
                 // Add a status message that summary is generated
                 const summaryMessage: StatusMessage = {
                   id: Math.random().toString(36).substring(2, 9),
-                  message: `Generated summary with ${chunk.data.sources?.length || 0} sources`,
-                  timestamp: chunk.timestamp || Date.now(),
+                  message: `Generated summary with ${data.data.sources?.length || 0} sources`,
+                  timestamp: data.timestamp || Date.now(),
                   type: 'status'
                 };
                 setStatusMessages(prev => [...prev, summaryMessage]);
                 
-                console.log("Received structured summary data:", chunk.data);
+                console.log("Received structured summary data:", data.data);
               }
               break;
             
@@ -960,6 +963,12 @@ export default function DatasetsPage() {
   // Handle form submission
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // If analysis is complete, go back to home page
+    if (analysisComplete) {
+      router.push('/');
+      return;
+    }
     
     // If search is already complete, start analysis instead of searching again
     if (searchComplete && datasets.length > 0) {
@@ -1436,14 +1445,23 @@ export default function DatasetsPage() {
     const params = new URLSearchParams(window.location.search);
     const initialQuery = params.get('query');
     
-    if (initialQuery) {
-      // Set the query in state
+    // Check if this is a refresh
+    const currentUrl = window.location.href;
+    const isRefresh = sessionStorage.getItem('lastUrl') === currentUrl;
+    
+    if (isRefresh && initialQuery) {
+      // This is a refresh with a query parameter, so let's clean up the URL
+      const cleanUrl = window.location.pathname; // Just the path without query params
+      window.history.replaceState({}, document.title, cleanUrl);
+    } else if (initialQuery && !isRefresh) {
+      // Normal behavior for first visit with query param
       setQuery(initialQuery);
-      // Start the search automatically
       processStreamingQuery(initialQuery);
-      // Mark search as performed
       setSearchPerformed(true);
     }
+    
+    // Save current URL to detect refreshes next time
+    sessionStorage.setItem('lastUrl', currentUrl);
   }, []);
 
   // Add state to track selected datasets
@@ -1728,6 +1746,30 @@ export default function DatasetsPage() {
   // Add this state variable with your other state declarations
   const [showAllStatusHistory, setShowAllStatusHistory] = useState(false);
 
+  // Add this before rendering status messages to check for duplicates
+  useEffect(() => {
+    const messageIds = statusMessages.map(m => m.id);
+    const uniqueIds = new Set(messageIds);
+    if (messageIds.length !== uniqueIds.size) {
+      console.error("Duplicate status messages detected:", 
+        messageIds.length - uniqueIds.size, 
+        "duplicates");
+      
+      // Find which messages are duplicated
+      const counts = {};
+      messageIds.forEach(id => {
+        counts[id] = (counts[id] || 0) + 1;
+      });
+      
+      Object.entries(counts)
+        .filter(([id, count]) => count > 1)
+        .forEach(([id, count]) => {
+          const duplicates = statusMessages.filter(m => m.id === id);
+          console.error(`Message duplicated ${count} times:`, duplicates);
+        });
+    }
+  }, [statusMessages]);
+
   return (
     <>
       {/* Initial hero state - when no search has been performed */}
@@ -1892,20 +1934,24 @@ export default function DatasetsPage() {
                 type="submit" 
                 disabled={loading || isAnalyzing} 
                 className={`${
-                  !loading && searchComplete && datasets.length > 0
-                    ? isAnalyzing
-                      ? "bg-black/80 text-white" 
-                      : "bg-black hover:bg-black/90 text-white animate-pulse"
-                    : "bg-green-600 hover:bg-green-700 text-white"
+                  analysisComplete
+                    ? "bg-green-600 hover:bg-green-700 text-white"
+                    : !loading && searchComplete && datasets.length > 0
+                      ? isAnalyzing
+                        ? "bg-black/80 text-white" 
+                        : "bg-black hover:bg-black/90 text-white animate-pulse"
+                      : "bg-green-600 hover:bg-green-700 text-white"
                 }`}
               >
                 {loading 
                   ? "Searching..." 
                   : isAnalyzing
                     ? "Analyzing..."
-                    : (searchComplete && datasets.length > 0) 
-                      ? "Analyze" 
-                      : "Search"
+                    : analysisComplete
+                      ? "New Query" 
+                      : (searchComplete && datasets.length > 0) 
+                        ? "Analyze" 
+                        : "Search"
                 }
               </Button>
             </div>
@@ -1918,40 +1964,39 @@ export default function DatasetsPage() {
             </Alert>
           )}
 
+          {/* Status message history - moved outside of loading condition to be visible at all times */}
+          {statusMessages.length > 0 && (
+            <div className="relative mb-4">
+              <div 
+                onClick={() => setShowAllStatusHistory(prev => !prev)} 
+                className={`text-sm text-neutral-600 dark:text-neutral-400 ${loading ? 'animate-pulse' : ''} cursor-pointer flex items-center`}
+              >
+                {statusMessages[statusMessages.length - 1].message}
+                {statusMessages.length > 1 && (
+                  <ChevronDown className={`h-4 w-4 ml-1 transition-transform ${showAllStatusHistory ? 'rotate-180' : ''}`} />
+                )}
+              </div>
+              
+              {/* Expanded history view */}
+              {showAllStatusHistory && statusMessages.length > 1 && (
+                <div className="mt-2 pl-4 border-l-2 border-gray-300 dark:border-gray-700 space-y-2 max-h-60 overflow-y-auto status-message-container">
+                  {statusMessages.slice(0, -1).map((msg, index) => (
+                    <div 
+                      key={msg.id}
+                      className={`text-sm ${msg.type === 'error' ? 'text-red-500' : 'text-neutral-500 dark:text-neutral-400'}`}
+                    >
+                      {msg.message}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Loading state with live discovery feed */}
           {loading && (
             <div className="space-y-4">
-              {/* Status messages */}
-              
-              
-              {/* Replace the simple pulsing status message with a clickable, expandable one */}
-              <div className="relative">
-                <div 
-                  onClick={() => setShowAllStatusHistory(prev => !prev)} 
-                  className="text-sm text-neutral-600 dark:text-neutral-400 animate-pulse cursor-pointer flex items-center"
-                >
-                  {statusMessages.length > 0 
-                    ? statusMessages[statusMessages.length - 1].message
-                    : "Finding relevant datasets..."}
-                  {statusMessages.length > 1 && (
-                    <ChevronDown className={`h-4 w-4 ml-1 transition-transform ${showAllStatusHistory ? 'rotate-180' : ''}`} />
-                  )}
-                </div>
-                
-                {/* Expanded history view */}
-                {showAllStatusHistory && statusMessages.length > 1 && (
-                  <div className="mt-2 pl-4 border-l-2 border-gray-300 dark:border-gray-700 space-y-2 max-h-60 overflow-y-auto">
-                    {statusMessages.slice(0, -1).map((msg, index) => (
-                      <div 
-                        key={msg.id}
-                        className={`text-sm ${msg.type === 'error' ? 'text-red-500' : 'text-neutral-500 dark:text-neutral-400'}`}
-                      >
-                        {msg.message}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+              {/* Status messages section completely removed from here - do not render anything related to status messages in this block */}
               
               {/* Show found datasets while still loading */}
               {datasets.length > 0 && (
@@ -2139,14 +2184,6 @@ export default function DatasetsPage() {
             <div className="space-y-4">
               {datasets.length > 0 ? (
                 <>
-                  <div className="flex flex-col">
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm text-neutral-600 dark:text-neutral-400">
-                        Found {datasets.length} relevant datasets for your query
-                        {executionTime !== null && ` in ${executionTime.toFixed(2)} seconds`}.
-                      </p>
-                    </div>
-                  </div>
                   
                   {/* New Table View for Datasets */}
                   <div className="rounded-md border shadow-sm overflow-hidden">
@@ -2215,7 +2252,7 @@ export default function DatasetsPage() {
                                   <div className="flex items-center space-x-2">
                                     <p className="font-medium text-sm truncate" title={dataset.title}>{dataset.title}</p>
                                     {/* Add relevance chip next to title */}
-                                    {relevanceScore > 0.7 ? (
+                                    {relevanceScore > 0.65 ? (
                                       <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300 whitespace-nowrap">
                                         <CheckCircle2 className="h-3 w-3 mr-1" />
                                         {Math.round(relevanceScore * 100)}%
