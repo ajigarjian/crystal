@@ -39,14 +39,20 @@ export function WebSearchSummary({ data }: WebSearchSummaryProps) {
     // Replace both actual newlines and escaped newlines with HTML line breaks
     formattedSummary = formattedSummary.replace(/(\\n|\n)/g, '<br />');
     
-    // Replace [1], [2], etc. with actual source titles
+    // Replace [1], [2], etc. with numbered badges
     Object.keys(data.sources || {}).forEach((key) => {
       const source = data.sources[key];
-      const title = source?.title || "Source";
       
-      // Use regex to replace [key] with source title
+      // Use regex to replace [key] with numbered badge
       const regex = new RegExp(`\\[${key}\\]`, 'g');
-      formattedSummary = formattedSummary.replace(regex, `<a href="${source?.url || '#'}" target="_blank" rel="noopener noreferrer" class="font-medium text-blue-600 hover:underline inline-flex items-center">${title} <span class="inline-block ml-0.5"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-external-link"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></span></a>`);
+      formattedSummary = formattedSummary.replace(
+        regex, 
+        `<a href="${source?.url || '#'}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center">
+          <span class="inline-flex items-center justify-center px-2 py-0.5 text-xs font-medium rounded-full bg-blue-100 text-blue-800 hover:bg-blue-200 transition-colors">
+            ${key}
+          </span>
+        </a>`
+      );
     });
     
     // Format the KEY POINTS section with proper styling
@@ -59,13 +65,13 @@ export function WebSearchSummary({ data }: WebSearchSummaryProps) {
       
       // Convert plain text bullet points to proper HTML list
       formattedSummary = formattedSummary.replace(
-        /- (.*?)(?=\n- |\n\n|$)/gs, 
+        /- (.*?)(?=\n- |\n\n|$)/g, 
         '<li>$1</li>'
       );
       
       // Wrap list items in a ul tag with proper styling
       formattedSummary = formattedSummary.replace(
-        /<li>.*?<\/li>/gs,
+        /<li>.*?<\/li>/g,
         match => `<ul class="list-disc pl-5 space-y-1">${match}</ul>`
       );
     }
