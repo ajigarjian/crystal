@@ -2328,8 +2328,9 @@ export default function DatasetsPage() {
                       <TableHeader>
                         <TableRow>
                           <TableHead className="w-[40px]"></TableHead>
-                          <TableHead className="max-w-[250px] w-[250px]">Dataset</TableHead>
-                          <TableHead className="w-[80px] text-center">Files</TableHead>
+                          {/* Increase the width of the Dataset column */}
+                          <TableHead className="max-w-[330px] w-[330px]">Dataset</TableHead>
+                          {/* Files column removed */}
                           <TableHead className="w-[100px] text-center">Relevance</TableHead>
                           <TableHead className="w-[120px] text-center">Status</TableHead>
                           <TableHead className="w-[100px] text-center">Include in Analysis</TableHead>
@@ -2378,7 +2379,8 @@ export default function DatasetsPage() {
                                   />
                                 </div>
                               </TableCell>
-                              <TableCell className="py-2 max-w-[250px] w-[250px]">
+                              
+                              <TableCell className="py-2 max-w-[330px] w-[330px]">
                                 <div className="overflow-hidden">
                                   <div className="flex items-center">
                                     <p className="font-medium text-sm truncate" title={dataset.title}>{dataset.title}</p>
@@ -2386,29 +2388,26 @@ export default function DatasetsPage() {
                                   <p className="text-xs text-neutral-500 truncate" title={getOrganizationName(dataset)}>
                                     {getOrganizationName(dataset)}
                                   </p>
+                                  {/* Optionally: We can add file count as a small badge here if still needed */}
                                 </div>
                               </TableCell>
+                              
+                              {/* Files column removed */}
+                              
+                              {/* Keep the remaining columns */}
                               <TableCell className="text-center">
-                                {dataset.file_count ? (
-                                  <span className="text-xs">{dataset.file_count}</span>
+                                {relevanceScore > 0.7 ? (
+                                  <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300">
+                                    <CheckCircle2 className="h-3 w-3 mr-1" />
+                                    {Math.round(relevanceScore * 100)}%
+                                  </span>
                                 ) : (
-                                  <span className="text-xs text-neutral-400">—</span>
+                                  <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300">
+                                    {Math.round(relevanceScore * 100)}%
+                                  </span>
                                 )}
                               </TableCell>
-                              <TableCell className="text-center">
-                                <div className="flex items-center justify-center">
-                                  {relevanceScore > 0.7 ? (
-                                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300">
-                                      <CheckCircle2 className="h-3 w-3 mr-1" />
-                                      {Math.round(relevanceScore * 100)}%
-                                    </span>
-                                  ) : (
-                                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300">
-                                      {Math.round(relevanceScore * 100)}%
-                                    </span>
-                                  )}
-                                </div>
-                              </TableCell>
+                              
                               <TableCell className="text-center">
                                 {processingStatus ? (
                                   <div className="flex flex-col items-center justify-center">
@@ -2432,6 +2431,7 @@ export default function DatasetsPage() {
                                   </span>
                                 )}
                               </TableCell>
+                              
                               <TableCell className="text-center">
                                 <div className="flex items-center justify-center">
                                   <div className="flex items-center gap-2">
