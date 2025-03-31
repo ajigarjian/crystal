@@ -964,6 +964,12 @@ export default function DatasetsPage() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
+    // If analysis is complete, go back to home page
+    if (analysisComplete) {
+      router.push('/');
+      return;
+    }
+    
     // If search is already complete, start analysis instead of searching again
     if (searchComplete && datasets.length > 0) {
       startAnalysis();
@@ -1919,20 +1925,24 @@ export default function DatasetsPage() {
                 type="submit" 
                 disabled={loading || isAnalyzing} 
                 className={`${
-                  !loading && searchComplete && datasets.length > 0
-                    ? isAnalyzing
-                      ? "bg-black/80 text-white" 
-                      : "bg-black hover:bg-black/90 text-white animate-pulse"
-                    : "bg-green-600 hover:bg-green-700 text-white"
+                  analysisComplete
+                    ? "bg-green-600 hover:bg-green-700 text-white"
+                    : !loading && searchComplete && datasets.length > 0
+                      ? isAnalyzing
+                        ? "bg-black/80 text-white" 
+                        : "bg-black hover:bg-black/90 text-white animate-pulse"
+                      : "bg-green-600 hover:bg-green-700 text-white"
                 }`}
               >
                 {loading 
                   ? "Searching..." 
                   : isAnalyzing
                     ? "Analyzing..."
-                    : (searchComplete && datasets.length > 0) 
-                      ? "Analyze" 
-                      : "Search"
+                    : analysisComplete
+                      ? "New Query" 
+                      : (searchComplete && datasets.length > 0) 
+                        ? "Analyze" 
+                        : "Search"
                 }
               </Button>
             </div>
