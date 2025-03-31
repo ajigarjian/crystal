@@ -648,16 +648,31 @@ export default function DatasetsPage() {
               setLoading(false);
               setExecutionTime(data.data.execution_time);
               
-              // Sort datasets by relevance score when search is complete
-              // AND filter out any datasets that were marked as not relevant
+              // After the search is complete, sort datasets with preferred datasets first, then by relevance
+              // This appears in the 'complete' case of processing streaming query results
               setDatasets(prev => {
-                return [...prev]
-                  .filter(dataset => !dataset.relevance || dataset.relevance.is_relevant !== false)
-                  .sort((a, b) => {
-                    const scoreA = a.relevance?.relevance_score || a.similarity || 0;
-                    const scoreB = b.relevance?.relevance_score || b.similarity || 0;
-                    return scoreB - scoreA; // Sort in descending order
-                  });
+                // Filter out any datasets that were marked as not relevant
+                const filteredDatasets = [...prev]
+                  .filter(dataset => !dataset.relevance || dataset.relevance.is_relevant !== false);
+                
+                // Sort with a compound sorting rule:
+                // 1. Preferred datasets first (using PREFERRED_DATASET_ID_SET)
+                // 2. Then by relevance score (descending)
+                return filteredDatasets.sort((a, b) => {
+                  // First check if either dataset is preferred
+                  const aIsPreferred = PREFERRED_DATASET_ID_SET.has(a.id);
+                  const bIsPreferred = PREFERRED_DATASET_ID_SET.has(b.id);
+                  
+                  // If their preferred status differs, preferred ones come first
+                  if (aIsPreferred !== bIsPreferred) {
+                    return aIsPreferred ? -1 : 1;
+                  }
+                  
+                  // If both have same preferred status, sort by relevance score
+                  const scoreA = a.relevance?.relevance_score || a.similarity || 0;
+                  const scoreB = b.relevance?.relevance_score || b.similarity || 0;
+                  return scoreB - scoreA; // Sort in descending order
+                });
               });
               
               // Add the completion message to status messages
