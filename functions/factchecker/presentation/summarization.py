@@ -25,15 +25,17 @@ def summarize_findings(
     Returns:
         Dictionary containing:
         {
-            'key_findings': List of key data points with sources,
-            'summary': Comprehensive summary of findings
+            'key_data_points': List of key data points with sources,
+            'summary': Comprehensive summary of findings,
+            'sources': List of source information
         }
     """
     # Debug print 
     if not formatted_data_list:
         return {
-            'key_findings': [],
-            'summary': "No relevant data was found to answer your query."
+            'key_data_points': [],
+            'summary': "No relevant data was found to answer your query.",
+            'sources': []
         }
     
     logger.info(f"Generating summary of findings from {len(formatted_data_list)} datasets")
@@ -41,11 +43,42 @@ def summarize_findings(
     # Prepare information about each dataset and its extracted data
     dataset_summaries = []
     dataset_ids = []  # Track dataset IDs for the summary
+    sources = []  # Create sources list for the frontend
     
-    for data in formatted_data_list:
+    for i, data in enumerate(formatted_data_list):
+        # Detailed logging of what's available in each data item
+        logger.info(f"Data item #{i+1} keys: {list(data.keys() if isinstance(data, dict) else [])}")
+        
         dataset_title = data.get("dataset_title", "Unnamed Dataset")
         dataset_id = data.get("dataset_id", "Unknown ID")
         dataset_ids.append(dataset_id)
+        
+        # Extract organization info, checking multiple possible locations
+        organization = (
+            data.get("organization_title") or
+            data.get("organization") or
+            data.get("dataset_source") or
+            data.get("organization_name") or
+            "Unknown Source"
+        )
+        
+        # Log organization field values for debugging
+        if isinstance(data, dict):
+            logger.info(f"Organization fields in data item #{i+1}:")
+            logger.info(f"  - organization_title: {data.get('organization_title')}")
+            logger.info(f"  - organization: {data.get('organization')}")
+            logger.info(f"  - dataset_source: {data.get('dataset_source')}")
+            logger.info(f"  - organization_name: {data.get('organization_name')}")
+        
+        # Log what we found for debugging
+        logger.info(f"Source #{i+1}: {dataset_title} (ID: {dataset_id}) - Organization: {organization}")
+        
+        # Add to sources list for frontend with proper fallbacks
+        sources.append({
+            "citation_id": dataset_id[:8] if dataset_id and dataset_id != "Unknown ID" else f"DS-{i+1}",
+            "title": dataset_title if dataset_title != "Unnamed Dataset" else f"Dataset {i+1}",
+            "organization": organization
+        })
         
         # Get the summary and aggregations
         summary = data.get("summary", "")
@@ -166,20 +199,40 @@ Paragraph directly answering the user's question based on the data analysis...
         key_findings_match = re.search(r'### Key Data Points(.*?)---', response, re.DOTALL)
         summary_match = re.search(r'### Search Summary(.*)', response, re.DOTALL)
         
-        key_findings = key_findings_match.group(1).strip() if key_findings_match else "No key findings identified."
+        key_findings_text = key_findings_match.group(1).strip() if key_findings_match else "No key findings identified."
         summary = summary_match.group(1).strip() if summary_match else "No findings summary available."
         
-        # Return the structured summary
+        # Extract individual bullet points for the key_data_points array
+        key_data_points = []
+        
+        # Look for bullet points at both levels (main points and sub-points)
+        bullet_pattern = r'- \*\*.*?\*\*:(?:\n  - .*?(?:\n|$))+'
+        main_points = re.findall(bullet_pattern, key_findings_text, re.DOTALL)
+        
+        for point in main_points:
+            # Add the main category point
+            key_data_points.append(point.strip())
+        
+        # If no structured bullet points were found, use the raw text
+        if not key_data_points:
+            # Fall back to splitting by newlines for any bullet points
+            simple_bullets = [line.strip() for line in key_findings_text.split('\n') 
+                             if line.strip().startswith('-')]
+            key_data_points = simple_bullets if simple_bullets else [key_findings_text]
+        
+        # Return the structured summary with sources
         return {
-            'key_findings': key_findings,
-            'summary': summary
+            'key_data_points': key_data_points,
+            'summary': summary,
+            'sources': sources
         }
         
     except Exception as e:
         logger.error(f"Error generating findings summary: {str(e)}")
         return {
-            'key_findings': "Error generating key findings.",
-            'summary': f"Error generating findings summary: {str(e)}"
+            'key_data_points': ["Error generating key findings."],
+            'summary': f"Error generating findings summary: {str(e)}",
+            'sources': sources
         }
 
 def format_findings_for_display(findings: Dict[str, Any]) -> str:
@@ -199,7 +252,17 @@ def format_findings_for_display(findings: Dict[str, Any]) -> str:
     
     # Add key findings
     output.append("### Key Data Points")
-    output.append(findings.get('key_findings', "No key findings identified."))
+    
+    # If key_data_points exists (new format), use it
+    if 'key_data_points' in findings and findings['key_data_points']:
+        for point in findings['key_data_points']:
+            output.append(point)
+    # Otherwise fall back to key_findings (old format)
+    elif 'key_findings' in findings:
+        output.append(findings['key_findings'])
+    else:
+        output.append("No key findings identified.")
+    
     output.append("\n---\n")
     
     # Add summary

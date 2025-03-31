@@ -464,8 +464,8 @@ def stream_analyze_helper(dataset_ids, query, file_path=None):
                 if hasattr(dataset_content, 'shape'):
                     dataset_info = {
                         "id": dataset_id,
-                        "title": os.path.basename(file_path),
-                        "description": "Dataset for analysis",
+                        "title": dataset.get('title', os.path.basename(file_path)),
+                        "description": dataset.get('description', "Dataset for analysis"),
                         "file_path": file_path,
                         "row_count": dataset_content.shape[0],
                         "column_count": dataset_content.shape[1],
@@ -556,20 +556,42 @@ def stream_analyze_helper(dataset_ids, query, file_path=None):
                     # Debug print extracted_data
                     print("extracted_data", extracted_data)
                     
-                    # Add dataset source information to the extracted data
-                    if extracted_data:
-                        extracted_data["dataset_title"] = dataset_info["title"]
-                        extracted_data["dataset_source"] = dataset_info.get("description", "Dataset")
-                        extracted_data["dataset_id"] = dataset_info["id"]
-                        extracted_data["file_path"] = dataset_info["file_path"]
-                        
-                        # Send extracted data as part of the stream
-                        yield json.dumps({
-                            'type': 'extracted_data',
-                            'data': extracted_data,
-                            'timestamp': time.time() - start_time
-                        }, cls=NumpyEncoder) + '\n'
-                        
+                    # Get dataset object with DB metadata
+                    dataset_obj = datasets.get(dataset_id, {})
+                    
+                    # Update extracted_data with the dataset info
+                    extracted_data["dataset_title"] = dataset_obj.get('title', os.path.basename(file_path))
+                    extracted_data["dataset_source"] = dataset_obj.get("organization", "Unknown Source")
+                    extracted_data["organization_title"] = dataset_obj.get("organization", "")
+                    extracted_data["organization_name"] = dataset_obj.get("organization_name", "")
+                    
+                    # Update extracted_data with dataset identity info before formatting
+                    extracted_data["dataset_id"] = dataset_id
+                    extracted_data["dataset_title"] = dataset.get('title', os.path.basename(file_path))
+                    extracted_data["organization"] = dataset.get('organization', "")
+                    extracted_data["organization_title"] = dataset.get('organization', "")
+                    extracted_data["organization_name"] = dataset.get('organization_name', "")
+                    
+                    # Now call format_extracted_data with the updated extracted_data
+                    formatted_data = format_extracted_data(
+                        extracted_data,
+                        analysis_result,
+                        query
+                    )
+                    
+                    # Log the organization info we're adding
+                    logger.info(f"Adding organization info to extracted data: " + 
+                               f"source={extracted_data['dataset_source']}, " +
+                               f"title={extracted_data.get('organization_title')}, " +
+                               f"name={extracted_data.get('organization_name')}")
+                    
+                    # Send extracted data as part of the stream
+                    yield json.dumps({
+                        'type': 'extracted_data',
+                        'data': extracted_data,
+                        'timestamp': time.time() - start_time
+                    }, cls=NumpyEncoder) + '\n'
+                    
                     # After successful extraction
                     yield create_status_message(
                         f'Successfully extracted relevant data',
@@ -638,9 +660,30 @@ def stream_analyze_helper(dataset_ids, query, file_path=None):
                         query
                     )
                     
-                    # Add to the list of formatted data
+                    # Log what we're getting back
+                    logger.info(f"Formatted data organization info: " + 
+                               f"source={formatted_data.get('formatted_data', {}).get('dataset_source')}")
+                    
+                    # Add to the list of formatted data with dataset identity preserved
                     if isinstance(formatted_data, dict) and 'formatted_data' in formatted_data:
-                        all_formatted_data.append(formatted_data['formatted_data'])
+                        # Create a copy of the formatted data with dataset identity fields
+                        formatted_entry = formatted_data['formatted_data'].copy() if isinstance(formatted_data['formatted_data'], dict) else {'data': formatted_data['formatted_data']}
+                        
+                        # Add dataset identity fields to the entry
+                        formatted_entry['dataset_id'] = dataset_id
+                        formatted_entry['dataset_title'] = dataset.get('title', os.path.basename(file_path))
+                        # Preserve organization information
+                        formatted_entry['organization'] = dataset.get('organization', '')
+                        formatted_entry['organization_title'] = dataset.get('organization', '')
+                        formatted_entry['organization_name'] = dataset.get('organization_name', '')
+                        
+                        # Log what we're adding to all_formatted_data
+                        logger.info(f"Adding formatted data with organization info: " + 
+                                  f"id={dataset_id}, " +
+                                  f"title={formatted_entry['dataset_title']}, " +
+                                  f"org={formatted_entry['organization']}")
+                        
+                        all_formatted_data.append(formatted_entry)
                     
                     # Send formatted data as part of the stream
                     yield json.dumps({
@@ -769,16 +812,6 @@ def stream_analyze_helper(dataset_ids, query, file_path=None):
                     'timestamp': time.time() - start_time
                 }, cls=NumpyEncoder) + '\n'
                 
-                # Format the findings for display
-                formatted_findings = format_findings_for_display(findings)
-                
-                # Send the formatted findings as part of the stream
-                yield json.dumps({
-                    'type': 'formatted_findings',
-                    'data': formatted_findings,
-                    'timestamp': time.time() - start_time
-                }, cls=NumpyEncoder) + '\n'
-                
             except Exception as e:
                 logger.error(f"Error generating findings summary: {str(e)}")
                 yield create_error_message(
@@ -837,12 +870,6 @@ def stream_analyze_helper(dataset_ids, query, file_path=None):
 def process_resource_metadata(resource_metadata):
     """
     Process resource metadata to organize resources by dataset ID.
-    
-    Args:
-        resource_metadata: Dictionary where keys are resource IDs and values are resource metadata
-        
-    Returns:
-        Dictionary where keys are dataset IDs and values are lists of resources
     """
     datasets = {}
     
@@ -854,13 +881,21 @@ def process_resource_metadata(resource_metadata):
             logger.warning(f"Resource {resource_id} has no dataset ID, skipping")
             continue
             
+        # Log the organization fields from the resource
+        logger.info(f"Resource {resource_id} organization data: " +
+                   f"organization_title={resource.get('dataset_organization_title')}, " +
+                   f"organization_name={resource.get('dataset_organization_name')}")
+            
         # Initialize the dataset entry if it doesn't exist
         if dataset_id not in datasets:
             datasets[dataset_id] = {
                 'dataset_id': dataset_id,
                 'title': resource.get('dataset_title', 'Unknown Dataset'),
                 'description': resource.get('dataset_notes', ''),
+                # Store all organization fields
                 'organization': resource.get('dataset_organization_title', ''),
+                'organization_name': resource.get('dataset_organization_name', ''),
+                'organization_description': resource.get('dataset_organization_description', ''),
                 'resources': []
             }
             

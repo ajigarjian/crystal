@@ -31,7 +31,7 @@ export function SummaryReport({
   return (
     <Card className="mt-4 w-full bg-card">
       <CardHeader className="pb-3">
-        <CardTitle className="text-xl font-semibold capitalize">{query}</CardTitle>
+        <CardTitle className="text-xl font-semibold capitalize">"{query}"</CardTitle>
       </CardHeader>
       <CardContent className="space-y-6">
         <div>

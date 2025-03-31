@@ -262,7 +262,7 @@ def register_waitlist(request):
                         headers={"Content-Type": "application/json"}
                     )
                 
-                unique_id = int(time.time() * 1000) + random.randint(1, 1000)
+                unique_id = int(time.time()) + random.randint(1, 1000)
                 cursor.execute(
                     """
                     INSERT INTO factchecker_waitlistentry (id, email, first_name, created_at) 
@@ -527,8 +527,8 @@ def submit_feedback(request):
         
         try:
             with conn.cursor() as cursor:
-                # Create a unique ID
-                unique_id = int(time.time() * 1000) + random.randint(1, 1000)
+                # Modified unique ID generation to stay within PostgreSQL integer range
+                unique_id = int(time.time()) + random.randint(1, 1000)
                 logger.info(f"Generated unique ID: {unique_id}")
                 
                 # Convert metadata to JSON string

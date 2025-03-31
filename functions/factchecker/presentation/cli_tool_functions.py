@@ -50,15 +50,36 @@ def summarize_findings(
     """
     # Debug print 
     if not extracted_data_list:
-        return "No relevant data was found to answer your query."
+        return {
+            "summary": "No relevant data was found to answer your query.",
+            "key_data_points": [],
+            "sources": []
+        }
     
     # Prepare information about each dataset and its extracted data
     dataset_summaries = []
     dataset_ids = []  # Track dataset IDs for the summary
+    sources = []  # Track sources for citation
     
     for data in extracted_data_list:
         dataset_title = data.get("dataset_title", "Unnamed Dataset")
         dataset_id = data.get("dataset_id", "Unknown ID")
+        
+        # Extract organization info, checking multiple possible locations
+        organization = (
+            data.get("organization_title") or
+            data.get("organization") or
+            data.get("dataset_source") or
+            data.get("organization_name") or
+            "Unknown Source"
+        )
+        
+        # Add to sources list with enhanced organization info
+        sources.append({
+            "citation_id": dataset_id[:8] if dataset_id and dataset_id != "Unknown ID" else f"DS-{i+1}",
+            "title": dataset_title if dataset_title != "Unnamed Dataset" else f"Dataset {i+1}",
+            "organization": organization
+        })
         
         # Get the extracted data - this is what's missing from the final output
         extracted = data.get("extracted_data")
@@ -111,7 +132,7 @@ def summarize_findings(
             if 'analysis' in analysis:
                 dataset_context += f"Analysis: {analysis['analysis']}\n\n"
 
-    # Create prompt for OpenAI
+    # Create prompt for OpenAI with instruction to return JSON
     prompt = f"""
 You are analyzing data to answer: "{query}"
 
@@ -121,26 +142,56 @@ DATA POINTS:
 {chr(10).join(dataset_summaries)}
 
 INSTRUCTIONS:
-1. Present the KEY DATA POINTS that directly answer the query - include SPECIFIC NUMBERS and VALUES
-2. Be concise but thorough - include all relevant data in your analysis
-3. Format as bullet points where appropriate
-4. Always cite the source dataset and calculation strategy in brackets [] for each data point
-5. If analyzing trends over time, be sure to include the full time range and specific values in your analysis
-6. Pay special attention to the most recent data points when analyzing trends
+1. Create a detailed analysis with the following structure:
+   - A "summary" section with 2-3 paragraphs that synthesizes findings and context
+   - A "key_data_points" section with 3-8 bullet points highlighting the most important specific findings
+   - Each bullet point should be prefixed with "- " and include specific numbers and values
+   - Each bullet point should cite its source using the dataset ID in square brackets [Source: Dataset ID]
 
-Finally, provide a "SEARCH SUMMARY" section with 2 paragraphs that:
-1. Summarizes the overall context of the datasets analyzed (their scope, limitations, quality)
-2. Synthesizes the findings in relation to the query [mentioning date context where applicable]
+2. Format your response as a clean JSON object with these exact keys:
+   - "summary": A string with the overall summary
+   - "key_data_points": An array of strings, each string being a complete bullet point
+   - Do not use JSON.stringify or add any markdown formatting outside of the content
+
+For example:
+{{
+  "summary": "This is the overall summary of findings...",
+  "key_data_points": [
+    "- First key finding with specifics [Source: Dataset XYZ]",
+    "- Second key finding with specifics [Source: Dataset ABC]"
+  ]
+}}
+
+Make sure your JSON is valid - use double quotes for keys and string values.
 """
     
+    # Call OpenAI with instruction to return JSON
     response = chat_completion(
         prompt,
-        system_message="You are a data analyst who provides thorough analysis of data, with special attention to recent data points.",
+        system_message="You are a data analyst who provides analysis in structured JSON format. Always return a valid JSON object without any surrounding text.",
         max_tokens=2048,
-        model_name="gpt-4o" # Let's use the good model for this
-        )
-    # Return the summary
-    return response
+        model_name="gpt-4o"
+    )
+    
+    # The response should now be a JSON string, so we need to parse it and return as dict
+    try:
+        # Parse the JSON response
+        result = json.loads(response)
+        
+        # Add the pre-built sources list
+        result["sources"] = sources
+        
+        return result
+    except json.JSONDecodeError:
+        # If parsing fails, return a simple structure with the raw response
+        logger.error(f"Failed to parse JSON response: {response[:100]}...")
+        return {
+            "summary": "There was an issue processing the analysis results.",
+            "key_data_points": [
+                "- The analysis could not be properly formatted. Please try again."
+            ],
+            "sources": sources
+        }
 
 def summarize_findings_alternate(
     query: str,

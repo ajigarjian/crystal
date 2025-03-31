@@ -18,6 +18,8 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import Link from "next/link";
 import { ChevronDown, ChevronUp, MessageSquareIcon, ThumbsUpIcon, BugIcon, LightbulbIcon, XIcon } from "lucide-react";
+import { SummaryReport } from '@/components/SummaryReport';
+import { SummaryReportSkeleton } from '@/components/SummaryReportSkeleton';
 import {
   Dialog,
   DialogContent,
@@ -817,6 +819,25 @@ export default function DatasetsPage() {
               setStatusMessages(prev => [...prev, assessmentMessage]);
               break;
             
+            case 'findings':
+              // Store summary findings data
+              if (chunk.data) {
+                // Use the key_data_points array directly
+                setSummaryData({
+                  summary: chunk.data.summary || '',
+                  key_data_points: chunk.data.key_data_points || [],
+                  sources: chunk.data.sources || []
+                });
+                
+                console.log("Received structured summary data:", chunk.data);
+              }
+              break;
+            
+            // We can ignore the formatted_findings message
+            case 'formatted_findings':
+              // Skip this - we're already using the structured data
+              break;
+            
             default:
               console.log(`Unknown message type: ${data.type}`, data);
           }
@@ -1351,6 +1372,8 @@ export default function DatasetsPage() {
   const [processingDatasets, setProcessingDatasets] = useState<Dataset[]>([]);
   const [analysisComplete, setAnalysisComplete] = useState(false);
   const [analysisResults, setAnalysisResults] = useState<Record<string, AnalysisResult> | null>(null);
+  const [summaryData, setSummaryData] = useState<any>(null);
+  const [isSummaryLoading, setIsSummaryLoading] = useState(false);
 
   // Initialize datasets as selected by default
   useEffect(() => {
@@ -1383,6 +1406,8 @@ export default function DatasetsPage() {
       setError(null);
       setAnalysisComplete(false);
       setAnalysisResults(null);
+      setSummaryData(null);
+      setIsSummaryLoading(true);
       
       // Initialize processing datasets
       const datasetsToAnalyze = datasets.filter(d => datasetIds.includes(d.id));
@@ -1435,6 +1460,14 @@ export default function DatasetsPage() {
                 );
               }
               break;
+            
+            case 'findings':
+            case 'formatted_findings':
+              // Store summary findings data
+              if (data.data) {
+                setSummaryData(data.data);
+              }
+              break;
               
             case 'result':
               // Store overall analysis results
@@ -1448,6 +1481,7 @@ export default function DatasetsPage() {
               // Analysis is complete
               setAnalysisComplete(true);
               setIsAnalyzing(false);
+              setIsSummaryLoading(false);
               break;
               
             case 'error':
@@ -2275,6 +2309,62 @@ export default function DatasetsPage() {
                       </TableBody>
                     </Table>
                   </div>
+
+                  {/* Analysis Results Section */}
+                  {isAnalyzing && (
+                    <div className="mt-6 space-y-4">
+                      <h2 className="text-xl font-semibold">Analysis in Progress</h2>
+                      <SummaryReportSkeleton query={query} />
+                    </div>
+                  )}
+
+                  {analysisComplete && processingDatasets.length > 0 && (
+                    <div className="mt-6 space-y-4">
+                      {isSummaryLoading ? (
+                        <SummaryReportSkeleton query={query} />
+                      ) : summaryData ? (
+                        <SummaryReport 
+                          query={query}
+                          summary={summaryData.summary || ''}
+                          keyFindings={summaryData.key_data_points || []}
+                          sources={summaryData.sources || []}
+                        />
+                      ) : null}
+                      
+                      {processingDatasets
+                        .filter(d => d.status === 'analyzed')
+                        .map(dataset => (
+                          <Card key={dataset.id} className="overflow-hidden mt-4">
+                            <CardHeader className="p-4 bg-muted/50">
+                              <h3 className="text-lg font-semibold">{dataset.title}</h3>
+                            </CardHeader>
+                            <CardContent className="p-4">
+                              {dataset.analysis_result ? (
+                                <div>
+                                  <div className="text-sm text-muted-foreground">
+                                    {dataset.analysis_result.summary}
+                                  </div>
+                                  {dataset.analysis_result.key_points && (
+                                    <div className="mt-4">
+                                      <h4 className="text-sm font-semibold mb-2">Key Points</h4>
+                                      <ul className="list-disc pl-5 text-sm text-muted-foreground">
+                                        {dataset.analysis_result.key_points.map((point, idx) => (
+                                          <li key={idx}>{point}</li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="text-sm text-muted-foreground italic">
+                                  No detailed analysis available for this dataset.
+                                </div>
+                              )}
+                            </CardContent>
+                          </Card>
+                        ))}
+                    </div>
+                  )}
                 </>
               ) : (
                 <div className="text-center py-10">
