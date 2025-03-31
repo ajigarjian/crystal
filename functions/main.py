@@ -188,12 +188,23 @@ def stream_search_datasets(request):
                 # Create a document with the search results
                 search_ref = db.collection('queries').document()
                 
-                # Add the search data
-                search_ref.set({
+                # Add all search data
+                search_data = {
                     'query': query,
                     'timestamp': firestore.SERVER_TIMESTAMP,
-                    'results': final_result
-                })
+                    'search_method': search_method,
+                    'similarity_threshold': similarity_threshold,
+                    'max_results': max_results,
+                    'census_max_results': census_max_results,
+                    'relevance_threshold': relevance_threshold,
+                    'ip_address': ip_address,
+                }
+                
+                # Add all the result data, not just the metadata
+                search_data.update(final_result)
+                
+                # Save to Firestore
+                search_ref.set(search_data)
                 
                 logger.info(f"Stored search results in Firestore with ID: {search_ref.id}")
             except Exception as e:
@@ -466,13 +477,20 @@ def stream_analyze(request):
                 # Create a document with the analysis results
                 analysis_ref = db.collection('queries').document()
                 
-                # Add the analysis data
-                analysis_ref.set({
+                # Add all analysis data
+                analysis_data = {
                     'dataset_ids': dataset_ids,
                     'query': query,
                     'timestamp': firestore.SERVER_TIMESTAMP,
-                    'results': final_result
-                })
+                    'file_path': file_path,
+                    'ip_address': ip_address,
+                }
+                
+                # Add all the result data, not just the metadata
+                analysis_data.update(final_result)
+                
+                # Save to Firestore
+                analysis_ref.set(analysis_data)
                 
                 logger.info(f"Stored analysis results in Firestore with ID: {analysis_ref.id}")
             except Exception as e:
