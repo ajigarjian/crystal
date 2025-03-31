@@ -54,7 +54,7 @@ export function SummaryReport({
       <CardContent className="space-y-6">
         <div>
           <h3 className="text-lg font-medium mb-2">Summary</h3>
-          <p className="text-sm leading-6 text-muted-foreground">
+          <p className="text-md leading-6 text-muted-foreground">
             {formatBoldText(cleanSummary)}
           </p>
         </div>
@@ -63,7 +63,7 @@ export function SummaryReport({
         
         <div>
           <h3 className="text-lg font-medium mb-2">Key Findings</h3>
-          <ul className="text-sm leading-6 text-muted-foreground space-y-2">
+          <ul className="text-md leading-6 text-muted-foreground space-y-2">
             {keyFindings.map((finding, index) => (
               <li key={index}>{formatBoldText(finding)}</li>
             ))}
@@ -75,7 +75,7 @@ export function SummaryReport({
         <div>
           <h3 className="text-lg font-medium mb-2">Sources</h3>
           <ScrollArea className="h-auto max-h-[200px]">
-            <ol className="text-sm leading-6 text-muted-foreground list-decimal pl-5 space-y-2">
+            <ol className="text-md leading-6 text-muted-foreground list-decimal pl-5 space-y-2">
               {sources.map((source) => (
                 <li key={source.citation_id}>
                   <span className="font-medium">[{source.citation_id}]</span>{" "}
