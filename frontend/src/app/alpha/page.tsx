@@ -452,13 +452,6 @@ export default function DatasetsPage() {
       setSearchPerformed(true);
       setExecutionTime(null);
       setQueryVariations([]);
-      setSearchStages([
-        { stage: "Analyzing query", complete: false, startTime: Date.now() },
-        { stage: "Generating query variations", complete: false },
-        { stage: "Vector search", complete: false },
-        { stage: "Keyword search", complete: false },
-        { stage: "Combining results", complete: false }
-      ]);
       
       console.log(`Streaming search for datasets: "${queryText}"`);
       
@@ -1353,21 +1346,11 @@ export default function DatasetsPage() {
     }
   };
 
-  // Toggle process details visibility
-  const toggleProcessDetails = () => {
-    setShowProcessDetails(!showProcessDetails);
-  };
-
   // Format milliseconds to readable duration
   const formatDuration = (startTime?: number, endTime?: number) => {
     if (!startTime || !endTime) return "—";
     const duration = endTime - startTime;
     return `${(duration / 1000).toFixed(2)}s`;
-  };
-
-  // New function to check if we should show the "Show All" button
-  const shouldShowAllButton = (messages: StatusMessage[]) => {
-    return messages.length > 3;
   };
 
   // New function to handle dataset preview
@@ -2163,98 +2146,6 @@ export default function DatasetsPage() {
                         {executionTime !== null && ` in ${executionTime.toFixed(2)} seconds`}.
                       </p>
                     </div>
-                    
-                    {/* Collapsible process details */}
-                    {showProcessDetails && (
-                      <div className="mt-2 border rounded-md overflow-hidden border-green-100 dark:border-green-900">
-                        {/* AI thinking process */}
-                        <div className="border-b p-3 bg-green-50 dark:bg-green-900/30">
-                          <h3 className="font-medium text-sm mb-2 text-green-900 dark:text-green-400">Search Strategy</h3>
-                          
-                          {/* Search stages with timing */}
-                          <div className="space-y-2 mb-3">
-                            {searchStages.map((stage, index) => (
-                              <div key={index} className="flex items-center justify-between text-sm">
-                                <div className="flex items-center gap-2">
-                                  {stage.complete ? (
-                                    <svg className="h-4 w-4 text-green-600" viewBox="0 0 20 20" fill="currentColor">
-                                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                                    </svg>
-                                  ) : (
-                                    <div className="h-4 w-4 rounded-full border-2 border-green-300 animate-pulse"></div>
-                                  )}
-                                  <span className={stage.complete ? "text-green-900 dark:text-green-300" : "text-neutral-500 dark:text-neutral-400"}>
-                                    {stage.stage}
-                                  </span>
-                                </div>
-                                <span className="text-xs text-green-700 dark:text-green-400">
-                                  {formatDuration(stage.startTime, stage.endTime)}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                          
-                
-                        </div>
-                        
-                        {/* Status messages */}
-                        <div className="p-3 bg-white dark:bg-neutral-800">
-                          
-                          <div className="space-y-1 max-h-[300px] overflow-y-auto pr-1 status-message-container">
-                            {(showAllMessages ? statusMessages : statusMessages.slice(-3)).map((msg) => (
-                              <div 
-                                key={msg.id}
-                                className={`text-sm ${msg.type === 'error' ? 'text-red-500' : 'text-neutral-600 dark:text-neutral-400'} mb-2`}
-                              >
-                                {msg.message && typeof msg.message === 'string' && msg.message.includes("Assessing dataset") ? (
-                                  // Format assessment messages in a more conversational style
-                                  <div dangerouslySetInnerHTML={{ 
-                                    __html: msg.message.replace(/Assessing dataset \d+\/\d+: (.+)/, (match, datasetName) => {
-                                      // Extract organization name from the message if available
-                                      const orgMatch = msg.message.match(/organization_name":\s*"([^"]+)"/);
-                                      const orgName = orgMatch ? orgMatch[1] : "";
-                                      
-                                      if (orgName) {
-                                        return `I'm assessing the dataset <strong>${datasetName}</strong> from <strong>${orgName}</strong>`;
-                                      } else {
-                                        return `I'm assessing the dataset <strong>${datasetName}</strong>`;
-                                      }
-                                    })
-                                  }} />
-                                ) : msg.message && typeof msg.message === 'string' && msg.message.includes("Pre-assessment:") ? (
-                                  // Format pre-assessment messages
-                                  <div dangerouslySetInnerHTML={{ 
-                                    __html: msg.message.replace(
-                                      /Pre-assessment: Dataset is (relevant|not relevant) \(Score: (.+)\)(\s*)Reasoning: (.+)/,
-                                      function(match, relevance, score, space, reasoning) {
-                                        // Convert first letter of reasoning to lowercase
-                                        const lowerCaseReasoning = reasoning.charAt(0).toLowerCase() + reasoning.slice(1);
-                                        return `It appears to be <strong>${relevance}</strong> because ${lowerCaseReasoning} I'll download the files for additional insight.`;
-                                      }
-                                    )
-                                  }} />
-                                ) : msg.message && typeof msg.message === 'string' && msg.message.includes("Final assessment:") ? (
-                                  // Format final assessment messages
-                                  <div dangerouslySetInnerHTML={{ 
-                                    __html: msg.message.replace(
-                                      /Final assessment: Dataset is (relevant|not relevant) \(Score: (.+)\)(\s*)Reasoning: (.+)/,
-                                      function(match, relevance, score, space, reasoning) {
-                                        // Convert first letter of reasoning to lowercase
-                                        const lowerCaseReasoning = reasoning.charAt(0).toLowerCase() + reasoning.slice(1);
-                                        return `Based on the actual files, this dataset is <strong>${relevance}</strong> because ${lowerCaseReasoning}`;
-                                      }
-                                    )
-                                  }} />
-                                ) : (
-                                  // Keep other messages as is or handle undefined
-                                  msg.message || ""
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    )}
                   </div>
                   
                   {/* New Table View for Datasets */}
