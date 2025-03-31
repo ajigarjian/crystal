@@ -1445,14 +1445,23 @@ export default function DatasetsPage() {
     const params = new URLSearchParams(window.location.search);
     const initialQuery = params.get('query');
     
-    if (initialQuery) {
-      // Set the query in state
+    // Check if this is a refresh
+    const currentUrl = window.location.href;
+    const isRefresh = sessionStorage.getItem('lastUrl') === currentUrl;
+    
+    if (isRefresh && initialQuery) {
+      // This is a refresh with a query parameter, so let's clean up the URL
+      const cleanUrl = window.location.pathname; // Just the path without query params
+      window.history.replaceState({}, document.title, cleanUrl);
+    } else if (initialQuery && !isRefresh) {
+      // Normal behavior for first visit with query param
       setQuery(initialQuery);
-      // Start the search automatically
       processStreamingQuery(initialQuery);
-      // Mark search as performed
       setSearchPerformed(true);
     }
+    
+    // Save current URL to detect refreshes next time
+    sessionStorage.setItem('lastUrl', currentUrl);
   }, []);
 
   // Add state to track selected datasets
