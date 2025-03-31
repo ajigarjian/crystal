@@ -329,12 +329,13 @@ def summarize_search_analysis(
     
     # Use only unique results (up to 5)
     for i, result in enumerate(unique_relevant_results[:5]):
-        source_name = f"{result.get('title', 'Unknown')}"
+        source_num = i + 1
+        source_name = f"[{source_num}] {result.get('title', 'Unknown')}"
         temporal_info = f" ({result.get('temporal_context', 'No date information')})" if result.get('temporal_context') else ""
         scope_info = f" - Scope: {result.get('scope', 'Not specified')}" if result.get('scope') else ""
         
         relevant_content.append(
-            f"Source {i+1}: {source_name}{temporal_info}\n"
+            f"Source {source_num}: {source_name}{temporal_info}\n"
             f"URL: {result.get('url', '')}{scope_info}\n"
             f"Summary: {result.get('summary', 'No summary available')}"
         )
@@ -351,16 +352,21 @@ RELEVANT SEARCH RESULTS:
 CURRENT YEAR: 2025
 
 TASK:
-1. Focus primarily on directly answering the user's query with clarity and accuracy
-2. Create a comprehensive but concise summary (2-3 paragraphs) that emphasizes key information relevant to the query
-3. Still cite sources using numbered citation format [1], [2], etc. but keep citations brief and unobtrusive
-4. Include temporal context when available and relevant to interpreting the answer
-5. Only note scope information (global, national, demographic-specific) when it affects the interpretation of results
-6. Identify consensus or contradictions between sources only when relevant to the user's understanding
-7. Keep your language clear, direct, and focused on providing the most useful answer
+1. Focus ONLY on directly answering the user's query with clarity and accuracy
+2. Create a DETAILED, RESEARCH QUALITY summary with:
+   - 4-5 paragraphs
+   - Many bullet points highlighting key findings
+3. Include temporal context
+4. When citing information, use the source number in square brackets (e.g., [1], [2], etc.)
 
 Format your response exactly as:
-SUMMARY: [2-3 paragraph summary that directly answers the query, with unobtrusive numbered citations [1], [2], etc.]
+SUMMARY: Add \n between paragraphs to indicate line breaks.
+
+
+KEY POINTS:
+• [Key point 1]
+• [Key point 2]
+• [Key point 3]
 '''
 
     system_message = "You are a research assistant who directly answers user questions from multiple sources. Focus on providing clear, accurate answers with minimal focus on the sources themselves. Be concise, emphasize insights relevant to the query, and use citations only when needed for credibility."
@@ -370,12 +376,17 @@ SUMMARY: [2-3 paragraph summary that directly answers the query, with unobtrusiv
             prompt=prompt,
             system_message=system_message,
             model_name="o3-mini",
-            temperature=0.1
+            temperature=0.1,
+            max_tokens=2000
         )
         
         # Parse the response
-        summary_match = re.search(r'SUMMARY:\s*(.*)', response, re.DOTALL)
-        summary = summary_match.group(1).strip() if summary_match else "No summary generated."
+        # Get the entire content from SUMMARY through KEY POINTS
+        full_content_match = re.search(r'SUMMARY:\s*(.*?)(?=\Z)', response, re.DOTALL)
+        full_content = full_content_match.group(1).strip() if full_content_match else "No summary generated."
+        
+        # Ensure we get both the paragraph summary and the key points
+        summary = full_content
         
         # Get top sources (up to 5) - use the unique results
         top_sources = []

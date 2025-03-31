@@ -1,4 +1,4 @@
-from typing import Any, Dict
+from typing import Any, Dict, List
 from firebase_functions import https_fn, options
 from firebase_admin import initialize_app, firestore
 import requests
@@ -44,6 +44,10 @@ from factchecker.download.download_gov_data import download_resource
 from factchecker.search_and_analyze import search_and_analyze
 # Import the summarize_findings function
 from factchecker.presentation.summarization import summarize_findings, format_findings_for_display
+# Import for parallel search
+from factchecker.search.web_search import tavily_web_search, enhanced_web_search, combined_web_search
+from factchecker.search.search_utils import generate_similar_queries
+from factchecker.processing.analysis.web_search_result_analyzer import analyze_search_results, summarize_search_analysis
 
 # Import models
 from factchecker.models import DatasetResource
@@ -751,26 +755,137 @@ def stream_analyze_helper(dataset_ids, query, file_path=None):
                 )
                 continue
         
-        # Call search_and_analyze at the beginning
+        # Call parallel web search at the beginning
         yield create_status_message(
-            f'Performing web search and analysis for your query...',
+            f'Performing parallel web searches for your query...',
             start_time
         )
         
-        # Call search_and_analyze with default parameters and handle errors
+        # Perform parallel web search with similar queries
         search_results = {}
         try:
-            search_results = search_and_analyze(
-                query=query,
-                max_results=5,  # Limit to 5 results for performance
-                search_type="comprehensive",
-                analyze_results=True
+            # Generate similar queries for web search
+            similar_queries = generate_similar_queries(query, num_variations=3)
+            logger.info(f"Generated similar queries: {similar_queries}")
+            
+            yield create_status_message(
+                f'Searching with multiple query variations: {", ".join(similar_queries[:2])}...',
+                start_time
             )
+            
+            # Function to run web search for a specific query
+            def search_worker(search_query):
+                try:
+                    logger.info(f"Executing search for query variation: '{search_query}'")
+                    return {
+                        "query": search_query,
+                        "results": enhanced_web_search(
+                            query=search_query,
+                            max_results=5,
+                            search_type="comprehensive"
+                        )
+                    }
+                except Exception as e:
+                    logger.error(f"Error in web search for query '{search_query}': {str(e)}")
+                    return {
+                        "query": search_query,
+                        "error": str(e),
+                        "results": []
+                    }
+            
+            all_search_results = []
+            
+            # Execute searches in parallel using ThreadPoolExecutor
+            with concurrent.futures.ThreadPoolExecutor(max_workers=len(similar_queries)) as executor:
+                # Submit all search tasks
+                future_to_query = {executor.submit(search_worker, q): q for q in similar_queries}
+                
+                # Process results as they complete
+                for future in concurrent.futures.as_completed(future_to_query):
+                    query_variation = future_to_query[future]
+                    try:
+                        result = future.result()
+                        all_search_results.append(result)
+                        yield create_status_message(
+                            f'Completed search for variation: "{query_variation}"',
+                            start_time
+                        )
+                    except Exception as e:
+                        logger.error(f"Error processing results for query '{query_variation}': {e}")
+            
+            # Process and combine the search results
+            combined_results = []
+            for result in all_search_results:
+                if "results" in result and isinstance(result["results"], dict) and "results" in result["results"]:
+                    combined_results.extend(result["results"]["results"])
+                elif "results" in result and isinstance(result["results"], list):
+                    combined_results.extend(result["results"])
+            
+            # Sort results by score (if available) or title
+            combined_results.sort(key=lambda x: x.get("score", 0), reverse=True)
+            
+            # Remove duplicates (based on URL)
+            unique_urls = set()
+            unique_results = []
+            for result in combined_results:
+                url = result.get("url")
+                if url and url not in unique_urls:
+                    unique_urls.add(url)
+                    unique_results.append(result)
+            
+            # Analyze the combined results
+            combined_search_results = {
+                "query": query,
+                "results": unique_results[:10],  # Limit to top 10 results
+                "total_results": len(unique_results),
+                "search_method": "parallel_similar_queries"
+            }
+            
+            # Run analysis on the combined results
+            analysis_results = analyze_search_results(
+                query=query,
+                search_results=combined_search_results,
+                max_results=10
+            )
+            
+            # Create a summary of the analysis
+            summary = summarize_search_analysis(
+                query=query,
+                analysis_results=analysis_results
+            )
+            
+            # Return the combined results with analysis
+            search_results = {
+                "search_results": combined_search_results,
+                "analysis": analysis_results,
+                "summary": summary
+            }
+            
+            yield create_status_message(
+                f'Successfully completed parallel web searches. Found {len(unique_results)} relevant results.',
+                start_time
+            )
+            
         except Exception as e:
-            logger.error(f"Error in web search: {str(e)}")
+            logger.error(f"Error in parallel web search: {str(e)}")
             logger.error(traceback.format_exc())
-            # Continue with empty search results rather than failing
-            search_results = {}
+            # Fallback to standard search if parallel search fails
+            try:
+                logger.info("Falling back to standard search...")
+                yield create_status_message(
+                    f'Falling back to standard web search...',
+                    start_time
+                )
+                search_results = search_and_analyze(
+                    query=query,
+                    max_results=10,
+                    search_type="comprehensive",
+                    analyze_results=True
+                )
+            except Exception as e2:
+                logger.error(f"Error in fallback web search: {str(e2)}")
+                # Continue with empty search results rather than failing
+                search_results = {}
         
         # Stream search results as they become available
         if search_results:

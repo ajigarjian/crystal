@@ -160,7 +160,11 @@ INSTRUCTIONS:
 3. Be concise but thorough - include all relevant data in your analysis
 4. Format as bullet points where appropriate
 5. Still cite the source dataset in brackets [] but keep citations brief and unobtrusive
-6. If analyzing trends over time, include the full time range and specific values with emphasis on the most recent data points
+6. When discussing data with dates:
+   - Present the most recent data first (as of April 2025)
+   - Include the full time range and specific values
+   - Clearly indicate the date context for each data point
+   - Highlight any trends or changes over time
 7. Exclude any subset_df data from your analysis
 
 Finally, provide a "SEARCH SUMMARY" section with 2 paragraphs that:
