@@ -54,7 +54,9 @@ export function SummaryReport({
       <CardContent className="space-y-6">
         <div>
           <h3 className="text-lg font-medium mb-2">Summary</h3>
-          <p className="text-sm leading-6 text-muted-foreground">{cleanSummary}</p>
+          <p className="text-sm leading-6 text-muted-foreground">
+            {formatBoldText(cleanSummary)}
+          </p>
         </div>
         
         <Separator />
