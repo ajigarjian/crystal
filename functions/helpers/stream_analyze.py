@@ -68,6 +68,15 @@ class NumpyEncoder(json.JSONEncoder):
             return obj.to_dict(orient="records")  # Convert DataFrame to list of records
         if isinstance(obj, pd.Series):
             return obj.to_dict()  # Convert Series to dict
+        # Handle pandas Timestamp objects
+        if hasattr(obj, 'isoformat') and callable(getattr(obj, 'isoformat')):
+            return obj.isoformat()
+        # Fallback for any other non-serializable types
+        try:
+            return str(obj)  # Convert any other type to string for safety
+        except:
+            return None  # If string conversion fails, return None
+        # This line won't be reached due to the fallbacks above, but kept for completeness
         return super(NumpyEncoder, self).default(obj)
 
 def create_status_message(message, start_time, dataset_id=None, status=None, progress=None):
