@@ -1275,9 +1275,16 @@ export default function DatasetsPage() {
     
     const firstLetter = orgName ? orgName.charAt(0).toUpperCase() : "D";
     const colors = ["4F46E5", "10B981", "EF4444", "F59E0B", "6366F1"];
-    const randomColor = colors[Math.floor(Math.random() * colors.length)];
     
-    return `https://placehold.co/32x32/${randomColor}/ffffff?text=${firstLetter}`;
+    // Use the dataset ID to deterministically select a color
+    // This ensures the same color is always used for the same dataset
+    const colorIndex = dataset.id ? 
+      Math.abs(dataset.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0)) % colors.length : 
+      0;
+    
+    const color = colors[colorIndex];
+    
+    return `https://placehold.co/32x32/${color}/ffffff?text=${firstLetter}`;
   };
 
   // Helper function to get organization name
