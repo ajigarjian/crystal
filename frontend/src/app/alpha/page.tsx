@@ -596,7 +596,8 @@ export default function DatasetsPage() {
                 // Add file count based on resources if available
                 const datasetWithFileCount = {
                   ...data.data,
-                  file_count: data.data.resources?.length || 0
+                  file_count: data.data.resources?.length || 0,
+                  status: 'starting' // Initialize with a status to show we're starting to process it
                 };
                 
                 // Sort datasets by similarity
@@ -627,6 +628,10 @@ export default function DatasetsPage() {
                     setTimeout(() => {
                       setDatasets(current => current.filter(d => d.id !== data.data.id));
                     }, 500); // Match this with your CSS transition duration
+                  } 
+                  // If the dataset is being assessed, show the assessing state
+                  else if (data.data.status === 'assessing') {
+                    updatedDatasets[datasetIndex].status = 'assessing';
                   }
                   
                   return updatedDatasets;
@@ -742,6 +747,7 @@ export default function DatasetsPage() {
                   if (d.id === data.dataset_id) {
                     return {
                       ...d,
+                      status: data.status || 'assessing', // Make sure we show the assessing status during relevance check
                       pre_assessment: {
                         is_relevant: data.is_relevant,
                         relevance_score: data.relevance_score,
@@ -752,6 +758,29 @@ export default function DatasetsPage() {
                   return d;
                 });
               });
+              break;
+            
+            case 'assessing':
+              // Dataset is being assessed for relevance
+              setDatasets(prev => {
+                return prev.map(d => {
+                  if (d.id === data.dataset_id) {
+                    return {
+                      ...d,
+                      status: 'assessing'
+                    };
+                  }
+                  return d;
+                });
+              });
+              
+              const assessingMessage: StatusMessage = {
+                id: Math.random().toString(36).substring(2, 9),
+                message: data.message || `Assessing relevance of dataset`,
+                timestamp: data.timestamp,
+                type: 'status'
+              };
+              setStatusMessages(prev => [...prev, assessingMessage]);
               break;
             
             case 'download_complete':
@@ -792,6 +821,7 @@ export default function DatasetsPage() {
                   if (d.id === data.dataset_id) {
                     return {
                       ...d,
+                      status: data.is_relevant ? 'relevant' : 'not_relevant', // Update status based on relevance
                       relevance: {
                         is_relevant: data.is_relevant,
                         relevance_score: data.relevance_score,
