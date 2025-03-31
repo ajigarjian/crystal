@@ -49,6 +49,7 @@ import { WebSearchSummary, WebSearchSummaryData } from '@/components/WebSearchSu
 import { WebSearchSummarySkeleton } from '@/components/WebSearchSummarySkeleton';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Globe } from 'lucide-react';
+import { PREFERRED_DATASET_ID_SET } from "@/lib/constants";
 
 interface Resource {
   id: string;
@@ -1445,9 +1446,10 @@ export default function DatasetsPage() {
   // Initialize datasets as selected by default
   useEffect(() => {
     if (datasets.length > 0) {
-      // Create an object with all datasets selected by default
       const initialSelection = datasets.reduce((acc, dataset) => {
-        acc[dataset.id] = true;
+        // Check if this dataset is in the preferred set
+        const isPreferred = PREFERRED_DATASET_ID_SET.has(dataset.id);
+        acc[dataset.id] = isPreferred;
         return acc;
       }, {} as Record<string, boolean>);
       
