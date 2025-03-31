@@ -30,11 +30,14 @@ export function WebSearchSummary({ data }: WebSearchSummaryProps) {
     return null;
   }
 
-  // Function to replace [1], [2] citations with source titles
+  // Function to replace [1], [2] citations with source titles and format KEY POINTS
   const formatSummaryWithSourceTitles = (summary: string) => {
     if (!summary) return "";
     
     let formattedSummary = summary;
+    
+    // Replace both actual newlines and escaped newlines with HTML line breaks
+    formattedSummary = formattedSummary.replace(/(\\n|\n)/g, '<br />');
     
     // Replace [1], [2], etc. with actual source titles
     Object.keys(data.sources || {}).forEach((key) => {
@@ -45,6 +48,27 @@ export function WebSearchSummary({ data }: WebSearchSummaryProps) {
       const regex = new RegExp(`\\[${key}\\]`, 'g');
       formattedSummary = formattedSummary.replace(regex, `<a href="${source?.url || '#'}" target="_blank" rel="noopener noreferrer" class="font-medium text-blue-600 hover:underline inline-flex items-center">${title} <span class="inline-block ml-0.5"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-external-link"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></span></a>`);
     });
+    
+    // Format the KEY POINTS section with proper styling
+    if (formattedSummary.includes("KEY POINTS:")) {
+      // Replace KEY POINTS: with a formatted header
+      formattedSummary = formattedSummary.replace(
+        "KEY POINTS:", 
+        '<h3 class="font-bold text-lg mt-4 mb-2">Key Points:</h3>'
+      );
+      
+      // Convert plain text bullet points to proper HTML list
+      formattedSummary = formattedSummary.replace(
+        /- (.*?)(?=\n- |\n\n|$)/gs, 
+        '<li>$1</li>'
+      );
+      
+      // Wrap list items in a ul tag with proper styling
+      formattedSummary = formattedSummary.replace(
+        /<li>.*?<\/li>/gs,
+        match => `<ul class="list-disc pl-5 space-y-1">${match}</ul>`
+      );
+    }
     
     return formattedSummary;
   };
