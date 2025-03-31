@@ -20,6 +20,7 @@ import Link from "next/link";
 import { ChevronDown, ChevronUp, MessageSquareIcon, ThumbsUpIcon, BugIcon, LightbulbIcon, XIcon } from "lucide-react";
 import { SummaryReport } from '@/components/SummaryReport';
 import { SummaryReportSkeleton } from '@/components/SummaryReportSkeleton';
+import { PreferredDatasetBadge } from '@/components/ui/dataset-badge';
 import {
   Dialog,
   DialogContent,
@@ -1924,10 +1925,13 @@ export default function DatasetsPage() {
                               />
                             </div>
                             <div className="flex-1 min-w-0">
-                              <h3 className="text-sm font-medium leading-tight line-clamp-2 mb-0.5">{dataset.title}</h3>
+                              <h3 className="text-sm font-medium leading-tight line-clamp-2 mb-0.5">
+                                {dataset.title}
+                              </h3>
                               <p className="text-xs text-neutral-500 truncate" title={getOrganizationName(dataset)}>
                                 {getOrganizationName(dataset)}
                               </p>
+                              {/* Remove badge from here */}
                               <div className="mt-1 flex flex-wrap gap-1.5">
                                 <Badge variant="outline" className="text-xs">
                                   Relevance: {Math.round((dataset.relevance?.relevance_score || dataset.similarity || 0) * 100)}%
@@ -2239,10 +2243,13 @@ export default function DatasetsPage() {
                               </TableCell>
                               <TableCell className="py-2 max-w-[250px] w-[250px]" onClick={() => handleDatasetSelect(dataset)}>
                                 <div className="overflow-hidden">
-                                  <p className="font-medium text-sm truncate" title={dataset.title}>{dataset.title}</p>
+                                  <div className="flex items-center">
+                                    <p className="font-medium text-sm truncate" title={dataset.title}>{dataset.title}</p>
+                                  </div>
                                   <p className="text-xs text-neutral-500 truncate" title={getOrganizationName(dataset)}>
                                     {getOrganizationName(dataset)}
                                   </p>
+                                  {/* Remove badge from here */}
                                 </div>
                               </TableCell>
                               <TableCell className="text-center">
@@ -2290,18 +2297,24 @@ export default function DatasetsPage() {
                                 )}
                               </TableCell>
                               <TableCell className="text-center">
-                                <Checkbox
-                                  checked={selectedDatasets[dataset.id] === true}
-                                  disabled={isAnalyzing}
-                                  onCheckedChange={(checked) => {
-                                    setSelectedDatasets(prev => ({
-                                      ...prev,
-                                      [dataset.id]: checked === true
-                                    }));
-                                  }}
-                                  aria-label="Include in analysis"
-                                  className="mx-auto"
-                                />
+                                <div className="flex items-center justify-center">
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-4 h-4 flex items-center justify-center">
+                                      <Checkbox
+                                        checked={selectedDatasets[dataset.id] === true}
+                                        disabled={isAnalyzing}
+                                        onCheckedChange={(checked) => {
+                                          setSelectedDatasets(prev => ({
+                                            ...prev,
+                                            [dataset.id]: checked === true
+                                          }));
+                                        }}
+                                        aria-label="Include in analysis"
+                                      />
+                                    </div>
+                                    <PreferredDatasetBadge datasetId={dataset.id} />
+                                  </div>
+                                </div>
                               </TableCell>
                             </TableRow>
                           );
