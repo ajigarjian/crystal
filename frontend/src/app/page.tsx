@@ -33,6 +33,9 @@ export default function Home() {
     transform: string;
   }>>([]);
   
+  // Initialize with empty examples
+  const [exampleQueries, setExampleQueries] = useState<string[]>([]);
+  
   // Initialize trail positions
   useEffect(() => {
     // Initialize with 5 points at the center
@@ -229,17 +232,18 @@ export default function Home() {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
   
-  // Use randomized examples from constants instead of hardcoded examples
-  const getRandomExamples = (count: number) => {
-    const shuffled = [...QUERY_EXAMPLES].sort(() => 0.5 - Math.random());
-    return shuffled.slice(0, count);
-  };
-  
-  // Add these example queries - randomly selected from constants
-  const exampleQueries = getRandomExamples(3);
+  // Get random examples on client-side only
+  useEffect(() => {
+    const getRandomExamples = (count: number) => {
+      const shuffled = [...QUERY_EXAMPLES].sort(() => 0.5 - Math.random());
+      return shuffled.slice(0, count);
+    };
+    
+    setExampleQueries(getRandomExamples(3));
+  }, []);
   
   // Get displayed examples based on screen size
-  const displayedExamples = isMobile ? exampleQueries.slice(0, 3) : exampleQueries.slice(0, 3);
+  const displayedExamples = isMobile ? exampleQueries.slice(0, 3) : exampleQueries;
   
   // Add this handler for example clicks
   const handleExampleClick = (exampleQuery: string) => {
