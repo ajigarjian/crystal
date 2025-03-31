@@ -8,6 +8,7 @@ import Link from "next/link";
 import { warmFunctions } from "@/lib/firebase";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
+import { QUERY_EXAMPLES } from "@/lib/constants";
 
 // Pre-generate the data text outside the component
 const DATA_TEXTS = generateDataTexts(150);
@@ -228,12 +229,14 @@ export default function Home() {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
   
-  // Add these example queries
-  const exampleQueries = [
-    "What's the air quality trend in NYC over the past 5 years?",
-    "How has median housing price changed in San Francisco since 2010?",
-    "What are the vaccination rates for children in Chicago by neighborhood?",
-  ];
+  // Use randomized examples from constants instead of hardcoded examples
+  const getRandomExamples = (count: number) => {
+    const shuffled = [...QUERY_EXAMPLES].sort(() => 0.5 - Math.random());
+    return shuffled.slice(0, count);
+  };
+  
+  // Add these example queries - randomly selected from constants
+  const exampleQueries = getRandomExamples(3);
   
   // Get displayed examples based on screen size
   const displayedExamples = isMobile ? exampleQueries.slice(0, 3) : exampleQueries.slice(0, 3);
