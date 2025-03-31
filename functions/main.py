@@ -444,7 +444,7 @@ def stream_analyze(request):
         "http://localhost:3000",
         "http://localhost:5173",
         ],
-        cors_methods=["get", "post", "options"],
+        cors_methods=["get", "post", "options"]
     ),
     memory=options.MemoryOption.MB_512
 )
