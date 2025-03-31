@@ -20,6 +20,7 @@ import Link from "next/link";
 import { ChevronDown, ChevronUp, MessageSquareIcon, ThumbsUpIcon, BugIcon, LightbulbIcon, XIcon } from "lucide-react";
 import { SummaryReport } from '@/components/SummaryReport';
 import { SummaryReportSkeleton } from '@/components/SummaryReportSkeleton';
+import { PreferredDatasetBadge } from '@/components/ui/dataset-badge';
 import {
   Dialog,
   DialogContent,
@@ -44,6 +45,11 @@ import { AlertCircle, CheckCircle2, FileText, Database, ArrowRight, Download, Fi
 import { Checkbox } from "@/components/ui/checkbox";
 import { streamSearchDatasets, warmFunctions, streamAnalyzeDatasets, submitFeedback } from "@/lib/firebase";
 import Script from "next/script";
+import { WebSearchSummary, WebSearchSummaryData } from '@/components/WebSearchSummary';
+import { WebSearchSummarySkeleton } from '@/components/WebSearchSummarySkeleton';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Globe } from 'lucide-react';
+import { PREFERRED_DATASET_ID_SET } from "@/lib/constants";
 
 interface Resource {
   id: string;
@@ -362,6 +368,9 @@ export default function DatasetsPage() {
   }[]>([]);
   const [selectedPreview, setSelectedPreview] = useState<Dataset | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [webSearchData, setWebSearchData] = useState<WebSearchSummaryData | null>(null);
+  const [isWebSearchLoading, setIsWebSearchLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<string>("datasets");
   
   // Scroll to the latest discovered dataset
   const discoveryEndRef = useRef<HTMLDivElement>(null);
@@ -588,7 +597,8 @@ export default function DatasetsPage() {
                 // Add file count based on resources if available
                 const datasetWithFileCount = {
                   ...data.data,
-                  file_count: data.data.resources?.length || 0
+                  file_count: data.data.resources?.length || 0,
+                  status: 'starting' // Initialize with a status to show we're starting to process it
                 };
                 
                 // Sort datasets by similarity
@@ -619,6 +629,10 @@ export default function DatasetsPage() {
                     setTimeout(() => {
                       setDatasets(current => current.filter(d => d.id !== data.data.id));
                     }, 500); // Match this with your CSS transition duration
+                  } 
+                  // If the dataset is being assessed, show the assessing state
+                  else if (data.data.status === 'assessing') {
+                    updatedDatasets[datasetIndex].status = 'assessing';
                   }
                   
                   return updatedDatasets;
@@ -734,6 +748,7 @@ export default function DatasetsPage() {
                   if (d.id === data.dataset_id) {
                     return {
                       ...d,
+                      status: data.status || 'assessing', // Make sure we show the assessing status during relevance check
                       pre_assessment: {
                         is_relevant: data.is_relevant,
                         relevance_score: data.relevance_score,
@@ -744,6 +759,29 @@ export default function DatasetsPage() {
                   return d;
                 });
               });
+              break;
+            
+            case 'assessing':
+              // Dataset is being assessed for relevance
+              setDatasets(prev => {
+                return prev.map(d => {
+                  if (d.id === data.dataset_id) {
+                    return {
+                      ...d,
+                      status: 'assessing'
+                    };
+                  }
+                  return d;
+                });
+              });
+              
+              const assessingMessage: StatusMessage = {
+                id: Math.random().toString(36).substring(2, 9),
+                message: data.message || `Assessing relevance of dataset`,
+                timestamp: data.timestamp,
+                type: 'status'
+              };
+              setStatusMessages(prev => [...prev, assessingMessage]);
               break;
             
             case 'download_complete':
@@ -784,6 +822,7 @@ export default function DatasetsPage() {
                   if (d.id === data.dataset_id) {
                     return {
                       ...d,
+                      status: data.is_relevant ? 'relevant' : 'not_relevant', // Update status based on relevance
                       relevance: {
                         is_relevant: data.is_relevant,
                         relevance_score: data.relevance_score,
@@ -828,6 +867,15 @@ export default function DatasetsPage() {
                   key_data_points: chunk.data.key_data_points || [],
                   sources: chunk.data.sources || []
                 });
+                
+                // Add a status message that summary is generated
+                const summaryMessage: StatusMessage = {
+                  id: Math.random().toString(36).substring(2, 9),
+                  message: `Generated summary with ${chunk.data.sources?.length || 0} sources`,
+                  timestamp: chunk.timestamp || Date.now(),
+                  type: 'status'
+                };
+                setStatusMessages(prev => [...prev, summaryMessage]);
                 
                 console.log("Received structured summary data:", chunk.data);
               }
@@ -913,6 +961,9 @@ export default function DatasetsPage() {
       setError(null);
       setAnalysisComplete(false);
       setAnalysisResults(null);
+      setSummaryData(null);
+      setWebSearchData(null);  // Reset web search data
+      setIsWebSearchLoading(true); // Show web search skeleton
       
       // Initialize processing datasets
       const datasetsToAnalyze = datasets.filter(d => datasetIds.includes(d.id));
@@ -1147,6 +1198,22 @@ export default function DatasetsPage() {
               setStatusMessages(prev => [...prev, errorMessage]);
               break;
               
+            case 'web_search_summary':
+              if (chunk.data) {
+                setWebSearchData(chunk.data);
+                setIsWebSearchLoading(false);
+                
+                // Add a status message for web search completion
+                const webSearchMessage: StatusMessage = {
+                  id: Math.random().toString(36).substring(2, 9),
+                  message: `Web search completed with ${chunk.data.total_relevant_sources || 0} relevant sources`,
+                  timestamp: chunk.timestamp || Date.now(),
+                  type: 'status'
+                };
+                setStatusMessages(prev => [...prev, webSearchMessage]);
+              }
+              break;
+              
             default:
               console.log('Unknown analysis chunk type:', chunk.type, chunk);
           }
@@ -1172,6 +1239,7 @@ export default function DatasetsPage() {
       console.error("Error in dataset analysis:", err);
       setError(`Failed to analyze datasets: ${err instanceof Error ? err.message : String(err)}`);
       setIsAnalyzing(false);
+      setIsWebSearchLoading(false);
       
       // Add error to status messages
       const errorMessage: StatusMessage = {
@@ -1378,9 +1446,10 @@ export default function DatasetsPage() {
   // Initialize datasets as selected by default
   useEffect(() => {
     if (datasets.length > 0) {
-      // Create an object with all datasets selected by default
       const initialSelection = datasets.reduce((acc, dataset) => {
-        acc[dataset.id] = true;
+        // Check if this dataset is in the preferred set
+        const isPreferred = PREFERRED_DATASET_ID_SET.has(dataset.id);
+        acc[dataset.id] = isPreferred;
         return acc;
       }, {} as Record<string, boolean>);
       
@@ -1407,7 +1476,8 @@ export default function DatasetsPage() {
       setAnalysisComplete(false);
       setAnalysisResults(null);
       setSummaryData(null);
-      setIsSummaryLoading(true);
+      setWebSearchData(null);  // Reset web search data
+      setIsWebSearchLoading(true); // Show web search skeleton
       
       // Initialize processing datasets
       const datasetsToAnalyze = datasets.filter(d => datasetIds.includes(d.id));
@@ -1421,10 +1491,10 @@ export default function DatasetsPage() {
       setProcessingDatasets(initialProcessing);
       
       // Call the Firebase function with streaming
-      await streamAnalyzeDatasets(
+      const analysisChunks = await streamAnalyzeDatasets(
         {
           query: query,
-          datasets: datasetsToAnalyze,
+          dataset_ids: datasetsToAnalyze.map(d => d.id),
         },
         (data) => {
           console.log('Received analysis chunk:', data);
@@ -1460,12 +1530,40 @@ export default function DatasetsPage() {
                 );
               }
               break;
-            
+              
             case 'findings':
+              // Store structured summary findings data
+              if (data.data) {
+                setSummaryData({
+                  summary: data.data.summary || '',
+                  key_data_points: data.data.key_data_points || [],
+                  sources: data.data.sources || []
+                });
+                
+                console.log("Received structured summary data:", data.data);
+              }
+              break;
+              
             case 'formatted_findings':
               // Store summary findings data
               if (data.data) {
                 setSummaryData(data.data);
+              }
+              break;
+              
+            case 'web_search_results':
+              // Store web search results
+              if (data.data) {
+                setWebSearchData(data.data);
+                setIsWebSearchLoading(false);
+              }
+              break;
+              
+            case 'web_search_summary':
+              // Store web search summary
+              if (data.data) {
+                setWebSearchData(data.data);
+                setIsWebSearchLoading(false);
               }
               break;
               
@@ -1511,6 +1609,7 @@ export default function DatasetsPage() {
       console.error("Error in dataset analysis:", err);
       setError(`Failed to analyze datasets: ${err.message || String(err)}`);
       setIsAnalyzing(false);
+      setIsWebSearchLoading(false);
     }
   };
 
@@ -1924,10 +2023,13 @@ export default function DatasetsPage() {
                               />
                             </div>
                             <div className="flex-1 min-w-0">
-                              <h3 className="text-sm font-medium leading-tight line-clamp-2 mb-0.5">{dataset.title}</h3>
+                              <h3 className="text-sm font-medium leading-tight line-clamp-2 mb-0.5">
+                                {dataset.title}
+                              </h3>
                               <p className="text-xs text-neutral-500 truncate" title={getOrganizationName(dataset)}>
                                 {getOrganizationName(dataset)}
                               </p>
+                              {/* Remove badge from here */}
                               <div className="mt-1 flex flex-wrap gap-1.5">
                                 <Badge variant="outline" className="text-xs">
                                   Relevance: {Math.round((dataset.relevance?.relevance_score || dataset.similarity || 0) * 100)}%
@@ -2239,10 +2341,13 @@ export default function DatasetsPage() {
                               </TableCell>
                               <TableCell className="py-2 max-w-[250px] w-[250px]" onClick={() => handleDatasetSelect(dataset)}>
                                 <div className="overflow-hidden">
-                                  <p className="font-medium text-sm truncate" title={dataset.title}>{dataset.title}</p>
+                                  <div className="flex items-center">
+                                    <p className="font-medium text-sm truncate" title={dataset.title}>{dataset.title}</p>
+                                  </div>
                                   <p className="text-xs text-neutral-500 truncate" title={getOrganizationName(dataset)}>
                                     {getOrganizationName(dataset)}
                                   </p>
+                                  {/* Remove badge from here */}
                                 </div>
                               </TableCell>
                               <TableCell className="text-center">
@@ -2290,18 +2395,24 @@ export default function DatasetsPage() {
                                 )}
                               </TableCell>
                               <TableCell className="text-center">
-                                <Checkbox
-                                  checked={selectedDatasets[dataset.id] === true}
-                                  disabled={isAnalyzing}
-                                  onCheckedChange={(checked) => {
-                                    setSelectedDatasets(prev => ({
-                                      ...prev,
-                                      [dataset.id]: checked === true
-                                    }));
-                                  }}
-                                  aria-label="Include in analysis"
-                                  className="mx-auto"
-                                />
+                                <div className="flex items-center justify-center">
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-4 h-4 flex items-center justify-center">
+                                      <Checkbox
+                                        checked={selectedDatasets[dataset.id] === true}
+                                        disabled={isAnalyzing}
+                                        onCheckedChange={(checked) => {
+                                          setSelectedDatasets(prev => ({
+                                            ...prev,
+                                            [dataset.id]: checked === true
+                                          }));
+                                        }}
+                                        aria-label="Include in analysis"
+                                      />
+                                    </div>
+                                    <PreferredDatasetBadge datasetId={dataset.id} />
+                                  </div>
+                                </div>
                               </TableCell>
                             </TableRow>
                           );
@@ -2311,64 +2422,96 @@ export default function DatasetsPage() {
                   </div>
 
                   {/* Analysis Results Section */}
-                  {isAnalyzing && (
+                  {(isAnalyzing || analysisComplete) && (
                     <div className="mt-6 space-y-4">
-                      <h2 className="text-xl font-semibold">Analysis in Progress</h2>
-                      <SummaryReportSkeleton query={query} />
-                    </div>
-                  )}
-
-                  {analysisComplete && processingDatasets.length > 0 && (
-                    <div className="mt-6 space-y-4">
-                      {isSummaryLoading ? (
-                        <SummaryReportSkeleton query={query} />
-                      ) : summaryData ? (
-                        <SummaryReport 
-                          query={query}
-                          summary={summaryData.summary || ''}
-                          keyFindings={summaryData.key_data_points || []}
-                          sources={summaryData.sources || []}
-                        />
-                      ) : null}
+                      <h2 className="text-xl font-semibold">Analysis Results</h2>
                       
-                      {processingDatasets
-                        .filter(d => d.status === 'analyzed')
-                        .map(dataset => (
-                          <Card key={dataset.id} className="overflow-hidden mt-4">
-                            <CardHeader className="p-4 bg-muted/50">
-                              <h3 className="text-lg font-semibold">{dataset.title}</h3>
-                            </CardHeader>
-                            <CardContent className="p-4">
-                              {dataset.analysis_result ? (
-                                <div>
-                                  <div className="text-sm text-muted-foreground">
-                                    {dataset.analysis_result.summary}
-                                  </div>
-                                  {dataset.analysis_result.key_points && (
-                                    <div className="mt-4">
-                                      <h4 className="text-sm font-semibold mb-2">Key Points</h4>
-                                      <ul className="list-disc pl-5 text-sm text-muted-foreground">
-                                        {dataset.analysis_result.key_points.map((point, idx) => (
-                                          <li key={idx}>{point}</li>
-                                        ))}
-                                      </ul>
+                      <Tabs 
+                        defaultValue="datasets" 
+                        value={activeTab} 
+                        onValueChange={setActiveTab}
+                        className="w-full"
+                      >
+                        <TabsList className="grid w-full grid-cols-2 mb-4">
+                          <TabsTrigger value="datasets" className="flex items-center gap-2">
+                            <Database className="h-4 w-4" />
+                            <span>Dataset Summary</span>
+                          </TabsTrigger>
+                          <TabsTrigger value="webSearch" className="flex items-center gap-2">
+                            <Globe className="h-4 w-4" />
+                            <span>Web Research</span>
+                          </TabsTrigger>
+                        </TabsList>
+                        
+                        <TabsContent value="datasets" className="space-y-4">
+                          {isAnalyzing && !summaryData ? (
+                            <SummaryReportSkeleton query={query} />
+                          ) : summaryData ? (
+                            <SummaryReport 
+                              query={query}
+                              summary={summaryData.summary || ''}
+                              keyFindings={summaryData.key_data_points || []}
+                              sources={summaryData.sources || []}
+                            />
+                          ) : (
+                            <div className="text-center p-8 text-muted-foreground">
+                              <p>No dataset analysis available</p>
+                            </div>
+                          )}
+                          
+                          {processingDatasets
+                            .filter(d => d.analysis_results)
+                            .map(dataset => (
+                              <Card key={dataset.id} className="overflow-hidden mt-4">
+                                <CardHeader className="p-4 bg-muted/50">
+                                  <h3 className="text-lg font-semibold">{dataset.title}</h3>
+                                </CardHeader>
+                                <div className="p-4">
+                                  {dataset.analysis_results ? (
+                                    <div>
+                                      <div className="text-sm text-muted-foreground">
+                                        {dataset.analysis_results.summary}
+                                      </div>
+                                      {dataset.analysis_results.key_points && (
+                                        <div className="mt-4">
+                                          <h4 className="text-sm font-semibold mb-2">Key Points</h4>
+                                          <ul className="list-disc pl-5 text-sm text-muted-foreground">
+                                            {dataset.analysis_results.key_points.map((point: string, idx: number) => (
+                                              <li key={idx}>{point}</li>
+                                            ))}
+                                          </ul>
+                                        </div>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <div className="text-sm text-muted-foreground italic">
+                                      No detailed analysis available for this dataset.
                                     </div>
                                   )}
                                 </div>
-                              ) : (
-                                <div className="text-sm text-muted-foreground italic">
-                                  No detailed analysis available for this dataset.
-                                </div>
-                              )}
-                            </CardContent>
-                          </Card>
-                        ))}
+                              </Card>
+                            ))}
+                        </TabsContent>
+                        
+                        <TabsContent value="webSearch" className="space-y-4">
+                          {isWebSearchLoading ? (
+                            <WebSearchSummarySkeleton />
+                          ) : webSearchData ? (
+                            <WebSearchSummary data={webSearchData} />
+                          ) : (
+                            <div className="text-center p-8 text-muted-foreground">
+                              <p>No web search results available yet</p>
+                            </div>
+                          )}
+                        </TabsContent>
+                      </Tabs>
                     </div>
                   )}
                 </>
               ) : (
                 <div className="text-center py-10">
-                  <p className="text-neutral-500">No relevant datasets found for your query. Try a different question.</p>
+                  <p className="text-neutral-500">Sorry, we don't seem to have any datasets for this query yet. </p>
+                  <p className="text-neutral-500">We're working hard to add more sources, please click "Feedback" to tell us!</p>
                 </div>
               )}
             </div>

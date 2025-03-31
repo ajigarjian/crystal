@@ -68,6 +68,15 @@ class NumpyEncoder(json.JSONEncoder):
             return obj.to_dict(orient="records")  # Convert DataFrame to list of records
         if isinstance(obj, pd.Series):
             return obj.to_dict()  # Convert Series to dict
+        # Handle pandas Timestamp objects
+        if hasattr(obj, 'isoformat') and callable(getattr(obj, 'isoformat')):
+            return obj.isoformat()
+        # Fallback for any other non-serializable types
+        try:
+            return str(obj)  # Convert any other type to string for safety
+        except:
+            return None  # If string conversion fails, return None
+        # This line won't be reached due to the fallbacks above, but kept for completeness
         return super(NumpyEncoder, self).default(obj)
 
 def create_status_message(message, start_time, dataset_id=None, status=None, progress=None):
@@ -573,11 +582,12 @@ def stream_analyze_helper(dataset_ids, query, file_path=None):
                     extracted_data["organization_name"] = dataset.get('organization_name', "")
                     
                     # Now call format_extracted_data with the updated extracted_data
-                    formatted_data = format_extracted_data(
-                        extracted_data,
-                        analysis_result,
-                        query
-                    )
+                    # Remove this premature call to format_extracted_data since analysis_result doesn't exist yet
+                    # formatted_data = format_extracted_data(
+                    #     extracted_data,
+                    #     analysis_result,
+                    #     query
+                    # )
                     
                     # Log the organization info we're adding
                     logger.info(f"Adding organization info to extracted data: " + 

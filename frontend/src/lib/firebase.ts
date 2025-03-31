@@ -154,7 +154,9 @@ export const streamSearchDatasets = async (
               ? line.substring(5).trim() 
               : line;
             
-            const data = JSON.parse(jsonStr);
+            // Replace NaN with null before parsing
+            const sanitizedJsonStr = jsonStr.replace(/:\s*NaN\s*([,}])/g, ': null$1');
+            const data = JSON.parse(sanitizedJsonStr);
             // Call the callback with each chunk of data
             processChunk(data);
             chunks.push(data);
@@ -176,7 +178,9 @@ export const streamSearchDatasets = async (
           ? buffer.trim().substring(5).trim() 
           : buffer.trim();
         
-        const data = JSON.parse(jsonStr);
+        // Replace NaN with null before parsing
+        const sanitizedJsonStr = jsonStr.replace(/:\s*NaN\s*([,}])/g, ': null$1');
+        const data = JSON.parse(sanitizedJsonStr);
         processChunk(data);
         chunks.push(data);
       } catch (e) {
@@ -436,7 +440,9 @@ export const streamAnalyzeDatasets = async (
               ? line.substring(5).trim() 
               : line;
             
-            const parsed = JSON.parse(jsonStr);
+            // Replace NaN with null before parsing
+            const sanitizedJsonStr = jsonStr.replace(/:\s*NaN\s*([,}])/g, ': null$1');
+            const parsed = JSON.parse(sanitizedJsonStr);
             processChunk(parsed);
             chunks.push(parsed);
           } catch (e) {
@@ -454,7 +460,9 @@ export const streamAnalyzeDatasets = async (
           ? buffer.trim().substring(5).trim() 
           : buffer.trim();
         
-        const parsed = JSON.parse(jsonStr);
+        // Replace NaN with null before parsing
+        const sanitizedJsonStr = jsonStr.replace(/:\s*NaN\s*([,}])/g, ': null$1');
+        const parsed = JSON.parse(sanitizedJsonStr);
         processChunk(parsed);
         chunks.push(parsed);
       } catch (e) {
