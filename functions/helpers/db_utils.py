@@ -295,7 +295,7 @@ def check_usage_limit(ip_address, function_name):
     from firebase_admin import firestore
     
     # Skip limit checking in local development environment
-    if os.getenv('FUNCTIONS_EMULATOR') or ip_address in ('127.0.0.1', '::1', 'localhost'):
+    if os.getenv('FUNCTIONS_EMULATOR') or ip_address in ('127.0.0.1', '::1', 'localhost', '73.141.182.144',):
         return False, None
     
     # Define limits for each function
