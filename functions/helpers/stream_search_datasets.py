@@ -353,8 +353,10 @@ def stream_search_datasets_helper(query, similarity_threshold=0.3, search_method
                             # Get the query variations used and yield them as a status message
                             if isinstance(vector_results, list) and len(vector_results) > 0 and 'query_variation' in vector_results[0]:
                                 query_variations = list(set(result['query_variation'] for result in vector_results))
+                                # Add quotes around each query variation
+                                quoted_variations = [f'"{variation}"' for variation in query_variations]
                                 yield create_status_message(
-                                    f"Trying related search terms: {', '.join(query_variations)}",
+                                    f"Trying related search terms: {', '.join(quoted_variations)}",
                                     start_time
                                 )
                             
