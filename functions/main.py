@@ -62,7 +62,7 @@ except Exception as django_setup_error:
 # After Django is set up, import helpers that might use Django models
 from helpers.db_utils import execute_query, get_db_connection, get_connection_pool
 from helpers.stream_search_datasets import stream_search_datasets_helper
-from helpers.stream_analyze import stream_analyze_helper
+from helpers.stream_analyze import stream_analyze_helper, NumpyEncoder
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -143,10 +143,15 @@ def stream_search_datasets(request):
         ):
             # If this is a JSON object and it's the 'complete' type, store it as the final result
             try:
+                # Try to parse and handle NaN values properly
                 chunk_data = json.loads(chunk.strip())
                 if chunk_data.get('type') == 'complete':
                     final_result = chunk_data.get('data', {})
+                    
+                # Re-encode with NumpyEncoder to handle NaN values
+                chunk = json.dumps(chunk_data, cls=NumpyEncoder)
             except:
+                # If parsing fails, leave the chunk as is
                 pass
             
             # Yield the chunk
@@ -394,10 +399,15 @@ def stream_analyze(request):
         ):
             # If this is a JSON object and it's the 'complete' type, store it as the final result
             try:
+                # Try to parse and handle NaN values properly
                 chunk_data = json.loads(chunk.strip())
                 if chunk_data.get('type') == 'complete':
                     final_result = chunk_data.get('data', {})
+                    
+                # Re-encode with NumpyEncoder to handle NaN values
+                chunk = json.dumps(chunk_data, cls=NumpyEncoder)
             except:
+                # If parsing fails, leave the chunk as is
                 pass
             
             # Yield the chunk
