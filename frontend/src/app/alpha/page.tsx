@@ -621,18 +621,49 @@ export default function DatasetsPage() {
                     ...data.data
                   };
                   
-                  // If the dataset has been assessed as not relevant, mark it for removal
+                  // If the dataset has been assessed as not relevant, update status and then mark for removal
                   if (data.data.relevance && data.data.relevance.is_relevant === false) {
-                    updatedDatasets[datasetIndex].isRemoving = true;
-                    
-                    // Remove the dataset after animation completes
+                    // Update the status to 'not_relevant' in a separate state update
+                    // This ensures a complete render cycle before starting the removal process
+                    setDatasets(currentDatasets => {
+                      return currentDatasets.map(d => {
+                          if (d.id === data.data.id) {
+                            return {
+                              ...d,
+                            status: 'not_relevant'  // Set the status
+                            };
+                          }
+                          return d;
+                        });
+                      });
+                      
+                    // Then after a delay, start the removal process in a separate update
+                      setTimeout(() => {
+                      setDatasets(current => {
+                        return current.map(d => {
+                          if (d.id === data.data.id) {
+                    return {
+                      ...d,
+                              isRemoving: true  // Start the removal animation
+                    };
+                  }
+                  return d;
+                });
+              });
+              
+                      // After animation completes, remove the dataset
                     setTimeout(() => {
-                      setDatasets(current => current.filter(d => d.id !== data.data.id));
-                    }, 500); // Match this with your CSS transition duration
+                        setDatasets(current => current.filter(d => d.id !== data.data.id));
+                      }, 1000); // Animation duration
+                    }, 1500); // Show "Not relevant" status for 1.5 seconds
                   } 
                   // If the dataset is being assessed, show the assessing state
                   else if (data.data.status === 'assessing') {
                     updatedDatasets[datasetIndex].status = 'assessing';
+                  }
+                  // If the dataset is relevant, update its status
+                  else if (data.data.relevance && data.data.relevance.is_relevant === true) {
+                    updatedDatasets[datasetIndex].status = 'relevant';
                   }
                   
                   return updatedDatasets;
@@ -1353,32 +1384,8 @@ export default function DatasetsPage() {
       case 'starting':
         return { 
           icon: <Loader2 className="h-4 w-4 animate-spin text-yellow-500" />, 
-          text: "Starting analysis...",
+          text: "Checking validity...",
           color: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300"
-        };
-      case 'downloading':
-        return { 
-          icon: <Download className="h-4 w-4 animate-pulse text-blue-500" />, 
-          text: "Downloading files...",
-          color: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300"
-        };
-      case 'downloaded':
-        return { 
-          icon: <FileCheck className="h-4 w-4 text-blue-500" />, 
-          text: `Downloaded ${dataset.file_count || 0} files`,
-          color: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300"
-        };
-      case 'analyzing_files':
-        return { 
-          icon: <Loader2 className="h-4 w-4 animate-spin text-indigo-500" />, 
-          text: "Analyzing files...",
-          color: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300"
-        };
-      case 'loading':
-        return { 
-          icon: <Loader2 className="h-4 w-4 animate-spin text-indigo-500" />, 
-          text: "Loading data...",
-          color: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300"
         };
       case 'assessing':
         return { 
@@ -1389,13 +1396,13 @@ export default function DatasetsPage() {
       case 'relevant':
         return { 
           icon: <CheckCircle2 className="h-4 w-4 text-green-500" />, 
-          text: `Relevant (${dataset.relevance?.relevance_score.toFixed(2)})`,
+          text: `Relevant`,
           color: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300"
         };
       case 'not_relevant':
         return { 
           icon: <AlertCircle className="h-4 w-4 text-orange-500" />, 
-          text: `Not relevant (${dataset.relevance?.relevance_score.toFixed(2)})`,
+          text: `Not relevant`,
           color: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300"
         };
       case 'skipped':
@@ -2018,14 +2025,16 @@ export default function DatasetsPage() {
                       <Card 
                         key={dataset.id}
                         className={`overflow-hidden hover:shadow-md transition-shadow cursor-pointer 
-                                   hover:border-green-200 flex flex-col border-neutral-200 
+                                   hover:border-green-200 flex flex-col border-neutral-200 relative
                                    ${dataset.isRemoving ? 'removing' : 'animate-fadeIn'}`}
                         onClick={() => handleDatasetSelect(dataset)}
                         style={style}
                       >
                         {/* Status indicator - if processing */}
                         {statusInfo && (
-                          <div className={`absolute top-2 right-2 z-10 rounded-full px-2 py-0.5 flex items-center text-xs ${statusInfo.color}`}>
+                          <div className={`absolute top-2 right-2 z-10 rounded-full px-2 py-0.5 flex items-center text-xs 
+                                           ${statusInfo.color} transition-opacity duration-500
+                                           ${dataset.isRemoving ? 'opacity-0' : 'opacity-100'}`}>
                             {statusInfo.icon}
                             <span className="ml-1">{statusInfo.text}</span>
                           </div>
