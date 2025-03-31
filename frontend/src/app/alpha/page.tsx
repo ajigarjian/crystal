@@ -2443,7 +2443,7 @@ export default function DatasetsPage() {
                               
                               <TableCell className="text-center">
                                 <div className="flex items-center justify-center">
-                                  <div className="flex items-center gap-2">
+                                  <div className="relative flex items-center">
                                     <div className="w-4 h-4 flex items-center justify-center">
                                       <Checkbox
                                         checked={selectedDatasets[dataset.id] === true}
