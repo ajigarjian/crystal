@@ -28,10 +28,28 @@ export function SummaryReport({
 }: SummaryReportProps) {
   const cleanSummary = summary?.replace(/^\(≈\d+ words\):\s*/g, '').trim() || '';
 
+  // Helper function to format bold text
+  const formatBoldText = (text: string) => {
+    if (!text) return null;
+    
+    // Split by ** markers
+    const parts = text.split(/(\*\*.*?\*\*)/g);
+    
+    return parts.map((part, i) => {
+      // Check if this part is surrounded by **
+      if (part.startsWith('**') && part.endsWith('**')) {
+        // Remove the ** and make it bold
+        const boldText = part.slice(2, -2);
+        return <strong key={i}>{boldText}</strong>;
+      }
+      return part;
+    });
+  };
+
   return (
     <Card className="mt-4 w-full bg-card">
       <CardHeader className="pb-3">
-        <CardTitle className="text-xl font-semibold capitalize">"{query}"</CardTitle>
+        <CardTitle className="text-xl font-semibold capitalize">&quot;{query}&quot;</CardTitle>
       </CardHeader>
       <CardContent className="space-y-6">
         <div>
@@ -45,7 +63,7 @@ export function SummaryReport({
           <h3 className="text-lg font-medium mb-2">Key Findings</h3>
           <ul className="text-sm leading-6 text-muted-foreground space-y-2">
             {keyFindings.map((finding, index) => (
-              <li key={index}>{finding}</li>
+              <li key={index}>{formatBoldText(finding)}</li>
             ))}
           </ul>
         </div>
