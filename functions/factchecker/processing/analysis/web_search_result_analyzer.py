@@ -341,7 +341,7 @@ def summarize_search_analysis(
     
     all_content = "\n\n".join(relevant_content)
     
-    prompt = f'''Summarize the relevant information found in these search results that addresses the user's query.
+    prompt = f'''Summarize the relevant information to directly answer the user's query.
 
 USER QUERY: "{query}"
 
@@ -351,18 +351,19 @@ RELEVANT SEARCH RESULTS:
 CURRENT YEAR: 2025
 
 TASK:
-1. Create a comprehensive summary (3-4 paragraphs) of the key information found across all sources.
-2. For each main point in your summary, cite the specific source using numbered citation format (e.g., [1], [2], etc.).
-3. Include temporal context when available (when the information was published or the time period it refers to).
-4. Note the scope of information (global, national, demographic-specific) when relevant.
-5. Identify any consensus or contradictions between sources.
-6. Keep your language clear and concise.
+1. Focus primarily on directly answering the user's query with clarity and accuracy
+2. Create a comprehensive but concise summary (2-3 paragraphs) that emphasizes key information relevant to the query
+3. Still cite sources using numbered citation format [1], [2], etc. but keep citations brief and unobtrusive
+4. Include temporal context when available and relevant to interpreting the answer
+5. Only note scope information (global, national, demographic-specific) when it affects the interpretation of results
+6. Identify consensus or contradictions between sources only when relevant to the user's understanding
+7. Keep your language clear, direct, and focused on providing the most useful answer
 
 Format your response exactly as:
-SUMMARY: [3-4 paragraph summary with proper numbered citations [1], [2], etc. for each main point]
+SUMMARY: [2-3 paragraph summary that directly answers the query, with unobtrusive numbered citations [1], [2], etc.]
 '''
 
-    system_message = "You are a research assistant who summarizes information from multiple sources. Be concise but thorough and always cite your sources using numbered citations [1], [2], etc. for each main point. Pay special attention to when the information was published or the time period it refers to, and note any limitations in scope."
+    system_message = "You are a research assistant who directly answers user questions from multiple sources. Focus on providing clear, accurate answers with minimal focus on the sources themselves. Be concise, emphasize insights relevant to the query, and use citations only when needed for credibility."
     
     try:
         response = chat_completion(

@@ -155,17 +155,17 @@ DATA POINTS:
 {chr(10).join(dataset_summaries)}
 
 INSTRUCTIONS:
-1. Present the KEY DATA POINTS that directly answer the query - include SPECIFIC NUMBERS and VALUES
-2. Be concise but thorough - include all relevant data in your analysis
-3. Format as bullet points where appropriate
-4. Always cite the source dataset and calculation strategy in brackets [] for each data point
-5. If analyzing trends over time, be sure to include the full time range and specific values in your analysis
-6. Pay special attention to the most recent data points when analyzing trends
+1. Focus primarily on answering the user's query with clarity and accuracy
+2. Present KEY DATA POINTS that directly answer the query - include SPECIFIC NUMBERS and VALUES
+3. Be concise but thorough - include all relevant data in your analysis
+4. Format as bullet points where appropriate
+5. Still cite the source dataset in brackets [] but keep citations brief and unobtrusive
+6. If analyzing trends over time, include the full time range and specific values with emphasis on the most recent data points
 7. Exclude any subset_df data from your analysis
 
 Finally, provide a "SEARCH SUMMARY" section with 2 paragraphs that:
-1. Summarizes the overall context of the datasets analyzed (their scope, limitations, quality)
-2. Synthesizes the findings in relation to the query [mentioning date context where applicable]
+1. Directly answers the user's question based on the data analysis with key insights [mention date context when applicable]
+2. Only briefly mentions the overall context of the data (scope, limitations) if it affects the interpretation of results
 
 Format your response exactly as:
 ### Key Data Points
@@ -182,15 +182,15 @@ Format your response exactly as:
 
 ### Search Summary
 
-Paragraph about the datasets used, their scope, and limitations...
-
 Paragraph directly answering the user's question based on the data analysis...
+
+Paragraph with additional context, qualifications, or trends only if relevant to understanding the answer...
 """
     
     try:
         response = chat_completion(
             prompt=prompt,
-            system_message="You are a data analyst who provides thorough analysis of data, with special attention to recent data points.",
+            system_message="You are a data analyst who directly answers users' questions using data, focusing primarily on providing clear, accurate, and actionable insights rather than describing data sources.",
             temperature=0.3,
             model_name="gpt-4o" # Using a more capable model for this task
         )
