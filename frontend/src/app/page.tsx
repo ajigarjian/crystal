@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { useEffect, useRef, useState } from "react";
 import { ArrowRight, Twitter } from "lucide-react";
 import Link from "next/link";
-import { warmFunctions } from "@/lib/firebase";
+import { trackDwellTimeEnd, trackDwellTimeStart, warmFunctions } from "@/lib/firebase";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { QUERY_EXAMPLES } from "@/lib/constants";
@@ -131,6 +131,16 @@ export default function Home() {
     });
     
     setTextStyles(newTextStyles);
+  }, []);
+  
+  // Track dwell time on alpha page
+  useEffect(() => {
+    const startTime = new Date();
+    trackDwellTimeStart('alpha_page');
+    
+    return () => {
+      trackDwellTimeEnd('alpha_page', startTime);
+    };
   }, []);
   
   // Animation loop for the trail effect
