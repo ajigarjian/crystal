@@ -1,6 +1,7 @@
 import { initializeApp } from "firebase/app";
 import { getFunctions, httpsCallable, connectFunctionsEmulator } from "firebase/functions";
 import { getFirestore, connectFirestoreEmulator } from "firebase/firestore";
+import { getAnalytics, logEvent } from "firebase/analytics";
 
 // Your web app's Firebase configuration
 // For Firebase JS SDK v7.20.0 and later, measurementId is optional
@@ -22,6 +23,47 @@ export const db = getFirestore(app);
 
 // Initialize Cloud Functions
 export const functions = getFunctions(app);
+
+// Initialize Analytics (in browser environment)
+export const getFirebaseAnalytics = () => {
+  if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'development') {
+    return getAnalytics(app);
+  }
+  return null;
+};
+
+export const trackDwellTimeStart = (pageName) => {
+  const analytics = getFirebaseAnalytics();
+  if (analytics) {
+    console.log(`Tracking dwell time start for: ${pageName}`);
+    logEvent(analytics, 'dwell_time_start', { 
+      page_name: pageName,
+      start_time: new Date().toISOString()
+    });
+    console.log('Dwell time start event logged');
+    
+    // Log a page_view event too (standard event)
+    logEvent(analytics, 'page_view', {
+      page_title: pageName,
+      page_location: window.location.href
+    });
+    console.log('Page view event logged');
+  } else {
+    console.error('Analytics not available for trackDwellTimeStart');
+  }
+};
+
+export const trackDwellTimeEnd = (pageName, startTime) => {
+  const analytics = getFirebaseAnalytics();
+  if (analytics) {
+    const endTime = new Date();
+    const durationSeconds = Math.floor((endTime - startTime) / 1000);
+    logEvent(analytics, 'dwell_time_end', { 
+      page_name: pageName,
+      duration_seconds: durationSeconds
+    });
+  }
+};
 
 // Set up emulator if in development
 if (process.env.NODE_ENV === 'development') {
@@ -87,7 +129,7 @@ export const streamSearchDatasets = async (
   const processChunk = typeof onChunk === 'function' 
     ? onChunk 
     : (chunk: any) => {
-        console.log('Received chunk:', chunk);
+        //console.log('Received chunk:', chunk);
         // Default implementation just logs the chunk
       };
 

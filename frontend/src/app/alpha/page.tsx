@@ -43,7 +43,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Progress } from "@/components/ui/progress";
 import { AlertCircle, CheckCircle2, FileText, Database, ArrowRight, Download, FileCheck, Loader2 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
-import { streamSearchDatasets, warmFunctions, streamAnalyzeDatasets, submitFeedback } from "@/lib/firebase";
+import { streamSearchDatasets, warmFunctions, streamAnalyzeDatasets, submitFeedback, trackDwellTimeStart, trackDwellTimeEnd } from "@/lib/firebase";
 import Script from "next/script";
 import { WebSearchSummary, WebSearchSummaryData } from '@/components/WebSearchSummary';
 import { WebSearchSummarySkeleton } from '@/components/WebSearchSummarySkeleton';
@@ -433,6 +433,16 @@ export default function DatasetsPage() {
     });
   }, [statusMessages]);
 
+  // Track dwell time on alpha page
+  useEffect(() => {
+    const startTime = new Date();
+    trackDwellTimeStart('alpha_page');
+    
+    return () => {
+      trackDwellTimeEnd('alpha_page', startTime);
+    };
+  }, []);
+
   // Function to process a query with streaming
   const processStreamingQuery = async (queryText: string) => {
     if (!queryText.trim()) {
@@ -514,7 +524,7 @@ export default function DatasetsPage() {
       
       // Call the Firebase function with a callback to process chunks in real-time
       await streamSearchDatasets(searchParams, (data) => {
-        console.log('Received chunk:', data);
+        // console.log('Received chunk:', data);
         
         try {
           // Handle status messages to track search stages
