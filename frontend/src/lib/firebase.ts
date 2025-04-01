@@ -24,7 +24,7 @@ export const db = getFirestore(app);
 // Initialize Cloud Functions
 export const functions = getFunctions(app);
 
-// Initialize Analytics (only in browser environment and production)
+// Initialize Analytics (in browser environment)
 export const getFirebaseAnalytics = () => {
   if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'development') {
     return getAnalytics(app);
@@ -35,10 +35,21 @@ export const getFirebaseAnalytics = () => {
 export const trackDwellTimeStart = (pageName) => {
   const analytics = getFirebaseAnalytics();
   if (analytics) {
+    console.log(`Tracking dwell time start for: ${pageName}`);
     logEvent(analytics, 'dwell_time_start', { 
       page_name: pageName,
       start_time: new Date().toISOString()
     });
+    console.log('Dwell time start event logged');
+    
+    // Log a page_view event too (standard event)
+    logEvent(analytics, 'page_view', {
+      page_title: pageName,
+      page_location: window.location.href
+    });
+    console.log('Page view event logged');
+  } else {
+    console.error('Analytics not available for trackDwellTimeStart');
   }
 };
 
