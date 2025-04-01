@@ -914,6 +914,12 @@ def stream_analyze_helper(dataset_ids, query, file_path=None):
             except Exception as e:
                 logger.error(f"Error streaming web search results: {str(e)}")
 
+        # After processing all datasets, send a message that all datasets have been analyzed
+        yield create_status_message(
+            f'All datasets have been analyzed successfully.',
+            start_time,
+            status='all_datasets_analyzed'
+        )
 
         # After processing all datasets, generate the findings summary
         if all_formatted_data:

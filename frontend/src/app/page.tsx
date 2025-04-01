@@ -9,6 +9,7 @@ import { trackDwellTimeEnd, trackDwellTimeStart, warmFunctions } from "@/lib/fir
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { QUERY_EXAMPLES } from "@/lib/constants";
+import { FeedbackWidget } from '@/components/FeedbackWidget';
 
 // Pre-generate the data text outside the component
 const DATA_TEXTS = generateDataTexts(150);
@@ -284,7 +285,7 @@ export default function Home() {
         ref={containerRef}
         className="w-full h-[calc(100vh-2rem)] rounded-lg bg-cover bg-center flex flex-col justify-center relative overflow-hidden"
         style={{
-          backgroundImage: "url('/images/crystalbackground.png')",
+          backgroundImage: "url('/images/crystal-backg.png')",
           '--mouse-x': '50%',
           '--mouse-y': '50%',
           '--trail-x-0': '50%',
@@ -320,7 +321,7 @@ export default function Home() {
             </Button>
           </Link>
         </div>
-        
+
         {/* Data Text Background Layer */}
         <div className="absolute inset-0 z-0 data-text-background">
           {DATA_TEXTS.map((text, i) => (
@@ -347,22 +348,25 @@ export default function Home() {
         
         {/* Background Image Layer with trail effect and darker overlay */}
         <div 
-          className="absolute inset-0 z-10 bg-cover bg-center trail-mask after:absolute after:inset-0 after:bg-black/70 after:backdrop-blur-sm" 
-          style={{ backgroundImage: "url('/images/crystalbackground.png')" }}
+          className="absolute inset-0 z-10 bg-cover bg-center trail-mask after:absolute after:inset-0 after:bg-black/50 after:backdrop-blur-xs" 
+          style={{ backgroundImage: "url('/images/crystal-backg.png')" }}
         ></div>
         
         {/* Content */}
         <div className="flex items-center justify-center z-20 relative w-full">
           <img 
-            src="/images/gem.svg" 
-            alt="Crystal Gem Logo" 
-            className="h-12 w-12 mr-3" 
+            src="/images/crystal-icon.png" 
+            alt="Crystal Icon" 
+            className="h-12 w-12" 
             style={{ filter: "brightness(0) invert(1)" }}
           />
           <div className="relative">
-            <h1 className="text-6xl font-bold text-white" style={{ fontFamily: 'var(--font-geist-sans)' }}>
+            <h1
+              className="text-6xl font-bold text-white"
+              style={{ fontFamily: 'Satoshi, sans-serif' }}
+            >
               Crystal
-              <Badge 
+              <Badge
                 className="ml-2 absolute -top-3 -right-16 bg-green-500 hover:bg-green-500 text-xs font-normal uppercase tracking-wide"
               >
                 Alpha
@@ -428,6 +432,8 @@ export default function Home() {
             />
           </a>
         </div>
+
+        <FeedbackWidget />
       </div>
     </div>
   );
