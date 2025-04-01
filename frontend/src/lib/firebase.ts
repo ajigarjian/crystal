@@ -1,6 +1,7 @@
 import { initializeApp } from "firebase/app";
 import { getFunctions, httpsCallable, connectFunctionsEmulator } from "firebase/functions";
 import { getFirestore, connectFirestoreEmulator } from "firebase/firestore";
+import { getAnalytics, logEvent } from "firebase/analytics";
 
 // Your web app's Firebase configuration
 // For Firebase JS SDK v7.20.0 and later, measurementId is optional
@@ -22,6 +23,36 @@ export const db = getFirestore(app);
 
 // Initialize Cloud Functions
 export const functions = getFunctions(app);
+
+// Initialize Analytics (only in browser environment and production)
+export const getFirebaseAnalytics = () => {
+  if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'development') {
+    return getAnalytics(app);
+  }
+  return null;
+};
+
+export const trackDwellTimeStart = (pageName) => {
+  const analytics = getFirebaseAnalytics();
+  if (analytics) {
+    logEvent(analytics, 'dwell_time_start', { 
+      page_name: pageName,
+      start_time: new Date().toISOString()
+    });
+  }
+};
+
+export const trackDwellTimeEnd = (pageName, startTime) => {
+  const analytics = getFirebaseAnalytics();
+  if (analytics) {
+    const endTime = new Date();
+    const durationSeconds = Math.floor((endTime - startTime) / 1000);
+    logEvent(analytics, 'dwell_time_end', { 
+      page_name: pageName,
+      duration_seconds: durationSeconds
+    });
+  }
+};
 
 // Set up emulator if in development
 if (process.env.NODE_ENV === 'development') {
@@ -87,7 +118,7 @@ export const streamSearchDatasets = async (
   const processChunk = typeof onChunk === 'function' 
     ? onChunk 
     : (chunk: any) => {
-        console.log('Received chunk:', chunk);
+        //console.log('Received chunk:', chunk);
         // Default implementation just logs the chunk
       };
 
