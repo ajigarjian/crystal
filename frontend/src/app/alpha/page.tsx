@@ -557,14 +557,20 @@ export default function DatasetsPage() {
           // Process different message types
           switch (data.type) {
             case 'status':
-              // Add new status message
+              // Global status update
               const statusMessage: StatusMessage = {
                 id: Math.random().toString(36).substring(2, 9),
                 message: data.message,
-                timestamp: data.timestamp,
+                timestamp: data.timestamp || Date.now(),
                 type: 'status'
               };
               setStatusMessages(prev => [...prev, statusMessage]);
+              
+              // Check if this is the "all datasets analyzed" message
+              if (data.status === 'all_datasets_analyzed') {
+                // You can add any specific UI state updates here if needed
+                console.log('All datasets have been analyzed');
+              }
               break;
               
             case 'discovery':
@@ -1053,6 +1059,12 @@ export default function DatasetsPage() {
                 type: 'status'
               };
               setStatusMessages(prev => [...prev, statusMessage]);
+              
+              // Check if this is the "all datasets analyzed" message
+              if (chunk.status === 'all_datasets_analyzed') {
+                // You can add any specific UI state updates here if needed
+                console.log('All datasets have been analyzed');
+              }
               break;
               
             case 'dataset_status':
@@ -1778,13 +1790,13 @@ export default function DatasetsPage() {
           <div
             className="w-full h-[calc(100vh-2rem)] rounded-lg bg-cover bg-center flex flex-col justify-center relative overflow-hidden"
             style={{
-              backgroundImage: "url('/images/crystal-bg0.png')",
+              backgroundImage: "url('/images/crystal-backg.png')",
             }}
           >
             {/* Background Image Layer with dark overlay */}
             <div 
-              className="absolute inset-0 z-10 bg-cover bg-center after:absolute after:inset-0 after:bg-black/70 after:backdrop-blur-sm" 
-              style={{ backgroundImage: "url('/images/crystal-bg0.png')" }}
+              className="absolute inset-0 z-10 bg-cover bg-center after:absolute after:inset-0 after:bg-black/50 after:backdrop-blur-xs" 
+              style={{ backgroundImage: "url('/images/crystal-backg .png')" }}
             ></div>
             
             {/* Back to home link */}
@@ -1821,13 +1833,13 @@ export default function DatasetsPage() {
             {/* Content */}
             <div className="flex items-center justify-center z-20 relative w-full">
               <img 
-                src="/images/gem.svg" 
-                alt="Crystal Gem Logo" 
-                className="h-12 w-12 mr-3" 
+                src="/images/crystal-icon.png" 
+                alt="Crystal Icon" 
+                className="h-12 w-12" 
                 style={{ filter: "brightness(0) invert(1)" }}
               />
               <div className="relative">
-                <h1 className="text-6xl font-bold text-white" style={{ fontFamily: 'var(--font-geist-sans)' }}>
+                <h1 className="text-6xl font-bold text-white" style={{ fontFamily: 'Satoshi, sans-serif' }}>
                   Crystal
                 </h1>
               </div>
@@ -1906,11 +1918,12 @@ export default function DatasetsPage() {
               </Link>
               <div className="flex items-center">
                 <img 
-                  src="/images/gem.svg" 
+                  src="/images/crystal-icon.png" 
                   alt="Crystal Logo" 
-                  className="h-6 w-6 mr-2" 
+                  className="h-6 w-6" 
+                  style={{ filter: "brightness(0) invert(0)" }}
                 />
-                <h1 className="text-2xl font-bold">Crystal</h1>
+                <h1 className="text-2xl font-bold" style={{ fontFamily: 'Satoshi, sans-serif' }}>Crystal</h1>
               </div>
             </div>
             

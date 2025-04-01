@@ -73,12 +73,12 @@ export default function WaitlistPage() {
       <div
         className="w-full h-[calc(100vh-2rem)] rounded-lg bg-cover bg-center flex flex-col justify-center relative overflow-hidden"
         style={{
-          backgroundImage: "url('/images/crystalbackground.png')",
+          backgroundImage: "url('/images/crystal-backg.png')",
         }}
       >
         {/* Background Image Layer with blur effect */}
-        <div className="absolute inset-0 z-10 bg-cover bg-center after:absolute after:inset-0 after:bg-black/70 after:backdrop-blur-sm" 
-          style={{ backgroundImage: "url('/images/crystalbackground.png')" }}>
+        <div className="absolute inset-0 z-10 bg-cover bg-center after:absolute after:inset-0 after:bg-black/50 after:backdrop-blur-sm" 
+          style={{ backgroundImage: "url('/images/crystal-backg.png')" }}>
         </div>
         
         {/* Back to home link */}
@@ -113,12 +113,12 @@ export default function WaitlistPage() {
         <>
           <div className="flex items-center justify-center z-20 relative w-full">
             <img 
-              src="/images/gem.svg" 
-              alt="Crystal Gem Logo" 
-              className="h-12 w-12 mr-3" 
+              src="/images/crystal-icon.png" 
+              alt="Crystal Icon" 
+              className="h-12 w-12" 
               style={{ filter: "brightness(0) invert(1)" }}
             />
-            <h1 className="text-6xl font-bold text-white" style={{ fontFamily: 'var(--font-geist-sans)' }}>
+            <h1 className="text-6xl font-bold text-white" style={{ fontFamily: 'Satoshi, sans-serif' }}>
               Crystal
             </h1>
           </div>
