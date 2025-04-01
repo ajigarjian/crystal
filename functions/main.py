@@ -76,6 +76,7 @@ firebase_admin.initialize_app()
         cors_origins=[
         "https://crystal-2f87e.web.app",
         "https://askcrystal.info",
+        "https://www.askcrystal.info",
         "http://localhost:3000",
         "http://localhost:5173",
         ],
@@ -227,6 +228,7 @@ def stream_search_datasets(request):
         cors_origins=[
             "https://crystal-2f87e.web.app",
             "https://askcrystal.info",
+            "https://www.askcrystal.info",
             "http://localhost:3000",
             "http://localhost:5173",
         ],
@@ -341,6 +343,7 @@ def register_waitlist(request):
     cors=options.CorsOptions(
         cors_origins=[
         "https://crystal-2f87e.web.app",
+        "https://www.askcrystal.info",
         "https://askcrystal.info",
         "http://localhost:3000",
         "http://localhost:5173",
@@ -513,6 +516,7 @@ def stream_analyze(request):
         cors_origins=[
         "https://crystal-2f87e.web.app",
         "https://askcrystal.info",
+        "https://www.askcrystal.info",
         "http://localhost:3000",
         "http://localhost:5173",
         ],
