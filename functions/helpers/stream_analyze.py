@@ -346,6 +346,11 @@ def stream_analyze_helper(dataset_ids, query, file_path=None, parallel=True):
 
         # Process it 
         datasets = process_resource_metadata(resource_metadata)
+
+        # If we have no datasets, just return
+        if not datasets:
+            logger.info("No datasets with usable resources found.")
+            raise Exception("No datasets with usable resources")
         
         # Lists to collect all formatted data and analyses
         all_formatted_data = []
@@ -1051,6 +1056,12 @@ def process_resource_metadata(resource_metadata):
         logger.info(f"Resource {resource_id} organization data: " +
                    f"organization_title={resource.get('dataset_organization_title')}, " +
                    f"organization_name={resource.get('dataset_organization_name')}")
+        
+
+        # Skip unsupported types
+        if resource.get('format') not in ["CSV", "XML", "XLSX", "XLS"]:
+            logger.error(f"Unsupported ressource {resource.get('format')}, skipping adding.")
+            continue
             
         # Initialize the dataset entry if it doesn't exist
         if dataset_id not in datasets:
@@ -1081,6 +1092,12 @@ def process_resource_metadata(resource_metadata):
         
         datasets[dataset_id]['resources'].append(resource_entry)
     
+
+    # If length is 0, return None. This means no datasets were processed.
+    if len(datasets) == 0:
+        logger.error("No usable resources were identified for resource", resource_id)
+        return None
+
     # Sort resources by position for each dataset
     for dataset_id in datasets:
         datasets[dataset_id]['resources'].sort(key=lambda x: x.get('position', 0))
