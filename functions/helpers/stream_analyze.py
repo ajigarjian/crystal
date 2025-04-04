@@ -309,7 +309,7 @@ def download_resource_helper(dataset_id, best_resource, output_dir="./downloads"
         logger.error(f"Error downloading resource: {str(e)}")
         return None
 
-def stream_analyze_helper(dataset_ids, query, file_path=None):
+def stream_analyze_helper(dataset_ids, query, file_path=None, parallel=True):
     """
     Helper function that generates the streaming analysis results for a dataset.
     Now includes web search results from search_and_analyze at the beginning.
@@ -318,6 +318,7 @@ def stream_analyze_helper(dataset_ids, query, file_path=None):
         dataset_id: ID of the dataset to analyze
         query: The user query
         file_path: Optional path to the dataset file (if not provided, will look in standard locations)
+        parallel: Boolean flag to control whether to run web searches in parallel (default: True)
         
     Yields:
         Streaming analysis results as JSON strings, including web search results
@@ -363,8 +364,8 @@ def stream_analyze_helper(dataset_ids, query, file_path=None):
             # Add the best resource directly to the dataset dictionary
             datasets[dataset_id]['best_resource'] = best_resource
 
-        # For each dataset, Download the best resource
-        for dataset_id, dataset in datasets.items():
+        def process_dataset(dataset_id, dataset):
+            """Helper function to process a single dataset"""
             # Set initial dataset status to queued
             yield create_status_message(
                 f'Adding dataset "{dataset["title"]}" to processing queue',
@@ -373,7 +374,7 @@ def stream_analyze_helper(dataset_ids, query, file_path=None):
                 status='queued'
             )
             
-            best_resource = datasets[dataset_id]['best_resource']
+            best_resource = dataset['best_resource']
 
             # Set status to downloading
             yield create_status_message(
@@ -394,8 +395,8 @@ def stream_analyze_helper(dataset_ids, query, file_path=None):
                     dataset_id=dataset_id,
                     status='error'
                 )
-                continue
-            
+                return
+
             # Update status to downloaded
             yield create_status_message(
                 f'Successfully downloaded dataset files',
@@ -430,7 +431,7 @@ def stream_analyze_helper(dataset_ids, query, file_path=None):
                 dataset_id=dataset_id,
                 status='loading'
             )
-        
+            
             try:
                 dataset_content = load_datafile(file_path)
                 
@@ -462,7 +463,7 @@ def stream_analyze_helper(dataset_ids, query, file_path=None):
                     start_time=start_time,
                     dataset_id=dataset_id
                 )
-                continue
+                return
             
             # Update status to assessing
             yield create_status_message(
@@ -471,7 +472,7 @@ def stream_analyze_helper(dataset_ids, query, file_path=None):
                 dataset_id=dataset_id,
                 status='assessing'
             )
-        
+            
             try:
                 # Create more detailed dataset info now that we have the data
                 if hasattr(dataset_content, 'shape'):
@@ -530,7 +531,6 @@ def stream_analyze_helper(dataset_ids, query, file_path=None):
                         start_time
                     )
                 
-            
             except Exception as e:
                 logger.warning(f"Error in relevance assessment: {str(e)}")
                 # Update status to error for assessment
@@ -585,20 +585,6 @@ def stream_analyze_helper(dataset_ids, query, file_path=None):
                     extracted_data["organization_title"] = dataset.get('organization', "")
                     extracted_data["organization_name"] = dataset.get('organization_name', "")
                     
-                    # Now call format_extracted_data with the updated extracted_data
-                    # Remove this premature call to format_extracted_data since analysis_result doesn't exist yet
-                    # formatted_data = format_extracted_data(
-                    #     extracted_data,
-                    #     analysis_result,
-                    #     query
-                    # )
-                    
-                    # Log the organization info we're adding
-                    logger.info(f"Adding organization info to extracted data: " + 
-                               f"source={extracted_data['dataset_source']}, " +
-                               f"title={extracted_data.get('organization_title')}, " +
-                               f"name={extracted_data.get('organization_name')}")
-                    
                     # Send extracted data as part of the stream
                     yield json.dumps({
                         'type': 'extracted_data',
@@ -639,7 +625,7 @@ def stream_analyze_helper(dataset_ids, query, file_path=None):
                 dataset_id=dataset_id,
                 status='analyzing'
             )
-        
+            
             try:
                 # This will perform the analysis and return a dictionary with the results
                 analysis_result = analyze_dataset_overview(
@@ -736,7 +722,7 @@ def stream_analyze_helper(dataset_ids, query, file_path=None):
                     dataset_id=dataset_id,
                     status='complete'
                 )
-            
+                
             except Exception as e:
                 logger.error(f"Error analyzing dataset: {str(e)}")
                 # Update status for analysis error
@@ -753,15 +739,51 @@ def stream_analyze_helper(dataset_ids, query, file_path=None):
                     start_time=start_time,
                     dataset_id=dataset_id
                 )
-                continue
-        
+                return
+
+        # Process datasets either in parallel or sequentially based on the parallel flag
+        if parallel:
+            # Process datasets in parallel
+            with concurrent.futures.ThreadPoolExecutor(max_workers=len(datasets)) as executor:
+                # Submit all tasks
+                future_to_dataset = {
+                    executor.submit(process_dataset, dataset_id, dataset): dataset_id 
+                    for dataset_id, dataset in datasets.items()
+                }
+                
+                # Process results as they complete
+                for future in concurrent.futures.as_completed(future_to_dataset):
+                    dataset_id = future_to_dataset[future]
+                    try:
+                        # Get the generator from the future
+                        generator = future.result()
+                        # Yield all messages from the generator
+                        for message in generator:
+                            yield message
+                    except Exception as e:
+                        logger.error(f"Error processing dataset {dataset_id}: {str(e)}")
+                        yield create_error_message(
+                            f'Error processing dataset {dataset_id}: {str(e)}',
+                            details=traceback.format_exc(),
+                            start_time=start_time,
+                            dataset_id=dataset_id
+                        )
+        else:
+            # Process datasets sequentially
+            for dataset_id, dataset in datasets.items():
+                # Get the generator from process_dataset
+                generator = process_dataset(dataset_id, dataset)
+                # Yield all messages from the generator
+                for message in generator:
+                    yield message
+
         # Call parallel web search at the beginning
         yield create_status_message(
-            f'Performing parallel web searches for your query...',
+            f'Performing {"parallel" if parallel else "sequential"} web searches for your query...',
             start_time
         )
         
-        # Perform parallel web search with similar queries
+        # Perform web search with similar queries
         search_results = {}
         try:
             # Generate similar queries for web search
@@ -795,23 +817,36 @@ def stream_analyze_helper(dataset_ids, query, file_path=None):
             
             all_search_results = []
             
-            # Execute searches in parallel using ThreadPoolExecutor
-            with concurrent.futures.ThreadPoolExecutor(max_workers=len(similar_queries)) as executor:
-                # Submit all search tasks
-                future_to_query = {executor.submit(search_worker, q): q for q in similar_queries}
-                
-                # Process results as they complete
-                for future in concurrent.futures.as_completed(future_to_query):
-                    query_variation = future_to_query[future]
+            if parallel:
+                # Execute searches in parallel using ThreadPoolExecutor
+                with concurrent.futures.ThreadPoolExecutor(max_workers=len(similar_queries)) as executor:
+                    # Submit all search tasks
+                    future_to_query = {executor.submit(search_worker, q): q for q in similar_queries}
+                    
+                    # Process results as they complete
+                    for future in concurrent.futures.as_completed(future_to_query):
+                        query_variation = future_to_query[future]
+                        try:
+                            result = future.result()
+                            all_search_results.append(result)
+                            yield create_status_message(
+                                f'Completed search for variation: "{query_variation}"',
+                                start_time
+                            )
+                        except Exception as e:
+                            logger.error(f"Error processing results for query '{query_variation}': {e}")
+            else:
+                # Execute searches sequentially
+                for search_query in similar_queries:
                     try:
-                        result = future.result()
+                        result = search_worker(search_query)
                         all_search_results.append(result)
                         yield create_status_message(
-                            f'Completed search for variation: "{query_variation}"',
+                            f'Completed search for variation: "{search_query}"',
                             start_time
                         )
                     except Exception as e:
-                        logger.error(f"Error processing results for query '{query_variation}': {e}")
+                        logger.error(f"Error processing results for query '{search_query}': {e}")
             
             # Process and combine the search results
             combined_results = []
@@ -838,7 +873,7 @@ def stream_analyze_helper(dataset_ids, query, file_path=None):
                 "query": query,
                 "results": unique_results[:10],  # Limit to top 10 results
                 "total_results": len(unique_results),
-                "search_method": "parallel_similar_queries"
+                "search_method": "parallel_similar_queries" if parallel else "sequential_similar_queries"
             }
             
             # Run analysis on the combined results
@@ -862,12 +897,12 @@ def stream_analyze_helper(dataset_ids, query, file_path=None):
             }
             
             yield create_status_message(
-                f'Successfully completed parallel web searches. Found {len(unique_results)} relevant results.',
+                f'Successfully completed {"parallel" if parallel else "sequential"} web searches. Found {len(unique_results)} relevant results.',
                 start_time
             )
             
         except Exception as e:
-            logger.error(f"Error in parallel web search: {str(e)}")
+            logger.error(f"Error in web search: {str(e)}")
             logger.error(traceback.format_exc())
             # Fallback to standard search if parallel search fails
             try:
