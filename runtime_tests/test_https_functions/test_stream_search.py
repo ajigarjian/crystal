@@ -8,10 +8,10 @@ FUNCTION_URL = "http://localhost:5001/crystal-2f87e/us-central1/stream_search_da
 
 # Test data to send
 test_data = {
-    "query": "Electric Vehicles",
+    "query": "Orange grove emissions factors",
     "similarity_threshold": 0.3,
     "search_method": None,  # Use hybrid search (default)
-    "max_results": 10,
+    "max_results": 20,
     "census_max_results": 3,
     "relevance_threshold": 0.4
 }
@@ -40,6 +40,7 @@ start_time = time.time()
 chunk_count = 0
 datasets_found = 0
 last_timestamp = 0
+datasets = {}  # Dictionary to store dataset information
 
 # Process each chunk as it arrives
 for chunk in response.iter_lines():
@@ -65,7 +66,12 @@ for chunk in response.iter_lines():
             elif chunk_data['type'] == 'dataset':
                 datasets_found += 1
                 dataset = chunk_data['data']
-                print(f"[DATASET] Found: {dataset['title']} (ID: {dataset['id']}, Score: {dataset.get('similarity', 'N/A')})")
+                dataset_id = dataset['id']
+                datasets[dataset_id] = {
+                    'title': dataset['title'],
+                    'score': dataset.get('similarity', 'N/A')
+                }
+                print(f"[DATASET] Found: {dataset['title']} (ID: {dataset_id}, Score: {dataset.get('similarity', 'N/A')})")
             
             elif chunk_data['type'] == 'dataset_update':
                 dataset_id = chunk_data['data']['id']
@@ -95,6 +101,9 @@ for chunk in response.iter_lines():
 # Calculate total processing time
 total_time = time.time() - start_time
 
+# Define a list of dataset IDs
+dataset_ids = []
+
 # Print summary
 print("-" * 50)
 print(f"Test Summary:")
@@ -102,3 +111,12 @@ print(f"- Total chunks received: {chunk_count}")
 print(f"- Datasets found: {datasets_found}")
 print(f"- Processing time: {total_time:.2f} seconds")
 print(f"- Function execution time: {last_timestamp:.2f} seconds")
+print("\nDataset Details:")
+print("-" * 50)
+for dataset_id, info in datasets.items():
+    dataset_ids.append(dataset_id)
+    print(f"ID: {dataset_id}")
+    print(f"Title: {info['title']}")
+    print(f"Relevance Score: {info['score']}")
+    print("-" * 50)
+print(f"Dataset IDs: {dataset_ids}")

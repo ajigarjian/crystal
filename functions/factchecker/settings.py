@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 load_dotenv()  # This should be called before importing settings
 
 # Check if running in emulator
-IS_EMULATOR = os.getenv('FUNCTIONS_EMULATOR') == 'true'
+IS_EMULATOR = (os.getenv('FUNCTIONS_EMULATOR') == 'true') or  (os.getenv('FUNCTIONS_EMULATOR') == "True")
 
 # Database settings
 DB_NAME = os.environ.get('DB_NAME', 'crystal')
