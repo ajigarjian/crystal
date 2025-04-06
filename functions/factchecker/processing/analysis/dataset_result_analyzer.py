@@ -159,7 +159,7 @@ EVALUATION CRITERIA:
 4. Resource Selection: For relevant datasets (score ≥ 0.4), recommend the most appropriate resource. Prefer CSV > JSON > XML formats.
 
 SCORING GUIDE:
-- 0.00: Not relevant (including ANY geographic/temporal mismatch)
+- 0.00-0.39: Not relevant (including ANY geographic/temporal mismatch)
 - 0.40-0.69: Potentially relevant (passes geographic/temporal checks, somewhat relevant subject)
 - 0.70-1.00: Highly relevant (passes all criteria easily)
 

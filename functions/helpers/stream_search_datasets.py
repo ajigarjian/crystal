@@ -288,8 +288,8 @@ def assess_datasets_concurrently(query, datasets, relevance_threshold, start_tim
     
     return processed_datasets
 
-def stream_search_datasets_helper(query, similarity_threshold=0.3, search_method=None, 
-                                 max_results=15, census_max_results=5, relevance_threshold=0.35):
+def stream_search_datasets_helper(query, similarity_threshold=0.25, search_method=None, 
+                                 max_results=50, census_max_results=5, relevance_threshold=0.4):
     """
     Helper function that generates the streaming search results
     """
@@ -302,11 +302,6 @@ def stream_search_datasets_helper(query, similarity_threshold=0.3, search_method
             f'I\'m starting my search for relevant datasets about "{query}"...',
             start_time
         )
-
-        # Reject requests where max_results exceeds 15
-        if max_results > 15:
-            print("ERROR! Max results may not exceed 15. Capping at 15.")
-            max_results = 15
         
         # Initialize API key for Data.gov
         gov_api_key = os.environ.get('DATA_GOV_API_KEY', '')
@@ -529,7 +524,7 @@ def stream_search_datasets_helper(query, similarity_threshold=0.3, search_method
                 'processed_count': len(all_datasets),
                 'relevant_count': len(relevant_datasets)
             },
-            'message': f'I\'ve completed my search! I found {len(relevant_datasets)} datasets in {final_execution_time:.1f} seconds.',
+            'message': f'I\'ve completed my search! I found {len(relevant_datasets)} dataset{"s" if len(relevant_datasets) != 1 else ""} in {final_execution_time:.1f} seconds.',
             'timestamp': final_execution_time
         }, cls=NumpyEncoder) + '\n'
         
