@@ -42,6 +42,24 @@ class DatasetCatalog(models.Model):
     # New field for image URL
     image_url = models.URLField(max_length=1000, blank=True, null=True)
     
+    # Data.gov extracted fields
+    datagov_date_created = models.TextField(blank=True, null=True)
+    datagov_date_issued = models.TextField(blank=True, null=True)
+    datagov_date_last_modified = models.TextField(blank=True, null=True)
+    datagov_date_metadata_created = models.TextField(blank=True, null=True)
+    datagov_date_metadata_modified = models.TextField(blank=True, null=True)
+    datagov_temporal_start = models.TextField(blank=True, null=True)
+    datagov_temporal_end = models.TextField(blank=True, null=True)
+    datagov_update_frequency = models.TextField(blank=True, null=True)
+    datagov_geographic_bbox = models.TextField(blank=True, null=True)
+    datagov_geographic_spatial_json = models.TextField(blank=True, null=True)
+    datagov_geographic_place_names = models.TextField(blank=True, null=True)
+    datagov_publisher = models.TextField(blank=True, null=True)
+    datagov_contact_email = models.TextField(blank=True, null=True)
+    datagov_progress = models.TextField(blank=True, null=True)
+    datagov_resource_type = models.TextField(blank=True, null=True)
+    datagov_identifier = models.TextField(blank=True, null=True)
+    
     class Meta:
         app_label = 'factchecker'
         db_table = 'factchecker_datasetcatalog'
