@@ -1059,7 +1059,7 @@ def process_resource_metadata(resource_metadata):
         
 
         # Skip unsupported types
-        if resource.get('format') not in ["CSV", "XML", "XLSX", "XLS"]:
+        if resource.get('format') not in ["CSV", "XML", "XLSX", "XLS", "JSON"]:
             logger.error(f"Unsupported ressource {resource.get('format')}, skipping adding.")
             continue
             

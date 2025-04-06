@@ -5,9 +5,10 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardHeader, CardFooter } from "@/components/ui/card";
+import { Card, CardHeader} from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+
 import { 
   Popover, 
   PopoverTrigger, 
@@ -42,7 +43,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Progress } from "@/components/ui/progress";
 import { AlertCircle, CheckCircle2, FileText, Database, ArrowRight, Download, FileCheck, Loader2 } from "lucide-react";
-import { Checkbox } from "@/components/ui/checkbox";
+// Checkbox import removed - no longer needed for dataset selection
 import { streamSearchDatasets, warmFunctions, streamAnalyzeDatasets, submitFeedback, trackDwellTimeStart, trackDwellTimeEnd } from "@/lib/firebase";
 import Script from "next/script";
 import { WebSearchSummary, WebSearchSummaryData } from '@/components/WebSearchSummary';
@@ -351,7 +352,7 @@ export default function DatasetsPage() {
   const [error, setError] = useState<string | null>(null);
   const [searchPerformed, setSearchPerformed] = useState(false);
   const [searchMethod, setSearchMethod] = useState<string>("hybrid");
-  const [similarityThreshold, setSimilarityThreshold] = useState<number>(0.3);
+  const [similarityThreshold, setSimilarityThreshold] = useState<number>(0.25);
   const [executionTime, setExecutionTime] = useState<number | null>(null);
   const [statusMessages, setStatusMessages] = useState<StatusMessage[]>([]);
   const [discoveryMessages, setDiscoveryMessages] = useState<StatusMessage[]>([]);
@@ -445,6 +446,9 @@ export default function DatasetsPage() {
 
   // Function to process a query with streaming
   const processStreamingQuery = async (queryText: string) => {
+    // Add the user query display at the top
+    setDisplayQuery(queryText);
+    
     if (!queryText.trim()) {
       setError("Please enter a query about government data.");
       return;
@@ -513,9 +517,9 @@ export default function DatasetsPage() {
         query: queryText,
         search_method: searchMethod === "hybrid" ? null : searchMethod,
         similarity_threshold: similarityThreshold,
-        max_results: 15,
+        max_results: 20,
         census_max_results: 5,
-        relevance_threshold: 0.4
+        relevance_threshold: 0.3
       };
       
       // Set up tracking variables
@@ -630,41 +634,9 @@ export default function DatasetsPage() {
                     ...data.data
                   };
                   
-                  // If the dataset has been assessed as not relevant, update status and then mark for removal
+                  // If the dataset has been assessed as not relevant, just update its status
                   if (data.data.relevance && data.data.relevance.is_relevant === false) {
-                    // Update the status to 'not_relevant' in a separate state update
-                    // This ensures a complete render cycle before starting the removal process
-                    setDatasets(currentDatasets => {
-                      return currentDatasets.map(d => {
-                          if (d.id === data.data.id) {
-                            return {
-                              ...d,
-                            status: 'not_relevant'  // Set the status
-                            };
-                          }
-                          return d;
-                        });
-                      });
-                      
-                    // Then after a delay, start the removal process in a separate update
-                      setTimeout(() => {
-                      setDatasets(current => {
-                        return current.map(d => {
-                          if (d.id === data.data.id) {
-                    return {
-                      ...d,
-                              isRemoving: true  // Start the removal animation
-                    };
-                  }
-                  return d;
-                });
-              });
-              
-                      // After animation completes, remove the dataset
-                    setTimeout(() => {
-                        setDatasets(current => current.filter(d => d.id !== data.data.id));
-                      }, 1000); // Animation duration
-                    }, 1500); // Show "Not relevant" status for 1.5 seconds
+                    updatedDatasets[datasetIndex].status = 'not_relevant';
                   } 
                   // If the dataset is being assessed, show the assessing state
                   else if (data.data.status === 'assessing') {
@@ -986,340 +958,22 @@ export default function DatasetsPage() {
       return;
     }
     
-    // If search is already complete, start analysis instead of searching again
-    if (searchComplete && datasets.length > 0) {
-      startAnalysis();
-    } else {
-      // Otherwise do the search as before
-      processStreamingQuery(query);
-    }
+    // Always start a new search when the button is clicked
+    processStreamingQuery(query);
+    // Analysis will be automatically triggered when search completes
+    // via the useEffect hook we added
   };
 
-  // Handle dataset selection
-  const handleDatasetSelect = (dataset: Dataset) => {
-    // Call stream_analyze instead of redirecting to beta page
-    const datasetIds = [dataset.id];
-    startAnalysisWithDatasets(datasetIds);
-  };
-  
-  // Handle multi-dataset selection - for when user wants to analyze multiple datasets
-  const handleMultiDatasetSelect = () => {
-    // Get the selected datasets
-    const datasetIds = Object.entries(selectedDatasets)
-      .filter(([_, isSelected]) => isSelected)
-      .map(([id]) => id);
-      
-    if (datasetIds.length === 0) {
-      setError("Please select at least one dataset to analyze.");
-      return;
-    }
-    
-    startAnalysisWithDatasets(datasetIds);
+  // Dataset click handler - now just shows preview
+  const handleDatasetClick = (dataset: Dataset) => {
+    // Just show dataset preview instead of selecting for analysis
+    setSelectedPreview(dataset);
+    setPreviewOpen(true);
   };
 
-  // Function to start analysis with selected datasets
-  const startAnalysisWithDatasets = async (datasetIds: string[]) => {
-    try {
-      // Update UI state
-      setIsAnalyzing(true);
-      setError(null);
-      setAnalysisComplete(false);
-      setAnalysisResults(null);
-      setSummaryData(null);
-      setWebSearchData(null);  // Reset web search data
-      setIsWebSearchLoading(true); // Show web search skeleton
-      
-      // Initialize processing datasets
-      const datasetsToAnalyze = datasets.filter(d => datasetIds.includes(d.id));
-      
-      // Mark selected datasets as queued
-      const initialProcessing = datasetsToAnalyze.map(dataset => ({
-        ...dataset,
-        status: 'queued' as const // Use const assertion to fix type issue
-      }));
-      
-      setProcessingDatasets(initialProcessing);
-      
-      // Add a status message that analysis is starting
-      const startMessage: StatusMessage = {
-        id: Math.random().toString(36).substring(2, 9),
-        message: `Starting analysis of ${datasetIds.length} datasets...`,
-        timestamp: Date.now(),
-        type: 'status'
-      };
-      setStatusMessages(prev => [...prev, startMessage]);
-      
-      // Call the Firebase function with streaming
-      const analysisChunks = await streamAnalyzeDatasets(
-        {
-          query: query,
-          dataset_ids: datasetIds
-        },
-        (chunk) => {
-          console.log('Analysis chunk received:', chunk);
-          
-          // Handle different chunk types
-          switch (chunk.type) {
-            case 'status':
-              // Global status update
-              const statusMessage: StatusMessage = {
-                id: Math.random().toString(36).substring(2, 9),
-                message: chunk.message,
-                timestamp: chunk.timestamp || Date.now(),
-                type: 'status'
-              };
-              setStatusMessages(prev => [...prev, statusMessage]);
-              
-              // Check if this is the "all datasets analyzed" message
-              if (chunk.status === 'all_datasets_analyzed') {
-                // You can add any specific UI state updates here if needed
-                console.log('All datasets have been analyzed');
-              }
-              break;
-              
-            case 'dataset_status':
-              // Update status for a specific dataset
-              setProcessingDatasets(prev => {
-                return prev.map(d => {
-                  if (d.id === chunk.dataset_id) {
-                    return {
-                      ...d,
-                      status: chunk.status,
-                      progress: chunk.progress // For progress bars
-                    };
-                  }
-                  return d;
-                });
-              });
-              
-              // Also add a status message
-              if (chunk.message) {
-                const datasetStatusMessage: StatusMessage = {
-                  id: Math.random().toString(36).substring(2, 9),
-                  message: chunk.message,
-                  timestamp: chunk.timestamp || Date.now(),
-                  type: 'status'
-                };
-                setStatusMessages(prev => [...prev, datasetStatusMessage]);
-              }
-              break;
-              
-            case 'download_start':
-              // Update dataset to downloading state
-              setProcessingDatasets(prev => {
-                return prev.map(d => {
-                  if (d.id === chunk.dataset_id) {
-                    return {
-                      ...d,
-                      status: 'downloading',
-                      progress: 0 // Initialize progress
-                    };
-                  }
-                  return d;
-                });
-              });
-              break;
-              
-            case 'download_progress':
-              // Update download progress
-              setProcessingDatasets(prev => {
-                return prev.map(d => {
-                  if (d.id === chunk.dataset_id) {
-                    return {
-                      ...d,
-                      progress: chunk.progress
-                    };
-                  }
-                  return d;
-                });
-              });
-              break;
-              
-            case 'download_complete':
-              // Mark download as complete
-              setProcessingDatasets(prev => {
-                return prev.map(d => {
-                  if (d.id === chunk.dataset_id) {
-                    return {
-                      ...d,
-                      status: 'downloaded',
-                      file_count: chunk.file_count || d.file_count,
-                      progress: 100
-                    };
-                  }
-                  return d;
-                });
-              });
-              
-              // Add status message
-              const downloadMessage: StatusMessage = {
-                id: Math.random().toString(36).substring(2, 9),
-                message: `Downloaded ${chunk.file_count || 'all'} files for dataset "${chunk.dataset_title || 'selected dataset'}"`,
-                timestamp: chunk.timestamp || Date.now(),
-                type: 'status'
-              };
-              setStatusMessages(prev => [...prev, downloadMessage]);
-              break;
-              
-            case 'analysis_start':
-              // Update dataset to analyzing state
-              setProcessingDatasets(prev => {
-                return prev.map(d => {
-                  if (d.id === chunk.dataset_id) {
-                    return {
-                      ...d,
-                      status: 'analyzing'
-                    };
-                  }
-                  return d;
-                });
-              });
-              
-              // Add status message
-              const analysisStartMessage: StatusMessage = {
-                id: Math.random().toString(36).substring(2, 9),
-                message: `Analyzing dataset "${chunk.dataset_title || 'selected dataset'}"...`,
-                timestamp: chunk.timestamp || Date.now(),
-                type: 'status'
-              };
-              setStatusMessages(prev => [...prev, analysisStartMessage]);
-              break;
-              
-            case 'analysis_result':
-              // Store analysis results
-              if (chunk.dataset_id) {
-                setProcessingDatasets(prev => {
-                  return prev.map(d => {
-                    if (d.id === chunk.dataset_id) {
-                      return {
-                        ...d,
-                        status: 'analyzed',
-                        analysis_results: chunk.results
-                      };
-                    }
-                    return d;
-                  });
-                });
-              }
-              
-              // Update global analysis results
-              setAnalysisResults(prev => {
-                const newResults = prev ? {...prev} : {};
-                if (chunk.dataset_id) {
-                  newResults[chunk.dataset_id] = chunk.results;
-                }
-                return newResults;
-              });
-              break;
-              
-            case 'complete':
-              // Analysis is complete
-              setAnalysisComplete(true);
-              setIsAnalyzing(false);
-              
-              // Add completion message
-              const completeMessage: StatusMessage = {
-                id: Math.random().toString(36).substring(2, 9),
-                message: chunk.message || "Analysis complete!",
-                timestamp: chunk.timestamp || Date.now(),
-                type: 'status'
-              };
-              setStatusMessages(prev => [...prev, completeMessage]);
-              
-              // Update all datasets to completed status if they're not already
-              setProcessingDatasets(prev => {
-                return prev.map(d => {
-                  if (d.status !== 'analyzed' && d.status !== 'error') {
-                    return {
-                      ...d,
-                      status: 'analyzed'
-                    };
-                  }
-                  return d;
-                });
-              });
-              break;
-              
-            case 'error':
-              // Handle errors
-              if (chunk.dataset_id) {
-                // Dataset-specific error
-                setProcessingDatasets(prev => {
-                  return prev.map(d => {
-                    if (d.id === chunk.dataset_id) {
-                      return {
-                        ...d,
-                        status: 'error',
-                        error: chunk.message
-                      };
-                    }
-                    return d;
-                  });
-                });
-              }
-              
-              // Add error message to status
-              const errorMessage: StatusMessage = {
-                id: Math.random().toString(36).substring(2, 9),
-                message: `Error: ${chunk.message}`,
-                timestamp: chunk.timestamp || Date.now(),
-                type: 'error'
-              };
-              setStatusMessages(prev => [...prev, errorMessage]);
-              break;
-              
-            case 'web_search_summary':
-              if (chunk.data) {
-                setWebSearchData(chunk.data);
-                setIsWebSearchLoading(false);
-                
-                // Add a status message for web search completion
-                const webSearchMessage: StatusMessage = {
-                  id: Math.random().toString(36).substring(2, 9),
-                  message: `Web search completed with ${chunk.data.total_relevant_sources || 0} relevant sources`,
-                  timestamp: chunk.timestamp || Date.now(),
-                  type: 'status'
-                };
-                setStatusMessages(prev => [...prev, webSearchMessage]);
-              }
-              break;
-              
-            default:
-              console.log('Unknown analysis chunk type:', chunk.type, chunk);
-          }
-        }
-      );
-      
-      // If we reached here with no completion message, manually set as complete
-      if (!analysisComplete) {
-        setAnalysisComplete(true);
-        setIsAnalyzing(false);
-        
-        const finalMessage: StatusMessage = {
-          id: Math.random().toString(36).substring(2, 9),
-          message: "Analysis complete!",
-          timestamp: Date.now(),
-          type: 'status'
-        };
-        setStatusMessages(prev => [...prev, finalMessage]);
-      }
-      
-      return analysisChunks;
-    } catch (err) {
-      console.error("Error in dataset analysis:", err);
-      setError(`Failed to analyze datasets: ${err instanceof Error ? err.message : String(err)}`);
-      setIsAnalyzing(false);
-      setIsWebSearchLoading(false);
-      
-      // Add error to status messages
-      const errorMessage: StatusMessage = {
-        id: Math.random().toString(36).substring(2, 9),
-        message: `Error: Failed to analyze datasets: ${err instanceof Error ? err.message : String(err)}`,
-        timestamp: Date.now(),
-        type: 'error'
-      };
-      setStatusMessages(prev => [...prev, errorMessage]);
-    }
+  // Helper function to get a status message with dataset count
+  const getDatasetCountText = (datasetsCount: number) => {
+    return `${datasetsCount} dataset${datasetsCount !== 1 ? 's' : ''}`;
   };
 
   // Helper function to get image URL
@@ -1486,8 +1140,7 @@ export default function DatasetsPage() {
     sessionStorage.setItem('lastUrl', currentUrl);
   }, []);
 
-  // Add state to track selected datasets
-  const [selectedDatasets, setSelectedDatasets] = useState<Record<string, boolean>>({});
+  // Analysis state variables
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [processingDatasets, setProcessingDatasets] = useState<Dataset[]>([]);
   const [analysisComplete, setAnalysisComplete] = useState(false);
@@ -1495,29 +1148,21 @@ export default function DatasetsPage() {
   const [summaryData, setSummaryData] = useState<any>(null);
   const [isSummaryLoading, setIsSummaryLoading] = useState(false);
 
-  // Initialize datasets as selected by default
+  // This effect will automatically trigger analysis when search is complete
   useEffect(() => {
-    if (datasets.length > 0) {
-      const initialSelection = datasets.reduce((acc, dataset) => {
-        // Check if this dataset is in the preferred set
-        const isPreferred = PREFERRED_DATASET_ID_SET.has(dataset.id);
-        acc[dataset.id] = isPreferred;
-        return acc;
-      }, {} as Record<string, boolean>);
-      
-      setSelectedDatasets(initialSelection);
+    if (searchComplete && datasets.length > 0 && !isAnalyzing && !analysisComplete) {
+      // Automatically start analysis with all relevant datasets when search is complete; uncomment to enable
+      startAnalysis();
     }
-  }, [datasets]);
+  }, [searchComplete, datasets, isAnalyzing, analysisComplete]);
 
-  // Add the new analysis function
+  // Analysis function - now uses all relevant datasets automatically
   const startAnalysis = async () => {
-    // Get the selected datasets
-    const datasetIds = Object.entries(selectedDatasets)
-      .filter(([_, isSelected]) => isSelected)
-      .map(([id]) => id);
+    // Get all relevant datasets (all datasets that remain after search filtering)
+    const datasetIds = datasets.map(dataset => dataset.id);
       
     if (datasetIds.length === 0) {
-      setError("Please select at least one dataset to analyze.");
+      setError("No relevant datasets found to analyze.");
       return;
     }
     
@@ -1531,10 +1176,10 @@ export default function DatasetsPage() {
       setWebSearchData(null);  // Reset web search data
       setIsWebSearchLoading(true); // Show web search skeleton
       
-      // Initialize processing datasets
-      const datasetsToAnalyze = datasets.filter(d => datasetIds.includes(d.id));
+      // All remaining datasets are considered relevant for analysis
+      const datasetsToAnalyze = datasets;
       
-      // Mark selected datasets as queued
+      // Mark all datasets as queued
       const initialProcessing = datasetsToAnalyze.map(dataset => ({
         ...dataset,
         status: 'queued'
@@ -1792,10 +1437,406 @@ export default function DatasetsPage() {
     }
   }, [statusMessages]);
 
+  // Add state for storing the displayed query
+  const [displayQuery, setDisplayQuery] = useState<string | null>(null);
+
   return (
-    <>
-      {/* Initial hero state - when no search has been performed */}
-      {!searchPerformed ? (
+    <div className="flex flex-col min-h-screen bg-gray-50">
+      {/* Move the query display bubble after the header */}
+      {searchPerformed ? (
+      <div>  {/* Add this wrapper div */}
+            {/* Header with logo, back button, and sidebar trigger */}
+            <div className="flex h-16 shrink-0 items-center justify-between px-4">
+              <div className="flex items-center">
+                <Link href="/">
+                  <div className="flex items-center cursor-pointer hover:opacity-80 transition-opacity">
+                    <img 
+                      src="/images/crystal-icon.png" 
+                      alt="Crystal Logo" 
+                      className="h-6 w-6" 
+                    />
+                    <h1 className="text-lg font-bold dark:text-white" style={{ fontFamily: 'Satoshi, sans-serif' }}>Crystal</h1>
+                  </div>
+                </Link>
+              </div>
+              
+              {/* Sidebar trigger */}
+              <div className="flex items-center">
+                <FeedbackWidget />
+              </div>
+            </div>
+            
+            {/* Add query display bubble here, after the header */}
+            {displayQuery && (
+              <div className="flex w-full flex-col gap-1 items-end mx-auto md:max-w-3xl lg:max-w-[40rem] xl:max-w-[48rem] px-4 mt-2 mb-8">
+                <div className="relative max-w-[var(--user-chat-width,70%)] rounded-3xl bg-gray-100 px-5 py-2.5 shadow-sm">
+                  <div className="whitespace-pre-wrap text-sm break-words text-gray-800">
+                    {displayQuery}
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            {/* Main content area - keep the responsive width constraints */}
+            <div className="flex flex-1 flex-col mx-auto w-full md:max-w-3xl lg:max-w-[40rem] xl:max-w-[48rem] p-4 overflow-auto">
+              {/* Error message */}
+              {error && (
+                <Alert variant="destructive" className="mb-4">
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              )}
+
+              {/* Status message history */}
+              {statusMessages.length > 0 && (
+                <div className="relative mb-4">
+                  <div 
+                    onClick={() => setShowAllStatusHistory(prev => !prev)} 
+                    className={`text-sm text-neutral-600 dark:text-neutral-400 ${loading ? 'animate-pulse' : ''} cursor-pointer flex items-center`}
+                  >
+                    {statusMessages[statusMessages.length - 1].message}
+                    {statusMessages.length > 1 && (
+                      <ChevronDown className={`h-4 w-4 ml-1 transition-transform ${showAllStatusHistory ? 'rotate-180' : ''}`} />
+                    )}
+                  </div>
+                  
+                  {/* Expanded history view - reversed order */}
+                  {showAllStatusHistory && statusMessages.length > 1 && (
+                    <div className="mt-2 pl-4 border-l-2 border-gray-300 dark:border-gray-700 space-y-2 max-h-60 overflow-y-auto status-message-container">
+                      {statusMessages.slice(0, -1).map((msg, index) => (
+                        <div 
+                          key={msg.id}
+                          className={`text-sm ${msg.type === 'error' ? 'text-red-500' : 'text-neutral-500 dark:text-neutral-400'}`}
+                        >
+                          {msg.message}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Loading state with live discovery feed */}
+              {loading && (
+                <div className="space-y-4">
+                  {/* Show found datasets while still loading */}
+                  {datasets.length > 0 && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                      {datasets.map((dataset, index) => {
+                        const statusInfo = getDatasetStatusInfo(dataset);
+                        const style = { '--animation-delay': `${index * 50}ms` } as React.CSSProperties;
+                        
+                        return (
+                          <Card 
+                            key={dataset.id}
+                            className={`overflow-hidden hover:shadow-md transition-shadow cursor-pointer 
+                                     hover:border-green-200 flex flex-col border-neutral-200 relative
+                                     ${dataset.status === 'not_relevant' ? 'opacity-50' : ''} 
+                                     animate-fadeIn`}
+                            onClick={() => handleDatasetClick(dataset)}
+                            style={style}
+                          >
+                            {/* Status indicator - if processing */}
+                            {statusInfo && (
+                              <div className={`absolute top-1 right-1 z-10 rounded-full px-1.5 py-0.5 flex items-center text-xs 
+                                             ${statusInfo.color} transition-opacity duration-500
+                                             ${dataset.isRemoving ? 'opacity-0' : 'opacity-100'}`}>
+                                {statusInfo.icon}
+                                <span className="ml-1">{statusInfo.text}</span>
+                              </div>
+                            )}
+                            
+                            <CardHeader className="pt-2 px-2">
+                              <div className="flex items-center gap-2">
+                                <div className="h-6 w-6 rounded overflow-hidden bg-neutral-200 flex-shrink-0">
+                                  <img 
+                                    src={getImageUrl(dataset)} 
+                                    alt={`Dataset logo`}
+                                    className="w-full h-full object-cover"
+                                    onError={(e) => {
+                                      const target = e.target as HTMLImageElement;
+                                      target.src = `https://placehold.co/32x32/4F46E5/ffffff?text=D`;
+                                    }}
+                                  />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <h3 className="text-sm font-medium leading-snug line-clamp-1">
+                                    {dataset.title}
+                                  </h3>
+                                  <p className="text-xs text-neutral-500 truncate mt-0.5" title={getOrganizationName(dataset)}>
+                                    {getOrganizationName(dataset)}
+                                  </p>
+                                </div>
+                              </div>
+                            </CardHeader>
+                            
+                            {/* Preview button - adjusted padding */}
+                            {dataset.preview && (
+                              <div className="px-2 pb-1">  {/* Reduced bottom padding from pb-2 to pb-1 */}
+                                <Button 
+                                  variant="outline" 
+                                  size="sm" 
+                                  className="w-full text-xs"
+                                  onClick={(e) => handlePreviewClick(e, dataset)}
+                                >
+                                  <FileText className="h-3 w-3 mr-1" />
+                                  Preview Data
+                                </Button>
+                              </div>
+                            )}
+                          </Card>
+                        );
+                      })}
+                      
+                      {/* Show skeletons for more datasets coming */}
+                      {loading && datasets.length > 0 && !datasets.some(d => d.status) && (
+                        <Card className="overflow-hidden border-neutral-200 animate-pulse">
+                          <CardHeader className="p-3 pb-2">
+                            <div className="flex items-start">
+                              <Skeleton className="h-6 w-6 rounded mr-2 flex-shrink-0" />
+                              <div className="flex-1">
+                                <Skeleton className="h-3 w-3/4 mb-1" />
+                                <Skeleton className="h-2 w-full" />
+                              </div>
+                            </div>
+                          </CardHeader>
+                         
+                        </Card>
+                      )}
+                    </div>
+                  )}
+                  
+                  {/* Show skeletons if no datasets found yet */}
+                  {datasets.length === 0 && discoveryMessages.length === 0 && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                      {Array.from({ length: 6 }).map((_, index) => (
+                        <Card key={index} className="overflow-hidden border-neutral-200">
+                          <CardHeader className="p-3 pb-2">
+                            <div className="flex items-start">
+                              <Skeleton className="h-6 w-6 rounded mr-2 flex-shrink-0" />
+                              <div className="flex-1">
+                                <Skeleton className="h-3 w-3/4 mb-1" />
+                                <Skeleton className="h-2 w-full" />
+                              </div>
+                            </div>
+                          </CardHeader>
+                        
+                        </Card>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Search complete results */}
+              {!loading && searchPerformed && (
+                <div className="space-y-4">
+                  {datasets.length > 0 ? (
+                    <>
+                      {/* New Table View for Datasets */}
+                      <div className="rounded-md border shadow-sm overflow-hidden">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead className="w-[40px]"></TableHead>
+                              {/* Increased width of the Dataset column */}
+                              <TableHead className="max-w-[530px] w-[530px]">Dataset</TableHead>
+                              <TableHead className="w-[120px] text-center">Status</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {datasets.map((dataset) => {
+                              const relevanceScore = dataset.relevance?.relevance_score || dataset.similarity || 0;
+                              
+                              // Find the processing status for this dataset
+                              const processingDataset = processingDatasets.find(d => d.id === dataset.id);
+                              const processingStatus = processingDataset?.status;
+                              
+                              return (
+                                <TableRow 
+                                  key={dataset.id}
+                                  className={`
+                                    ${isAnalyzing ? 'opacity-70 pointer-events-none select-none' : 'cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800/50'}
+                                  `}
+                                  onClick={(e) => {
+                                    // Only allow clicking if not analyzing
+                                    if (isAnalyzing) return;
+                                    
+                                    // Prevent toggling if clicking on a button or interactive element
+                                    if (e.target instanceof HTMLElement && 
+                                        (e.target.closest('button') || 
+                                         e.target.tagName === 'INPUT' ||
+                                         e.target.closest('input') ||
+                                         e.target.closest('label'))) {
+                                      return;
+                                    }
+                                    
+                                    // Show dataset preview
+                                    handleDatasetClick(dataset);
+                                  }}
+                                >
+                                  <TableCell className="p-2">
+                                    <div className="h-8 w-8 rounded overflow-hidden bg-neutral-200 flex-shrink-0">
+                                      <img 
+                                        src={getImageUrl(dataset)} 
+                                        alt={`${getOrganizationName(dataset)} logo`}
+                                        className="w-full h-full object-cover"
+                                        onError={(e) => {
+                                          const target = e.target as HTMLImageElement;
+                                          target.src = `https://placehold.co/32x32/4F46E5/ffffff?text=D`;
+                                        }}
+                                      />
+                                    </div>
+                                  </TableCell>
+                                  
+                                  <TableCell className="py-2 max-w-[530px] w-[530px]">
+                                    <div className="overflow-hidden">
+                                      <div className="flex items-center space-x-2">
+                                        <p className="font-medium text-sm truncate" title={dataset.title}>{dataset.title}</p>
+                                        {/* Add relevance chip next to title */}
+                                        {relevanceScore > 0.65 ? (
+                                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300 whitespace-nowrap">
+                                            <CheckCircle2 className="h-3 w-3 mr-1" />
+                                            {Math.round(relevanceScore * 100)}%
+                                          </span>
+                                        ) : (
+                                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300 whitespace-nowrap">
+                                            {Math.round(relevanceScore * 100)}%
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="flex justify-between items-center">
+                                        <p className="text-xs text-neutral-500 truncate" title={getOrganizationName(dataset)}>
+                                          {getOrganizationName(dataset)}
+                                        </p>
+                                      </div>
+                                    </div>
+                                  </TableCell>
+                                  
+                                  <TableCell className="text-center">
+                                    {processingStatus ? (
+                                      <div className="flex flex-col items-center justify-center">
+                                        <Badge className={`${getStatusColor(processingStatus)}`}>
+                                          {getStatusIcon(processingStatus)}
+                                          <span className="ml-1">{getStatusLabel(processingStatus)}</span>
+                                        </Badge>
+                                        {/* Add progress bar for downloading status */}
+                                        {processingStatus === 'downloading' && processingDataset.progress && (
+                                          <Progress 
+                                            value={processingDataset.progress} 
+                                            className="h-1 w-16 mt-1" 
+                                          />
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <span className="text-xs text-neutral-500">
+                                        {isAnalyzing ? 'Queued' : 'Ready'}
+                                      </span>
+                                    )}
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+                      </div>
+
+                      {/* Analysis Results Section */}
+                      {(isAnalyzing || analysisComplete) && (
+                        <div className="mt-6 space-y-4">
+                          <Tabs 
+                            defaultValue="datasets" 
+                            value={activeTab} 
+                            onValueChange={setActiveTab}
+                            className="w-full"
+                          >
+                            <TabsList className="grid w-full grid-cols-2 mb-4">
+                              <TabsTrigger value="datasets" className="flex items-center gap-2">
+                                <Database className="h-4 w-4" />
+                                <span>Dataset Summary</span>
+                              </TabsTrigger>
+                              <TabsTrigger value="webSearch" className="flex items-center gap-2">
+                                <Globe className="h-4 w-4" />
+                                <span>Web Research</span>
+                              </TabsTrigger>
+                            </TabsList>
+                            
+                            <TabsContent value="datasets" className="space-y-4">
+                              {isAnalyzing && !summaryData ? (
+                                <SummaryReportSkeleton query={query} />
+                              ) : summaryData ? (
+                                <SummaryReport 
+                                  query={query}
+                                  summary={summaryData.summary || ''}
+                                  keyFindings={summaryData.key_data_points || []}
+                                  sources={summaryData.sources || []}
+                                />
+                              ) : (
+                                <div className="text-center p-8 text-muted-foreground">
+                                  <p>No dataset analysis available</p>
+                                </div>
+                              )}
+                              
+                              {processingDatasets
+                                .filter(d => d.analysis_results)
+                                .map(dataset => (
+                                  <Card key={dataset.id} className="overflow-hidden mt-4">
+                                    <CardHeader className="p-4 bg-muted/50">
+                                      <h3 className="text-lg font-semibold">{dataset.title}</h3>
+                                    </CardHeader>
+                                    <div className="p-4">
+                                      {dataset.analysis_results ? (
+                                        <div>
+                                          <div className="text-sm text-muted-foreground">
+                                            {dataset.analysis_results.summary}
+                                          </div>
+                                          {dataset.analysis_results.key_points && (
+                                            <div className="mt-4">
+                                              <h4 className="text-sm font-semibold mb-2">Key Points</h4>
+                                              <ul className="list-disc pl-5 text-sm text-muted-foreground">
+                                                {dataset.analysis_results.key_points.map((point: string, idx: number) => (
+                                                  <li key={idx}>{point}</li>
+                                                ))}
+                                              </ul>
+                                            </div>
+                                          )}
+                                        </div>
+                                      ) : (
+                                        <div className="text-sm text-muted-foreground italic">
+                                          No detailed analysis available for this dataset.
+                                        </div>
+                                      )}
+                                    </div>
+                                  </Card>
+                                ))}
+                            </TabsContent>
+                            
+                            <TabsContent value="webSearch" className="space-y-4">
+                              {isWebSearchLoading ? (
+                                <WebSearchSummarySkeleton />
+                              ) : webSearchData ? (
+                                <WebSearchSummary data={webSearchData} />
+                              ) : (
+                                <div className="text-center p-8 text-muted-foreground">
+                                  <p>No web search results available yet</p>
+                                </div>
+                              )}
+                            </TabsContent>
+                          </Tabs>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="text-center py-10">
+                      <p className="text-neutral-500">Sorry, we don't seem to have any datasets for this query yet. </p>
+                      <p className="text-neutral-500">We're working hard to add more sources, please click "Feedback" to tell us!</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+      </div>
+      ) : (
+        /* Initial hero state - when no search has been performed */
         <div className="flex items-center justify-center min-h-screen bg-neutral-50 dark:bg-neutral-50 p-4">
           <div
             className="w-full h-[calc(100vh-2rem)] rounded-lg bg-cover bg-center flex flex-col justify-center relative overflow-hidden"
@@ -1809,50 +1850,24 @@ export default function DatasetsPage() {
               style={{ backgroundImage: "url('/images/crystal-backg .png')" }}
             ></div>
             
-            {/* Back to home link */}
-            <div className="absolute top-6 left-6 z-30">
-              <Link href="/">
-                <Button 
-                  variant="link" 
-                  className="text-white hover:text-green-400 transition-colors p-2 rounded-full hover:bg-white/10 group"
-                  style={{ fontFamily: 'var(--font-geist-sans)' }}
-                  aria-label="Back to home"
-                >
-                  <svg 
-                    xmlns="http://www.w3.org/2000/svg" 
-                    width="24" 
-                    height="24" 
-                    viewBox="0 0 24 24" 
-                    fill="none" 
-                    stroke="currentColor" 
-                    strokeWidth="2" 
-                    strokeLinecap="round" 
-                    strokeLinejoin="round"
-                    className="transition-transform duration-200 group-hover:translate-x-[-2px]"
-                  >
-                    <path d="m12 19-7-7 7-7"/>
-                    <path d="M19 12H5"/>
-                  </svg>
-                </Button>
-              </Link>
-            </div>
-            
             {/* Add FeedbackWidget */}
             <FeedbackWidget />
             
             {/* Content */}
             <div className="flex items-center justify-center z-20 relative w-full">
-              <img 
-                src="/images/crystal-icon.png" 
-                alt="Crystal Icon" 
-                className="h-12 w-12" 
-                style={{ filter: "brightness(0) invert(1)" }}
-              />
-              <div className="relative">
-                <h1 className="text-6xl font-bold text-white" style={{ fontFamily: 'Satoshi, sans-serif' }}>
-                  Crystal
-                </h1>
-              </div>
+              <Link href="/">
+                <div className="flex items-center cursor-pointer hover:opacity-80 transition-opacity">
+                  <img 
+                    src="/images/crystal-icon.png" 
+                    alt="Crystal Icon" 
+                    className="h-12 w-12" 
+                    style={{ filter: "brightness(0) invert(1)" }}
+                  />
+                  <h1 className="text-6xl font-bold text-white" style={{ fontFamily: 'Satoshi, sans-serif' }}>
+                    Crystal
+                  </h1>
+                </div>
+              </Link>
             </div>
             <div className="relative p-2 mt-2 z-20 text-center w-full">
               <h2 className="relative text-xl sm:text-2xl text-white" style={{ fontFamily: 'var(--font-geist-sans)' }}>
@@ -1896,550 +1911,6 @@ export default function DatasetsPage() {
               </div>
             </div>
           </div>
-        </div>
-      ) : (
-        /* Regular datasets page layout when search has been performed */
-        <div className="container mx-auto py-6 space-y-6">
-          {/* Back button and logo section */}
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center">
-              <Link href="/">
-                <Button 
-                  variant="ghost" 
-                  className="p-2 mr-2 group"
-                  aria-label="Back to home"
-                >
-                  <svg 
-                    xmlns="http://www.w3.org/2000/svg" 
-                    width="20" 
-                    height="20" 
-                    viewBox="0 0 24 24" 
-                    fill="none" 
-                    stroke="currentColor" 
-                    strokeWidth="2" 
-                    strokeLinecap="round" 
-                    strokeLinejoin="round"
-                    className="transition-transform duration-200 group-hover:translate-x-[-2px]"
-                  >
-                    <path d="m12 19-7-7 7-7"/>
-                    <path d="M19 12H5"/>
-                  </svg>
-                </Button>
-              </Link>
-              <div className="flex items-center">
-                <img 
-                  src="/images/crystal-icon.png" 
-                  alt="Crystal Logo" 
-                  className="h-6 w-6" 
-                  style={{ filter: "brightness(0) invert(0)" }}
-                />
-                <h1 className="text-2xl font-bold" style={{ fontFamily: 'Satoshi, sans-serif' }}>Crystal</h1>
-              </div>
-            </div>
-            
-            {/* Add FeedbackWidget */}
-            <FeedbackWidget />
-          </div>
-          
-          {/* Search form - simplified */}
-          <form onSubmit={handleSubmit} className="mb-6">
-            <div className="flex space-x-2">
-              <Input
-                id="query"
-                type="text"
-                placeholder="Refine your search..."
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                className="flex-1"
-                disabled={loading}
-              />
-              <Button 
-                type="submit" 
-                disabled={loading || isAnalyzing} 
-                className={`${
-                  analysisComplete
-                    ? "bg-green-600 hover:bg-green-700 text-white"
-                    : !loading && searchComplete && datasets.length > 0
-                      ? isAnalyzing
-                        ? "bg-black/80 text-white" 
-                        : "bg-black hover:bg-black/90 text-white animate-pulse"
-                      : "bg-green-600 hover:bg-green-700 text-white"
-                }`}
-              >
-                {loading 
-                  ? "Searching..." 
-                  : isAnalyzing
-                    ? "Analyzing..."
-                    : analysisComplete
-                      ? "New Query" 
-                      : (searchComplete && datasets.length > 0) 
-                        ? "Analyze" 
-                        : "Search"
-                }
-              </Button>
-            </div>
-          </form>
-
-          {/* Error message */}
-          {error && (
-            <Alert variant="destructive">
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
-
-          {/* Status message history - moved outside of loading condition to be visible at all times */}
-          {statusMessages.length > 0 && (
-            <div className="relative mb-4">
-              <div 
-                onClick={() => setShowAllStatusHistory(prev => !prev)} 
-                className={`text-sm text-neutral-600 dark:text-neutral-400 ${loading ? 'animate-pulse' : ''} cursor-pointer flex items-center`}
-              >
-                {statusMessages[statusMessages.length - 1].message}
-                {statusMessages.length > 1 && (
-                  <ChevronDown className={`h-4 w-4 ml-1 transition-transform ${showAllStatusHistory ? 'rotate-180' : ''}`} />
-                )}
-              </div>
-              
-              {/* Expanded history view */}
-              {showAllStatusHistory && statusMessages.length > 1 && (
-                <div className="mt-2 pl-4 border-l-2 border-gray-300 dark:border-gray-700 space-y-2 max-h-60 overflow-y-auto status-message-container">
-                  {statusMessages.slice(0, -1).map((msg, index) => (
-                    <div 
-                      key={msg.id}
-                      className={`text-sm ${msg.type === 'error' ? 'text-red-500' : 'text-neutral-500 dark:text-neutral-400'}`}
-                    >
-                      {msg.message}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Loading state with live discovery feed */}
-          {loading && (
-            <div className="space-y-4">
-              {/* Status messages section completely removed from here - do not render anything related to status messages in this block */}
-              
-              {/* Show found datasets while still loading */}
-              {datasets.length > 0 && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                  {datasets.map((dataset, index) => {
-                    const statusInfo = getDatasetStatusInfo(dataset);
-                    const style = { '--animation-delay': `${index * 50}ms` } as React.CSSProperties;
-                    
-                    return (
-                      <Card 
-                        key={dataset.id}
-                        className={`overflow-hidden hover:shadow-md transition-shadow cursor-pointer 
-                                   hover:border-green-200 flex flex-col border-neutral-200 relative
-                                   ${dataset.isRemoving ? 'removing' : 'animate-fadeIn'}`}
-                        onClick={() => handleDatasetSelect(dataset)}
-                        style={style}
-                      >
-                        {/* Status indicator - if processing */}
-                        {statusInfo && (
-                          <div className={`absolute top-2 right-2 z-10 rounded-full px-2 py-0.5 flex items-center text-xs 
-                                           ${statusInfo.color} transition-opacity duration-500
-                                           ${dataset.isRemoving ? 'opacity-0' : 'opacity-100'}`}>
-                            {statusInfo.icon}
-                            <span className="ml-1">{statusInfo.text}</span>
-                          </div>
-                        )}
-                        
-                        <CardHeader className="p-3 pb-2">
-                          <div className="flex items-start">
-                            <div className="h-6 w-6 rounded overflow-hidden bg-neutral-200 mr-2 flex-shrink-0">
-                              <img 
-                                src={getImageUrl(dataset)} 
-                                alt={`Dataset logo`}
-                                className="w-full h-full object-cover"
-                                onError={(e) => {
-                                  const target = e.target as HTMLImageElement;
-                                  target.src = `https://placehold.co/32x32/4F46E5/ffffff?text=D`;
-                                }}
-                              />
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <h3 className="text-sm font-medium leading-tight line-clamp-2 mb-0.5">
-                                {dataset.title}
-                              </h3>
-                              <p className="text-xs text-neutral-500 truncate" title={getOrganizationName(dataset)}>
-                                {getOrganizationName(dataset)}
-                              </p>
-                              {/* Remove badge from here */}
-                              <div className="mt-1 flex flex-wrap gap-1.5">
-                                <Badge variant="outline" className="text-xs">
-                                  Relevance: {Math.round((dataset.relevance?.relevance_score || dataset.similarity || 0) * 100)}%
-                                </Badge>
-                                
-                                {/* Add file count badge if available */}
-                                {dataset.file_count && dataset.file_count > 0 && (
-                                  <Badge variant="secondary" className="text-xs">
-                                    {dataset.file_count} {dataset.file_count === 1 ? 'file' : 'files'}
-                                  </Badge>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        </CardHeader>
-                        
-                        {/* Add a description section */}
-                        <div className="px-3 py-2">
-                          <p className="text-xs text-neutral-600 line-clamp-3">
-                            {dataset.description ? 
-                              (typeof dataset.description === 'string' ? 
-                                dataset.description.replace(/<[^>]*>/g, '') : 
-                                'No description') : 
-                              'No description'}
-                          </p>
-                        </div>
-                        
-                        {/* Add a resources section */}
-                        {dataset.resources && dataset.resources.length > 0 && (
-                          <div className="px-3 py-2">
-                            <p className="text-xs font-medium">Available formats:</p>
-                            <div className="flex flex-wrap gap-1 mt-1">
-                              {Array.from(new Set(dataset.resources.map(r => r.format?.toUpperCase() || 'UNKNOWN'))).map((format, i) => (
-                                <Badge key={i} variant="secondary" className="text-xs">
-                                  {format}
-                                </Badge>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                        
-                        {/* Preview button - if dataset has been downloaded/processed */}
-                        {dataset.preview && (
-                          <div className="px-3 py-2">
-                            <Button 
-                              variant="outline" 
-                              size="sm" 
-                              className="w-full text-xs"
-                              onClick={(e) => handlePreviewClick(e, dataset)}
-                            >
-                              <FileText className="h-3 w-3 mr-1" />
-                              Preview Data
-                            </Button>
-                          </div>
-                        )}
-                        
-                        <CardFooter className="px-3 py-2 border-t border-neutral-100 mt-auto">
-                          <div className="w-full flex flex-wrap gap-1.5">
-                            {dataset.tags && dataset.tags.length > 0 ? (
-                              <>
-                                {dataset.tags.slice(0, 3).map((tag, index) => (
-                                  <Badge 
-                                    key={index} 
-                                    variant="secondary" 
-                                    className="text-xs px-2 py-0.5 h-5 whitespace-nowrap overflow-hidden text-ellipsis max-w-[120px]"
-                                  >
-                                    {typeof tag === 'object' && tag.name ? tag.name : String(tag)}
-                                  </Badge>
-                                ))}
-                                {dataset.tags.length > 3 && (
-                                  <Badge variant="outline" className="text-xs px-2 py-0.5 h-5">
-                                    +{dataset.tags.length - 3}
-                                  </Badge>
-                                )}
-                              </>
-                            ) : (
-                              <span className="text-xs text-neutral-400">No tags</span>
-                            )}
-                          </div>
-                        </CardFooter>
-                      </Card>
-                    );
-                  })}
-                  
-                  {/* Show skeletons for more datasets coming */}
-                  {loading && datasets.length > 0 && !datasets.some(d => d.status) && (
-                    <Card className="overflow-hidden border-neutral-200 animate-pulse">
-                      <CardHeader className="p-3 pb-2">
-                        <div className="flex items-start">
-                          <Skeleton className="h-6 w-6 rounded mr-2 flex-shrink-0" />
-                          <div className="flex-1">
-                            <Skeleton className="h-3 w-3/4 mb-1" />
-                            <Skeleton className="h-2 w-full" />
-                          </div>
-                        </div>
-                      </CardHeader>
-                      <CardFooter className="px-3 py-2 border-t border-neutral-100">
-                        <div className="w-full flex gap-1.5">
-                          <Skeleton className="h-5 w-16" />
-                          <Skeleton className="h-5 w-16" />
-                        </div>
-                      </CardFooter>
-                    </Card>
-                  )}
-                </div>
-              )}
-              
-              {/* Show skeletons if no datasets found yet */}
-              {datasets.length === 0 && discoveryMessages.length === 0 && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                  {Array.from({ length: 6 }).map((_, index) => (
-                    <Card key={index} className="overflow-hidden border-neutral-200">
-                      <CardHeader className="p-3 pb-2">
-                        <div className="flex items-start">
-                          <Skeleton className="h-6 w-6 rounded mr-2 flex-shrink-0" />
-                          <div className="flex-1">
-                            <Skeleton className="h-3 w-3/4 mb-1" />
-                            <Skeleton className="h-2 w-full" />
-                          </div>
-                        </div>
-                      </CardHeader>
-                      <CardFooter className="px-3 py-2 border-t border-neutral-100">
-                        <div className="w-full flex gap-1.5">
-                          <Skeleton className="h-5 w-16" />
-                          <Skeleton className="h-5 w-16" />
-                        </div>
-                      </CardFooter>
-                    </Card>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Search complete results */}
-          {!loading && searchPerformed && (
-            <div className="space-y-4">
-              {datasets.length > 0 ? (
-                <>
-                  
-                  {/* New Table View for Datasets */}
-                  <div className="rounded-md border shadow-sm overflow-hidden">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="w-[40px]"></TableHead>
-                          {/* Increase the width of the Dataset column */}
-                          <TableHead className="max-w-[430px] w-[430px]">Dataset</TableHead>
-                          {/* Relevance column removed */}
-                          <TableHead className="w-[120px] text-center">Status</TableHead>
-                          <TableHead className="w-[100px] text-center">Include in Analysis</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {datasets.map((dataset) => {
-                          const relevanceScore = dataset.relevance?.relevance_score || dataset.similarity || 0;
-                          
-                          // Find the processing status for this dataset
-                          const processingDataset = processingDatasets.find(d => d.id === dataset.id);
-                          const processingStatus = processingDataset?.status;
-                          
-                          return (
-                            <TableRow 
-                              key={dataset.id}
-                              className={`
-                                ${isAnalyzing ? 'opacity-70 pointer-events-none select-none' : 'cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800/50'}
-                              `}
-                              onClick={(e) => {
-                                // Only allow clicking if not analyzing
-                                if (isAnalyzing) return;
-                                
-                                // Prevent toggling if clicking on a button, checkbox, or interactive element
-                                if (e.target instanceof HTMLElement && 
-                                    (e.target.closest('button') || 
-                                     e.target.tagName === 'INPUT' ||
-                                     e.target.closest('input') ||
-                                     e.target.closest('label') ||
-                                     e.target.closest('.checkbox-container'))) {
-                                  return;
-                                }
-                                
-                                // Toggle the checkbox for this dataset
-                                setSelectedDatasets(prev => ({
-                                  ...prev,
-                                  [dataset.id]: !(prev[dataset.id] === true)
-                                }));
-                              }}
-                            >
-                              <TableCell className="p-2">
-                                <div className="h-8 w-8 rounded overflow-hidden bg-neutral-200 flex-shrink-0">
-                                  <img 
-                                    src={getImageUrl(dataset)} 
-                                    alt={`${getOrganizationName(dataset)} logo`}
-                                    className="w-full h-full object-cover"
-                                    onError={(e) => {
-                                      const target = e.target as HTMLImageElement;
-                                      target.src = `https://placehold.co/32x32/4F46E5/ffffff?text=D`;
-                                    }}
-                                  />
-                                </div>
-                              </TableCell>
-                              
-                              <TableCell className="py-2 max-w-[430px] w-[430px]">
-                                <div className="overflow-hidden">
-                                  <div className="flex items-center space-x-2">
-                                    <p className="font-medium text-sm truncate" title={dataset.title}>{dataset.title}</p>
-                                    {/* Add relevance chip next to title */}
-                                    {relevanceScore > 0.65 ? (
-                                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300 whitespace-nowrap">
-                                        <CheckCircle2 className="h-3 w-3 mr-1" />
-                                        {Math.round(relevanceScore * 100)}%
-                                      </span>
-                                    ) : (
-                                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300 whitespace-nowrap">
-                                        {Math.round(relevanceScore * 100)}%
-                                      </span>
-                                    )}
-                                  </div>
-                                  <div className="flex justify-between items-center">
-                                    <p className="text-xs text-neutral-500 truncate" title={getOrganizationName(dataset)}>
-                                      {getOrganizationName(dataset)}
-                                    </p>
-                                  </div>
-                                </div>
-                              </TableCell>
-                              
-                              <TableCell className="text-center">
-                                {processingStatus ? (
-                                  <div className="flex flex-col items-center justify-center">
-                                    <Badge className={`${getStatusColor(processingStatus)}`}>
-                                      {getStatusIcon(processingStatus)}
-                                      <span className="ml-1">{getStatusLabel(processingStatus)}</span>
-                                    </Badge>
-                                    {/* Add progress bar for downloading status */}
-                                    {processingStatus === 'downloading' && processingDataset.progress && (
-                                      <Progress 
-                                        value={processingDataset.progress} 
-                                        className="h-1 w-16 mt-1" 
-                                      />
-                                    )}
-                                  </div>
-                                ) : (
-                                  <span className="text-xs text-neutral-500">
-                                    {isAnalyzing ? 
-                                      (selectedDatasets[dataset.id] === true ? 'Queued' : 'Skipped') : 
-                                      'Ready'}
-                                  </span>
-                                )}
-                              </TableCell>
-                              
-                              <TableCell className="text-center">
-                                <div className="flex items-center justify-center">
-                                  <div className="relative flex items-center">
-                                    <div className="w-4 h-4 flex items-center justify-center">
-                                      <Checkbox
-                                        checked={selectedDatasets[dataset.id] === true}
-                                        disabled={isAnalyzing}
-                                        onCheckedChange={(checked) => {
-                                          if (isAnalyzing) return; // Extra protection
-                                          setSelectedDatasets(prev => ({
-                                            ...prev,
-                                            [dataset.id]: checked === true
-                                          }));
-                                        }}
-                                        aria-label="Include in analysis"
-                                      />
-                                    </div>
-                                    <PreferredDatasetBadge datasetId={dataset.id} />
-                                  </div>
-                                </div>
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
-                      </TableBody>
-                    </Table>
-                  </div>
-
-                  {/* Analysis Results Section */}
-                  {(isAnalyzing || analysisComplete) && (
-                    <div className="mt-6 space-y-4">
-                      
-                      <Tabs 
-                        defaultValue="datasets" 
-                        value={activeTab} 
-                        onValueChange={setActiveTab}
-                        className="w-full"
-                      >
-                        <TabsList className="grid w-full grid-cols-2 mb-4">
-                          <TabsTrigger value="datasets" className="flex items-center gap-2">
-                            <Database className="h-4 w-4" />
-                            <span>Dataset Summary</span>
-                          </TabsTrigger>
-                          <TabsTrigger value="webSearch" className="flex items-center gap-2">
-                            <Globe className="h-4 w-4" />
-                            <span>Web Research</span>
-                          </TabsTrigger>
-                        </TabsList>
-                        
-                        <TabsContent value="datasets" className="space-y-4">
-                          {isAnalyzing && !summaryData ? (
-                            <SummaryReportSkeleton query={query} />
-                          ) : summaryData ? (
-                            <SummaryReport 
-                              query={query}
-                              summary={summaryData.summary || ''}
-                              keyFindings={summaryData.key_data_points || []}
-                              sources={summaryData.sources || []}
-                            />
-                          ) : (
-                            <div className="text-center p-8 text-muted-foreground">
-                              <p>No dataset analysis available</p>
-                            </div>
-                          )}
-                          
-                          {processingDatasets
-                            .filter(d => d.analysis_results)
-                            .map(dataset => (
-                              <Card key={dataset.id} className="overflow-hidden mt-4">
-                                <CardHeader className="p-4 bg-muted/50">
-                                  <h3 className="text-lg font-semibold">{dataset.title}</h3>
-                                </CardHeader>
-                                <div className="p-4">
-                                  {dataset.analysis_results ? (
-                                    <div>
-                                      <div className="text-sm text-muted-foreground">
-                                        {dataset.analysis_results.summary}
-                                      </div>
-                                      {dataset.analysis_results.key_points && (
-                                        <div className="mt-4">
-                                          <h4 className="text-sm font-semibold mb-2">Key Points</h4>
-                                          <ul className="list-disc pl-5 text-sm text-muted-foreground">
-                                            {dataset.analysis_results.key_points.map((point: string, idx: number) => (
-                                              <li key={idx}>{point}</li>
-                                            ))}
-                                          </ul>
-                                        </div>
-                                      )}
-                                    </div>
-                                  ) : (
-                                    <div className="text-sm text-muted-foreground italic">
-                                      No detailed analysis available for this dataset.
-                                    </div>
-                                  )}
-                                </div>
-                              </Card>
-                            ))}
-                        </TabsContent>
-                        
-                        <TabsContent value="webSearch" className="space-y-4">
-                          {isWebSearchLoading ? (
-                            <WebSearchSummarySkeleton />
-                          ) : webSearchData ? (
-                            <WebSearchSummary data={webSearchData} />
-                          ) : (
-                            <div className="text-center p-8 text-muted-foreground">
-                              <p>No web search results available yet</p>
-                            </div>
-                          )}
-                        </TabsContent>
-                      </Tabs>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <div className="text-center py-10">
-                  <p className="text-neutral-500">Sorry, we don't seem to have any datasets for this query yet. </p>
-                  <p className="text-neutral-500">We're working hard to add more sources, please click "Feedback" to tell us!</p>
-                </div>
-              )}
-            </div>
-          )}
         </div>
       )}
       
@@ -2591,14 +2062,9 @@ export default function DatasetsPage() {
             >
               Close
             </Button>
-            <Button
-              onClick={() => handleDatasetSelect(selectedPreview!)}
-            >
-              Use Dataset
-            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </>
+    </div>
   );
 }

@@ -146,7 +146,7 @@ def stream_search_datasets(request):
     search_method = request_json.get('search_method', None)  # 'vector', 'keyword', or None for hybrid
     max_results = int(request_json.get('max_results', 15))
     census_max_results = int(request_json.get('census_max_results', 5))
-    relevance_threshold = 0.35 #hardcoded for now #float(request_json.get('relevance_threshold', 0.3)) 
+    relevance_threshold = float(request_json.get('relevance_threshold', 0.3)) 
     
     logger.info(f"Streaming search parameters: method={search_method}, threshold={similarity_threshold}, max_results={max_results}")
     
@@ -449,18 +449,67 @@ def stream_analyze(request):
         # Initialize a variable to store the final result
         final_result = None
         
+        # Initialize tracking stats for datasets
+        dataset_stats = {
+            "total": len(dataset_ids),
+            "queued": 0,
+            "downloading": 0,
+            "downloaded": 0,
+            "loading": 0,
+            "loaded": 0,
+            "assessing": 0,
+            "relevant": 0,
+            "not_relevant": 0,
+            "extracting": 0,
+            "extracted": 0,
+            "analyzing": 0,
+            "complete": 0,
+            "error": 0,
+            "dataset_details": {}
+        }
+        
         # Process the streaming analysis
         for chunk in stream_analyze_helper(
             dataset_ids=dataset_ids,
             query=query,
             file_path=file_path
         ):
-            # If this is a JSON object and it's the 'complete' type, store it as the final result
+            # Track dataset progress through stages
             try:
-                # Try to parse and handle NaN values properly
                 chunk_data = json.loads(chunk.strip())
+                if chunk_data.get('type') == 'dataset_status':
+                    dataset_id = chunk_data.get('dataset_id')
+                    status = chunk_data.get('status')
+                    
+                    # Initialize dataset in tracking if not exists
+                    if dataset_id not in dataset_stats["dataset_details"]:
+                        dataset_stats["dataset_details"][dataset_id] = {
+                            "current_status": None,
+                            "statuses_reached": [],
+                            "timestamp": chunk_data.get('timestamp', 0)
+                        }
+                    
+                    # Update dataset status in tracking
+                    if status:
+                        dataset_stats["dataset_details"][dataset_id]["current_status"] = status
+                        if status not in dataset_stats["dataset_details"][dataset_id]["statuses_reached"]:
+                            dataset_stats["dataset_details"][dataset_id]["statuses_reached"].append(status)
+                            dataset_stats[status] = dataset_stats.get(status, 0) + 1
+                        dataset_stats["dataset_details"][dataset_id]["timestamp"] = chunk_data.get('timestamp', 0)
+                
+                # If this is a JSON object and it's the 'complete' type, store it as the final result
                 if chunk_data.get('type') == 'complete':
                     final_result = chunk_data.get('data', {})
+                    
+                    # Add the dataset tracking report
+                    dataset_report = create_dataset_progress_report(dataset_stats)
+                    tracking_chunk = json.dumps({
+                        "type": "dataset_tracking",
+                        "data": dataset_stats,
+                        "report": dataset_report,
+                        "timestamp": chunk_data.get('timestamp', 0)
+                    }, cls=NumpyEncoder)
+                    yield tracking_chunk + "\n"
                     
                 # Re-encode with NumpyEncoder to handle NaN values
                 chunk = json.dumps(chunk_data, cls=NumpyEncoder)
@@ -487,6 +536,7 @@ def stream_analyze(request):
                     'timestamp': firestore.SERVER_TIMESTAMP,
                     'file_path': file_path,
                     'ip_address': ip_address,
+                    'dataset_stats': dataset_stats
                 }
                 
                 # Add all the result data, not just the metadata
@@ -510,6 +560,85 @@ def stream_analyze(request):
             "X-Accel-Buffering": "no"
         }
     )
+
+def create_dataset_progress_report(dataset_stats):
+    """Create a markdown report summarizing the dataset progress through the analysis pipeline."""
+    total = dataset_stats["total"]
+    
+    # Create markdown report
+    report = "# Dataset Processing Report\n\n"
+    report += f"## Summary\n"
+    report += f"Total datasets: {total}\n\n"
+    
+    # Add stats for each stage
+    stages = [
+        ("queued", "Datasets queued"),
+        ("downloading", "Datasets in downloading state"),
+        ("downloaded", "Datasets successfully downloaded"),
+        ("loading", "Datasets in loading state"),
+        ("loaded", "Datasets successfully loaded"),
+        ("assessing", "Datasets in relevance assessment"),
+        ("relevant", "Datasets deemed relevant"),
+        ("not_relevant", "Datasets deemed not relevant"),
+        ("extracting", "Datasets in data extraction"),
+        ("extracted", "Datasets with successful extraction"),
+        ("analyzing", "Datasets in analysis state"),
+        ("complete", "Datasets with completed analysis"),
+        ("error", "Datasets with errors")
+    ]
+    
+    report += "## Processing Stages\n"
+    for key, label in stages:
+        count = dataset_stats.get(key, 0)
+        percentage = (count / total * 100) if total > 0 else 0
+        report += f"- **{label}**: {count} ({percentage:.1f}%)\n"
+    
+    # Add details for each dataset
+    report += "\n## Dataset Details\n"
+    
+    # Sort datasets by their progression through the pipeline
+    sorted_datasets = sorted(
+        dataset_stats["dataset_details"].items(),
+        key=lambda x: (
+            # First sort by furthest stage reached (using index of status in the stages list)
+            max([stage[0] for stage in stages].index(status) if status in [s[0] for s in stages] else -1 
+                for status in x[1]["statuses_reached"]),
+            # Then by timestamp (most recent first)
+            x[1]["timestamp"]
+        ),
+        reverse=True
+    )
+    
+    for dataset_id, details in sorted_datasets:
+        status = details["current_status"] or "unknown"
+        statuses = ", ".join(details["statuses_reached"])
+        report += f"- **Dataset {dataset_id[:8]}...**: Current status: `{status}`, Stages reached: `{statuses}`\n"
+    
+    # Add data quality analysis
+    report += "\n## Data Flow Analysis\n"
+    if dataset_stats.get("downloaded", 0) > 0:
+        download_success_rate = (dataset_stats.get("downloaded", 0) / dataset_stats.get("queued", 1)) * 100
+        report += f"- **Download success rate**: {download_success_rate:.1f}%\n"
+    
+    if dataset_stats.get("relevant", 0) + dataset_stats.get("not_relevant", 0) > 0:
+        relevance_rate = (dataset_stats.get("relevant", 0) / 
+                          (dataset_stats.get("relevant", 0) + dataset_stats.get("not_relevant", 0))) * 100
+        report += f"- **Relevance rate**: {relevance_rate:.1f}%\n"
+    
+    if dataset_stats.get("extracted", 0) > 0 and dataset_stats.get("relevant", 0) > 0:
+        extraction_success_rate = (dataset_stats.get("extracted", 0) / dataset_stats.get("relevant", 0)) * 100
+        report += f"- **Extraction success rate**: {extraction_success_rate:.1f}%\n"
+    
+    if dataset_stats.get("complete", 0) > 0 and dataset_stats.get("extracted", 0) > 0:
+        analysis_success_rate = (dataset_stats.get("complete", 0) / dataset_stats.get("extracted", 0)) * 100
+        report += f"- **Analysis success rate**: {analysis_success_rate:.1f}%\n"
+    
+    # Calculate overall pipeline efficiency
+    if dataset_stats.get("complete", 0) > 0 and total > 0:
+        pipeline_efficiency = (dataset_stats.get("complete", 0) / total) * 100
+        report += f"- **Overall pipeline efficiency**: {pipeline_efficiency:.1f}%\n"
+    
+    return report
 
 @https_fn.on_request(
     cors=options.CorsOptions(

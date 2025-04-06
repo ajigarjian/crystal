@@ -167,7 +167,7 @@ INSTRUCTIONS:
    - Highlight any trends or changes over time
 7. Exclude any subset_df data from your analysis
 
-Finally, provide a "SEARCH SUMMARY" section with 2 paragraphs that:
+Finally, provide a "SEARCH SUMMARY" section with multiple paragraphs that:
 1. Directly answers the user's question based on the data analysis with key insights [mention date context when applicable]
 2. Only briefly mentions the overall context of the data (scope, limitations) if it affects the interpretation of results
 
