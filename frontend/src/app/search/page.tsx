@@ -1,11 +1,49 @@
 "use client";
 
 import Link from 'next/link';
-import { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Input } from "@/components/ui/input";
-import { Search, Loader2 } from "lucide-react";
+import { Search, Loader2, ChevronDown, ChevronUp, FileText, ExternalLink, Info, ChevronRight, Download, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { streamSearchDatasets } from "@/lib/firebase";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  TableCaption,
+  TableFooter,
+} from "@/components/ui/table";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerTrigger,
+  DrawerFooter,
+  DrawerClose,
+} from "@/components/ui/drawer";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export default function SearchPage() {
   const [query, setQuery] = useState('');
@@ -14,6 +52,9 @@ export default function SearchPage() {
   const [statusMessage, setStatusMessage] = useState('');
   const [datasets, setDatasets] = useState<any[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
+  const [expandedDataset, setExpandedDataset] = useState<string | null>(null);
+  const [executionTime, setExecutionTime] = useState<number>(0);
+  const [ellipsis, setEllipsis] = useState('');
 
   // Focus the input field when the page loads
   useEffect(() => {
@@ -34,6 +75,35 @@ export default function SearchPage() {
     }
   }, [isSearching, searchProgress]);
 
+  // Sort datasets by similarity score when the search is complete
+  useEffect(() => {
+    if (!isSearching && datasets.length > 0) {
+      // Sort datasets by similarity score (higher is better)
+      const sortedDatasets = [...datasets].sort((a, b) => 
+        (b.similarity || 0) - (a.similarity || 0)
+      );
+      setDatasets(sortedDatasets);
+    }
+  }, [isSearching, datasets.length]);
+
+  // Add this effect to manage the ellipsis animation
+  useEffect(() => {
+    if (isSearching) {
+      const ellipsisAnimation = setInterval(() => {
+        setEllipsis(prev => {
+          if (prev === '') return '.';
+          if (prev === '.') return '..';
+          if (prev === '..') return '...';
+          return '';
+        });
+      }, 1000); // Change ellipsis state every 400ms for a nice pace
+      
+      return () => clearInterval(ellipsisAnimation);
+    } else {
+      setEllipsis('');
+    }
+  }, [isSearching]);
+
   const handleSearch = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!query.trim() || isSearching) return;
@@ -43,6 +113,7 @@ export default function SearchPage() {
     setSearchProgress(0);
     setStatusMessage('Initiating search...');
     setDatasets([]);
+    setExpandedDataset(null);
 
     try {
       // Start the streaming search
@@ -50,8 +121,8 @@ export default function SearchPage() {
         {
           query: query.trim(),
           search_method: null, // hybrid search
-          similarity_threshold: 0.3,
-          max_results: 15
+          similarity_threshold: 0.35,
+          max_results: 20
         },
         (chunk) => {
           // Process incoming chunks
@@ -75,10 +146,16 @@ export default function SearchPage() {
             // Search complete, set progress to 100%
             setSearchProgress(100);
             
-            // Small delay before finishing to show the completion
+            // Store the execution time from the backend
+            if (chunk.data && chunk.data.execution_time) {
+              setExecutionTime(chunk.data.execution_time);
+            }
+            
+            // Ensure skeletons are visible for at least a short time for UX consistency
+            const minLoadingTime = 1000; // 1 second minimum loading time
             setTimeout(() => {
               setIsSearching(false);
-            }, 1000);
+            }, minLoadingTime);
           }
         }
       );
@@ -95,10 +172,130 @@ export default function SearchPage() {
     }
   };
 
+  // Toggle expansion function
+  const toggleExpand = (datasetId: string) => {
+    setExpandedDataset(expandedDataset === datasetId ? null : datasetId);
+  };
+  
+  // Get organization image
+  const getOrganizationImage = (dataset: any) => {
+    // Check all possible places where image URLs might exist
+    
+    // 1. Direct image_url on dataset
+    if (dataset.image_url && typeof dataset.image_url === 'string') {
+      console.log('Found direct image_url:', dataset.image_url);
+      return dataset.image_url;
+    }
+    
+    // 2. Inside organization object
+    if (dataset.organization) {
+      if (typeof dataset.organization === 'object') {
+        // Check various possible field names
+        if (dataset.organization.image_url) {
+          console.log('Found organization.image_url:', dataset.organization.image_url);
+          return dataset.organization.image_url;
+        }
+        if (dataset.organization.logo) {
+          console.log('Found organization.logo:', dataset.organization.logo);
+          return dataset.organization.logo;
+        }
+        if (dataset.organization.icon) {
+          console.log('Found organization.icon:', dataset.organization.icon);
+          return dataset.organization.icon;
+        }
+      }
+    }
+    
+    // 3. Check for separate organization_image_url field
+    if (dataset.organization_image_url) {
+      console.log('Found organization_image_url:', dataset.organization_image_url);
+      return dataset.organization_image_url;
+    }
+    
+    // Add debugging to see the dataset structure
+    console.log('Dataset with missing image_url:', {
+      id: dataset.id,
+      title: dataset.title,
+      org: dataset.organization,
+      orgName: dataset.organization_name,
+      orgTitle: dataset.organization_title
+    });
+    
+    // Get organization name for the fallback initial
+    let orgName = '';
+    if (dataset.organization) {
+      if (typeof dataset.organization === 'object') {
+        orgName = dataset.organization.name || dataset.organization.title || '';
+      } else {
+        orgName = dataset.organization; // Handle case where organization is a string
+      }
+    } else {
+      orgName = dataset.organization_title || dataset.organization_name || '';
+    }
+    
+    // Return the first letter of organization name
+    return orgName ? orgName.charAt(0).toUpperCase() : 'U';
+  };
+
+  // Get organization name
+  const getOrganizationName = (dataset: any) => {
+    if (dataset.organization) {
+      if (typeof dataset.organization === 'object') {
+        return dataset.organization.title || dataset.organization.name || 'Unknown source';
+      } else {
+        return dataset.organization; // Handle case where organization is a string
+      }
+    }
+    return dataset.organization_title || dataset.organization_name || 'Unknown source';
+  };
+  
+  // Format file type
+  const getFileType = (resource: any) => {
+    if (resource.format) return resource.format.toUpperCase();
+    
+    // Try to extract from URL
+    const url = resource.url || '';
+    const extension = url.split('.').pop()?.toLowerCase();
+    
+    if (['csv', 'json', 'xml', 'pdf', 'xls', 'xlsx', 'txt', 'zip'].includes(extension || '')) {
+      return extension?.toUpperCase();
+    }
+    
+    return 'FILE';
+  };
+
+  // Get formatted tag list
+  const getTagsList = (dataset: any, maxTags = 3) => {
+    if (!dataset.tags || !dataset.tags.length) return null;
+    
+    const tags = dataset.tags.slice(0, maxTags).map((tag: any, i: number) => {
+      const tagText = typeof tag === 'string' ? tag : (tag.display_name || tag.name || '');
+      return (
+        <Badge 
+          key={i} 
+          variant="secondary"
+          className="text-xs bg-gray-100 text-gray-800 mr-1"
+        >
+          {tagText}
+        </Badge>
+      );
+    });
+    
+    if (dataset.tags.length > maxTags) {
+      tags.push(
+        <Badge key="more" variant="outline" className="text-xs text-gray-500">
+          +{dataset.tags.length - maxTags}
+        </Badge>
+      );
+    }
+    
+    return tags;
+  };
+
   return (
-    <div className="flex flex-col min-h-screen bg-gray-50">
+    <div className="flex flex-col min-h-screen bg-gray-50 text-gray-900">
       {/* Header with logo */}
-      <div className="flex h-16 shrink-0 items-center justify-between px-4 border-b">
+      <div className="flex h-16 shrink-0 items-center justify-between px-4 border-b bg-white">
         <div className="flex items-center">
           <Link href="/">
             <div className="flex items-center cursor-pointer hover:opacity-80 transition-opacity">
@@ -107,7 +304,7 @@ export default function SearchPage() {
                 alt="Crystal Logo" 
                 className="h-6 w-6 mr-2 filter brightness-0" 
               />
-              <h1 className="text-lg font-bold" style={{ fontFamily: 'Satoshi, sans-serif' }}>Crystal</h1>
+              <h1 className="text-lg font-bold text-gray-900" style={{ fontFamily: 'Satoshi, sans-serif' }}>Crystal</h1>
             </div>
           </Link>
         </div>
@@ -119,7 +316,7 @@ export default function SearchPage() {
           <Input
             ref={inputRef}
             placeholder="Search for datasets..."
-            className="pl-12 pr-4 py-7 text-lg w-full rounded-full border-gray-300 transition-all shadow-sm hover:shadow focus:shadow-md relative z-10"
+            className="pl-12 pr-4 py-7 text-lg w-full rounded-full border-gray-300 transition-all shadow-sm hover:shadow focus:shadow-md relative z-10 bg-white text-gray-900 selection:bg-green-100 selection:text-green-900"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -166,28 +363,266 @@ export default function SearchPage() {
             </div>
           )}
         </div>
-        
-        {/* Status message below search bar */}
+      </div>
+      
+      {/* Dataset results section - TABLE VIEW */}
+      <div className="flex-1 max-w-7xl mx-auto w-full px-4 pb-12">
         <AnimatePresence>
-          {isSearching && (
-            <motion.div 
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              transition={{ duration: 0.3 }}
-              className="mt-4"
+          {(isSearching || (!isSearching && datasets.length > 0)) && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.5 }}
+              className="mt-6"
             >
-              <span 
-                className={`text-sm text-neutral-600 dark:text-neutral-400 ${isSearching ? 'animate-pulse' : ''} cursor-pointer`}
-              >
-                {statusMessage}
-              </span>
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="text-sm text-gray-900">
+                  {isSearching ? (
+                    <span className="flex items-center">
+                      <span className="text-gray-700">
+                        {/* Remove any trailing ellipsis from the status message */}
+                        {statusMessage.replace(/\.{3,}$/, '')}
+                        <span className="inline-block w-8">{ellipsis}</span>
+                      </span>
+                    </span>
+                  ) : (
+                    `Found ${datasets.length} datasets in ${executionTime.toFixed(1)} seconds.`
+                  )}
+                </h2>
+              </div>
+              
+              <div className="rounded-md border border-gray-200 bg-white">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:!bg-transparent border-b border-gray-200">
+                      <TableHead className="w-10 h-10 text-gray-700"></TableHead>
+                      <TableHead className="w-40 font-medium text-gray-700">Source</TableHead>
+                      <TableHead className="w-[450px] font-medium text-gray-700">Dataset</TableHead>
+                      <TableHead className="w-28 text-center font-medium text-gray-700">Resources</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {isSearching ? (
+                      // Skeleton rows when searching
+                      Array(3).fill(0).map((_, index) => (
+                        <TableRow 
+                          key={`skeleton-${index}`}
+                          className="border-b border-gray-200 hover:!bg-transparent"
+                        >
+                          <TableCell className="py-4 px-4">
+                            <div className="flex items-center justify-center w-5 h-5">
+                              <Skeleton className="h-4 w-4 bg-gray-200 rounded-sm" />
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-4">
+                            <div className="flex items-center gap-2">
+                              <Skeleton className="h-6 w-6 rounded-full bg-gray-200" />
+                              <Skeleton className="h-4 w-24 bg-gray-200" />
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-4 max-w-[450px]">
+                            <div className="space-y-2">
+                              <Skeleton className="h-5 w-full max-w-[300px] bg-gray-200" />
+                              <Skeleton className="h-3 w-3/4 bg-gray-200" />
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-4 text-center">
+                            <div className="flex justify-center">
+                              <Skeleton className="h-6 w-20 bg-gray-200 rounded-full" />
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    ) : (
+                      // Real data rows when search is complete
+                      datasets.map((dataset, index) => (
+                        <React.Fragment key={dataset.id}>
+                          <TableRow 
+                            className={`border-b border-gray-200 hover:bg-gray-50 transition-colors cursor-pointer ${
+                              expandedDataset === dataset.id ? 'bg-gray-50' : ''
+                            }`}
+                            onClick={() => toggleExpand(dataset.id)}
+                          >
+                            <TableCell className="py-4 px-4">
+                              <motion.div
+                                initial={{ rotate: 0 }}
+                                animate={{ rotate: expandedDataset === dataset.id ? 90 : 0 }}
+                                transition={{ duration: 0.2 }}
+                                className="flex items-center justify-center w-5 h-5"
+                              >
+                                <ChevronRight className="h-4 w-4 text-gray-500" />
+                              </motion.div>
+                            </TableCell>
+                            <TableCell className="py-4">
+                              <div className="flex items-center gap-2">
+                                <Avatar className="h-6 w-6 rounded shrink-0">
+                                  {typeof getOrganizationImage(dataset) === 'string' && 
+                                   getOrganizationImage(dataset).length > 1 ? (
+                                    <AvatarImage src={getOrganizationImage(dataset) as string} />
+                                  ) : (
+                                    <AvatarFallback className="rounded bg-green-100 text-green-600 text-xs">
+                                      {getOrganizationImage(dataset)}
+                                    </AvatarFallback>
+                                  )}
+                                </Avatar>
+                                <span className="text-sm line-clamp-2 text-gray-800 leading-tight" title={getOrganizationName(dataset)}>
+                                  {getOrganizationName(dataset)}
+                                </span>
+                              </div>
+                            </TableCell>
+                            <TableCell className="py-4 max-w-[450px]">
+                              <div className="overflow-hidden">
+                                <h3 className="font-medium text-gray-900 line-clamp-2" title={dataset.title}>
+                                  {dataset.title}
+                                </h3>
+                              </div>
+                            </TableCell>
+                            <TableCell className="py-4 text-center">
+                              <Drawer>
+                                <DrawerTrigger asChild>
+                                  <Badge 
+                                    variant="outline" 
+                                    className="font-medium text-gray-700 border border-gray-200 bg-transparent hover:bg-gray-100 cursor-pointer inline-flex items-center gap-1.5 transition-colors px-3 py-1"
+                                  >
+                                    <Download className="h-3 w-3" />
+                                    {(dataset.resources || []).length}
+                                  </Badge>
+                                </DrawerTrigger>
+                                <DrawerContent className="bg-white text-gray-900">
+                                  <DrawerHeader className="border-b border-gray-100">
+                                    <DrawerTitle className="text-xl font-semibold text-gray-900">Resources</DrawerTitle>
+                                    <DrawerDescription className="text-gray-600">
+                                      Available resources for "{dataset.title}"
+                                    </DrawerDescription>
+                                  </DrawerHeader>
+                                  <div className="p-4">
+                                    {dataset.resources && dataset.resources.length > 0 ? (
+                                      <Table>
+                                        <TableHeader>
+                                          <TableRow className="border-b border-gray-200 hover:!bg-gray-50">
+                                            <TableHead className="w-[100px] text-gray-700">Type</TableHead>
+                                            <TableHead className="text-gray-700">Name</TableHead>
+                                            <TableHead className="text-right text-gray-700">Access</TableHead>
+                                          </TableRow>
+                                        </TableHeader>
+                                        <TableBody>
+                                          {dataset.resources.map((resource: any, resourceIndex: number) => (
+                                            <TableRow 
+                                              key={resource.id || resourceIndex}
+                                              className="border-b border-gray-100 hover:!bg-gray-50 hover:!text-gray-900"
+                                            >
+                                              <TableCell className="font-medium text-gray-900">
+                                                {getFileType(resource)}
+                                              </TableCell>
+                                              <TableCell className="text-gray-800">
+                                                {resource.name || 'Unnamed resource'}
+                                              </TableCell>
+                                              <TableCell className="text-right">
+                                                <Button 
+                                                  size="sm" 
+                                                  variant="ghost"
+                                                  className="h-8 w-8 p-0 text-gray-700 hover:!bg-gray-100 hover:!text-gray-900"
+                                                  asChild
+                                                >
+                                                  <a href={resource.url} target="_blank" rel="noopener noreferrer">
+                                                    <ExternalLink className="h-4 w-4" />
+                                                  </a>
+                                                </Button>
+                                              </TableCell>
+                                            </TableRow>
+                                          ))}
+                                        </TableBody>
+                                      </Table>
+                                    ) : (
+                                      <p className="text-sm text-gray-500 italic">No resources available</p>
+                                    )}
+                                  </div>
+                                  <DrawerFooter className="border-t border-gray-100 bg-white">
+                                    <div className="flex justify-end w-full">
+                                      <Button 
+                                        variant="default" 
+                                        className="gap-1 bg-green-500 text-white hover:!bg-green-600"
+                                        onClick={() => {
+                                          // Logic to download all resources
+                                          if (dataset.resources && dataset.resources.length > 0) {
+                                            window.open(dataset.resources[0].url, '_blank');
+                                          }
+                                        }}
+                                      >
+                                        <Download className="h-4 w-4" />
+                                        Download All
+                                      </Button>
+                                    </div>
+                                  </DrawerFooter>
+                                </DrawerContent>
+                              </Drawer>
+                            </TableCell>
+                          </TableRow>
+                          
+                          {/* Expandable row for resources */}
+                          <AnimatePresence>
+                            {expandedDataset === dataset.id && (
+                              <motion.tr
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: 'auto' }}
+                                exit={{ opacity: 0, height: 0 }}
+                                transition={{ duration: 0.2 }}
+                                className="bg-gray-50"
+                              >
+                                <td colSpan={4} className="p-0 border-b border-gray-200">
+                                  <motion.div
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    exit={{ opacity: 0 }}
+                                    transition={{ duration: 0.2, delay: 0.1 }}
+                                    className="px-4 py-4"
+                                  >
+                                    {/* Full description */}
+                                    <div className="mb-4">
+                                      <p className="text-sm text-gray-600">
+                                        {dataset.description || 'No description available'}
+                                      </p>
+                                    </div>
+                                    
+                                    {/* Tags section */}
+                                    {dataset.tags && dataset.tags.length > 0 && (
+                                      <div>
+                                        <h4 className="text-sm font-medium mb-2 text-gray-800">Tags</h4>
+                                        <div className="flex flex-wrap gap-1.5">
+                                          {dataset.tags.map((tag: any, tagIndex: number) => {
+                                            const tagText = typeof tag === 'string' 
+                                              ? tag 
+                                              : (tag.display_name || tag.name || '');
+                                              
+                                            return (
+                                              <Badge 
+                                                key={tagIndex} 
+                                                variant="secondary"
+                                                className="text-xs text-gray-700 bg-gray-100 hover:bg-gray-200"
+                                              >
+                                                {tagText}
+                                              </Badge>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </motion.div>
+                                </td>
+                              </motion.tr>
+                            )}
+                          </AnimatePresence>
+                        </React.Fragment>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
       </div>
-      
-      {/* Removed dataset results section */}
     </div>
   );
 }
