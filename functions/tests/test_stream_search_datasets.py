@@ -2,28 +2,39 @@ import sys
 import json
 import logging
 import traceback
-from firebase_admin import firestore
-import firebase_admin
 import os
 from dotenv import load_dotenv
+import django
+from firebase_admin import firestore
+import firebase_admin
+
+load_dotenv()
+
+os.environ["FUNCTIONS_EMULATOR"] = "True"
 
 # Add the parent directory to the Python path
 functions_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(functions_dir)
 
-# Now import the helper function - without the 'functions.' prefix
+# Set the DJANGO_SETTINGS_MODULE environment variable
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'factchecker.settings')
+
+# Initialize Django
+django.setup()
+
+# Import the helper function after Django is initialized
 from helpers.stream_search_datasets import stream_search_datasets_helper
 
-# Load environment variables
-load_dotenv()
-
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.DEBUG,  # Set to DEBUG for more verbosity
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('stream_analyze.log')
+    ]
+)
 logger = logging.getLogger(__name__)
-
-# Set emulator flag, this tells our code that we're running it locally, regardless of
-# whether we're using it or not
-os.environ["FUNCTIONS_EMULATOR"] = "True"
 
 # Initialize Firebase app if not already initialized
 try:
