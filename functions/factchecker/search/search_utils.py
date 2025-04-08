@@ -8,9 +8,14 @@ including resource checking and query expansion.
 import requests
 import json
 import concurrent.futures
+import time  # Add time import
+import logging  # Add logging import
 from typing import Dict, List, Tuple, Callable, Any
 from factchecker.utils.openai_client import chat_completion
 import os
+
+# Add logger
+logger = logging.getLogger(__name__)
 
 def get_usable_resources(dataset_id: str, verbose: bool = False) -> List[Dict]:
     """
@@ -192,7 +197,7 @@ Your response (JSON array only):"""
         # Return just the original query if there's an error
         return [original_query]
 
-def parallel_search(query: str, search_function: Callable, similarity_threshold: float = 0.3, 
+def parallel_search(query: str, search_function: Callable, start_time: float, similarity_threshold: float = 0.3, 
                    max_results: int = 10, use_variations: bool = True, verbose: bool = False) -> List[Dict]:
     """
     Perform parallel searches with the original query and variations.
@@ -200,6 +205,7 @@ def parallel_search(query: str, search_function: Callable, similarity_threshold:
     Args:
         query: The original search query
         search_function: Function to use for searching (e.g., vector_search_datasets)
+        start_time: The start time of the overall operation for relative timestamps
         similarity_threshold: Minimum similarity score (0-1)
         max_results: Maximum number of results to return per query
         use_variations: Whether to generate and use query variations
@@ -220,15 +226,22 @@ def parallel_search(query: str, search_function: Callable, similarity_threshold:
     results_by_query = {}
     
     # Define worker function
-    def search_worker(search_query):
+    def search_worker(search_query, worker_start_time):
         try:
+            # Log start of individual search
+            logger.info(f'Starting search for variation "{search_query}" at timestamp: {time.time() - worker_start_time:.2f} seconds')
+            
             # Use the global searcher for all queries
             results = search_function(
                 search_query, 
+                start_time=worker_start_time,
                 similarity_threshold=similarity_threshold,
                 max_results=max_results,
                 verbose=False  # Suppress verbose output from search function
             )
+            
+            # Log end of individual search
+            logger.info(f'Completed search for variation "{search_query}" at timestamp: {time.time() - worker_start_time:.2f} seconds')
             
             # Add the query variation to each result
             for result in results:
@@ -244,8 +257,11 @@ def parallel_search(query: str, search_function: Callable, similarity_threshold:
             return []
     
     # Execute searches in parallel
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(queries)) as executor:
-        future_to_query = {executor.submit(search_worker, q): q for q in queries}
+    # Limit max_workers to avoid resource contention
+    max_workers_limit = 4 
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(queries), max_workers_limit)) as executor:
+        # Pass start_time to the worker
+        future_to_query = {executor.submit(search_worker, q, start_time): q for q in queries}
         
         for future in concurrent.futures.as_completed(future_to_query):
             query_variation = future_to_query[future]

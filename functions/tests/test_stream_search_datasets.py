@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 import django
 from firebase_admin import firestore
 import firebase_admin
+import pprint
 
 load_dotenv()
 
@@ -118,20 +119,23 @@ def local_stream_search_datasets(request_json):
             print(chunk)
         # If we have a final result, store it in Firestore for later retrieval
         if final_result:
-            try:
-                # Create a document with the search results
-                search_ref = db.collection('searches').document()
+            # Prettyprin  the final result
+            pp = pprint.PrettyPrinter(indent=4)
+            pp.pprint(final_result)
+            # try:
+            #     # Create a document with the search results
+            #     search_ref = db.collection('searches').document()
                 
-                # Add the search data
-                search_ref.set({
-                    'query': query,
-                    'timestamp': firestore.SERVER_TIMESTAMP,
-                    'results': final_result
-                })
+            #     # Add the search data
+            #     search_ref.set({
+            #         'query': query,
+            #         'timestamp': firestore.SERVER_TIMESTAMP,
+            #         'results': final_result
+            #     })
                 
-                logger.info(f"Stored search results in Firestore with ID: {search_ref.id}")
-            except Exception as e:
-                logger.error(f"Error storing results in Firestore: {e}")
+            #     logger.info(f"Stored search results in Firestore with ID: {search_ref.id}")
+            # except Exception as e:
+            #     logger.error(f"Error storing results in Firestore: {e}")
                 
     except Exception as e:
         error_message = f"Error processing streaming search: {str(e)}"
@@ -151,7 +155,7 @@ def run_local_search():
         "query": "Philly crime stats",
         "similarity_threshold": 0.3,
         "search_method": None,  # None for hybrid search
-        "max_results": 15,
+        "max_results": 20,
         "census_max_results": 5,
         "relevance_threshold": 0.35
     }

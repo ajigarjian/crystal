@@ -99,15 +99,25 @@ def search_vector_datasets(query, similarity_threshold, max_results, start_time)
     yield create_status_message('I\'m searching through data.gov datasets...', start_time)
     
     try:
+        # Log start of parallel search
+        logger.info(f"Starting parallel search at timestamp: {time.time() - start_time:.2f} seconds")
+        
         # Perform parallel search
         results = parallel_search(
             query,
             search_function=vector_search_datasets,
+            start_time=start_time,
             similarity_threshold=similarity_threshold,
             max_results=max_results,
             use_variations=True,
             verbose=False
         )
+        
+        # Log completion of parallel search
+        # logger.info(f"Parallel search completed at timestamp: {time.time() - start_time:.2f} seconds") # No longer needed here
+        
+        # Log timestamp when vector search results are returned
+        # logger.info(f"Vector search results returned from Pinecone at timestamp: {time.time() - start_time:.2f} seconds") # Moved inside pinecone_search
         
         # Convert generator to list if needed
         if hasattr(results, '__iter__') and not isinstance(results, list):

@@ -214,6 +214,7 @@ def get_pinecone_client():
 
 def vector_search_datasets_pinecone(
     query: str,
+    start_time: float,
     pinecone_api_key: Optional[str] = None,
     pinecone_environment: Optional[str] = None,
     index_name: str = "dataset-embeddings",
@@ -228,6 +229,7 @@ def vector_search_datasets_pinecone(
     
     Args:
         query: The search query string.
+        start_time: Start time for measuring Pinecone query duration
         pinecone_api_key: Pinecone API key; if None, read from env var PINECONE_API_KEY.
         pinecone_environment: Pinecone environment (e.g., 'us-east-1-gcp'); if None, read from env var PINECONE_ENVIRONMENT.
         index_name: Name of the Pinecone index to query.
@@ -293,6 +295,9 @@ def vector_search_datasets_pinecone(
             top_k=top_k * 3,  # over-fetch so we can threshold
             include_metadata=False
         )
+
+        # Log when results are returned from Pinecone API
+        logger.info(f'Pinecone index.query completed for "{query}" at timestamp: {time.time() - start_time:.2f} seconds')
 
         if verbose:
             print(f"Retrieved {len(results.matches)} matches from Pinecone before filtering.")
