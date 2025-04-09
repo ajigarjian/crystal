@@ -80,9 +80,10 @@ firebase_admin.initialize_app()
         "http://localhost:3000",
         "http://localhost:5173",
         ],
-        cors_methods=["get", "post"],
+        cors_methods=["get", "post"]
     ),
-    memory=options.MemoryOption.MB_512
+    memory=options.MemoryOption.GB_2,
+    min_instances=5
 )
 def stream_search_datasets(request):
     """HTTP Cloud Function that streams dataset search results."""

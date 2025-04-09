@@ -99,10 +99,15 @@ def search_vector_datasets(query, similarity_threshold, max_results, start_time)
     yield create_status_message('I\'m searching through data.gov datasets...', start_time)
     
     try:
+        # Initialize Pinecone early
+        from factchecker.search.pinecone_search import get_pinecone_client
+        pc = get_pinecone_client()
+        logger.info(f"Pinecone client initialized at timestamp: {time.time() - start_time:.2f} seconds")
+        
         # Log start of parallel search
         logger.info(f"Starting parallel search at timestamp: {time.time() - start_time:.2f} seconds")
         
-        # Perform parallel search
+        # Perform parallel search with streaming enabled
         results = parallel_search(
             query,
             search_function=vector_search_datasets,
@@ -110,20 +115,27 @@ def search_vector_datasets(query, similarity_threshold, max_results, start_time)
             similarity_threshold=similarity_threshold,
             max_results=max_results,
             use_variations=True,
-            verbose=False
+            verbose=False,
+            stream_results=True,  # Enable streaming results
+            pinecone_client=pc  # Pass the initialized client
         )
         
+        # For streaming, we need to process the results as they come in
+        seen_vector_ids = set()
+        all_datasets_count = 0
+        
+        # Process each result as it's yielded
+        for result in results:
+            dataset_id = result['id']
+            if dataset_id not in seen_vector_ids:
+                seen_vector_ids.add(dataset_id)
+                all_datasets_count += 1
+                for chunk in process_and_yield_dataset(result, 'vector', all_datasets_count, start_time):
+                    yield chunk
+        
         # Log completion of parallel search
-        # logger.info(f"Parallel search completed at timestamp: {time.time() - start_time:.2f} seconds") # No longer needed here
+        logger.info(f"Parallel search completed at timestamp: {time.time() - start_time:.2f} seconds")
         
-        # Log timestamp when vector search results are returned
-        # logger.info(f"Vector search results returned from Pinecone at timestamp: {time.time() - start_time:.2f} seconds") # Moved inside pinecone_search
-        
-        # Convert generator to list if needed
-        if hasattr(results, '__iter__') and not isinstance(results, list):
-            results = list(results)
-        
-        yield results  # Yield the results instead of returning them
     except Exception as e:
         logger.error(f"Error in vector search: {e}")
         yield []  # Yield empty list instead of returning it
@@ -216,7 +228,7 @@ def assess_dataset_relevance(query, dataset, relevance_threshold, start_time, da
         return dataset
 
 # Add this new function for concurrent assessment
-def assess_datasets_concurrently(query, datasets, relevance_threshold, start_time, max_workers=3):
+def assess_datasets_concurrently(query, datasets, relevance_threshold, start_time, max_workers=20):
     """Assess multiple datasets concurrently and yield status updates"""
     total_datasets = len(datasets)
     processed_datasets = []
@@ -500,14 +512,14 @@ def stream_search_datasets_helper(query, similarity_threshold=0.25, search_metho
         
         # Use concurrent assessment instead of sequential
         try:
-            # Process datasets concurrently in batches of 3
+            # Process datasets concurrently in batches of 20
             relevant_datasets = []
             for chunk in assess_datasets_concurrently(
                 query, 
                 all_datasets, 
                 relevance_threshold, 
                 start_time, 
-                max_workers=3
+                max_workers=20
             ):
                 yield chunk
             

@@ -198,7 +198,8 @@ Your response (JSON array only):"""
         return [original_query]
 
 def parallel_search(query: str, search_function: Callable, start_time: float, similarity_threshold: float = 0.3, 
-                   max_results: int = 10, use_variations: bool = True, verbose: bool = False) -> List[Dict]:
+                   max_results: int = 10, use_variations: bool = True, verbose: bool = False, 
+                   stream_results: bool = False, pinecone_client=None) -> List[Dict]:
     """
     Perform parallel searches with the original query and variations.
     
@@ -210,6 +211,8 @@ def parallel_search(query: str, search_function: Callable, start_time: float, si
         max_results: Maximum number of results to return per query
         use_variations: Whether to generate and use query variations
         verbose: Whether to print detailed logging information
+        stream_results: If True, generate variations sequentially and yield results as they become available
+        pinecone_client: Pre-initialized Pinecone client to use for searches
         
     Returns:
         Combined and deduplicated list of search results
@@ -231,14 +234,24 @@ def parallel_search(query: str, search_function: Callable, start_time: float, si
             # Log start of individual search
             logger.info(f'Starting search for variation "{search_query}" at timestamp: {time.time() - worker_start_time:.2f} seconds')
             
-            # Use the global searcher for all queries
-            results = search_function(
-                search_query, 
-                start_time=worker_start_time,
-                similarity_threshold=similarity_threshold,
-                max_results=max_results,
-                verbose=False  # Suppress verbose output from search function
-            )
+            # Use the provided Pinecone client or get a new one
+            if pinecone_client:
+                results = search_function(
+                    search_query, 
+                    start_time=worker_start_time,
+                    similarity_threshold=similarity_threshold,
+                    max_results=max_results,
+                    verbose=False,  # Suppress verbose output from search function
+                    pinecone_client=pinecone_client  # Pass the pre-initialized client
+                )
+            else:
+                results = search_function(
+                    search_query, 
+                    start_time=worker_start_time,
+                    similarity_threshold=similarity_threshold,
+                    max_results=max_results,
+                    verbose=False
+                )
             
             # Log end of individual search
             logger.info(f'Completed search for variation "{search_query}" at timestamp: {time.time() - worker_start_time:.2f} seconds')
@@ -256,20 +269,34 @@ def parallel_search(query: str, search_function: Callable, start_time: float, si
             results_by_query[search_query] = 0
             return []
     
-    # Execute searches in parallel
-    # Limit max_workers to avoid resource contention
-    max_workers_limit = 4 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(queries), max_workers_limit)) as executor:
-        # Pass start_time to the worker
-        future_to_query = {executor.submit(search_worker, q, start_time): q for q in queries}
-        
-        for future in concurrent.futures.as_completed(future_to_query):
-            query_variation = future_to_query[future]
-            try:
-                results = future.result()
-                all_results.extend(results)
-            except Exception as e:
-                print(f"Error processing results for query '{query_variation}': {e}")
+    if stream_results:
+        # Sequential/Streaming approach: generate one variation, start its search, and while that search runs, generate the next variation.
+        # This allows us to yield results as soon as they are available from each search.
+        for search_query in queries:
+            # Start search for the current variation
+            results = search_worker(search_query, start_time)
+            # Yield results immediately for this variation
+            for result in results:
+                dataset_id = result['id']
+                if dataset_id not in seen_ids:
+                    seen_ids.add(dataset_id)
+                    all_results.append(result)
+                    yield result
+    else:
+        # Original parallel approach: generate all variations upfront and run searches in parallel
+        # Limit max_workers to avoid resource contention
+        max_workers_limit = 4
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(queries), max_workers_limit)) as executor:
+            # Pass start_time to the worker
+            future_to_query = {executor.submit(search_worker, q, start_time): q for q in queries}
+            
+            for future in concurrent.futures.as_completed(future_to_query):
+                query_variation = future_to_query[future]
+                try:
+                    results = future.result()
+                    all_results.extend(results)
+                except Exception as e:
+                    print(f"Error processing results for query '{query_variation}': {e}")
     
     # Deduplicate results
     deduplicated_results = []
@@ -292,7 +319,11 @@ def parallel_search(query: str, search_function: Callable, start_time: float, si
     print(f"Found {len(all_results)} total results, {len(deduplicated_results)} unique results")
     print(f"Returning top {len(final_results)} results after deduplication")
     
-    return final_results
+    if not stream_results:
+        return final_results
+    else:
+        # For streaming, we've already yielded individual results, so return the final list
+        return final_results
 
 def single_search(query: str, search_function: Callable, similarity_threshold: float = 0.3, 
                   max_results: int = 10, verbose: bool = False) -> List[Dict]:
