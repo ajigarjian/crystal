@@ -83,7 +83,7 @@ firebase_admin.initialize_app()
         cors_methods=["get", "post"]
     ),
     memory=options.MemoryOption.GB_2,
-    min_instances=5
+    min_instances=1
 )
 def stream_search_datasets(request):
     """HTTP Cloud Function that streams dataset search results."""
