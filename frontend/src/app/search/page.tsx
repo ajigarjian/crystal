@@ -49,6 +49,7 @@ export default function SearchPage() {
   const [query, setQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [searchProgress, setSearchProgress] = useState(0);
+  const [searchComplete, setSearchComplete] = useState(true);
   const [statusMessage, setStatusMessage] = useState('');
   const [datasets, setDatasets] = useState<any[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -65,7 +66,7 @@ export default function SearchPage() {
 
   // Automatically increment progress for perceived performance
   useEffect(() => {
-    if (isSearching && searchProgress < 90) {
+    if (!searchComplete && searchProgress < 90) {
       const timer = setTimeout(() => {
         // Accelerate at the beginning and slow down near 90%
         const increment = searchProgress < 30 ? 5 : searchProgress < 60 ? 2 : 0.5;
@@ -73,22 +74,22 @@ export default function SearchPage() {
       }, 500);
       return () => clearTimeout(timer);
     }
-  }, [isSearching, searchProgress]);
+  }, [searchComplete, searchProgress]);
 
   // Sort datasets by similarity score when the search is complete
   useEffect(() => {
-    if (!isSearching && datasets.length > 0) {
+    if (searchComplete && datasets.length > 0) {
       // Sort datasets by similarity score (higher is better)
       const sortedDatasets = [...datasets].sort((a, b) => 
         (b.similarity || 0) - (a.similarity || 0)
       );
       setDatasets(sortedDatasets);
     }
-  }, [isSearching, datasets.length]);
+  }, [searchComplete, datasets.length]);
 
   // Add this effect to manage the ellipsis animation
   useEffect(() => {
-    if (isSearching) {
+    if (!searchComplete) {
       const ellipsisAnimation = setInterval(() => {
         setEllipsis(prev => {
           if (prev === '') return '.';
@@ -96,13 +97,13 @@ export default function SearchPage() {
           if (prev === '..') return '...';
           return '';
         });
-      }, 1000); // Change ellipsis state every 400ms for a nice pace
+      }, 1000); // Change ellipsis state every second for a nice pace
       
       return () => clearInterval(ellipsisAnimation);
     } else {
       setEllipsis('');
     }
-  }, [isSearching]);
+  }, [searchComplete]);
 
   const handleSearch = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -110,6 +111,7 @@ export default function SearchPage() {
 
     // Reset state for new search
     setIsSearching(true);
+    setSearchComplete(false);
     setSearchProgress(0);
     setStatusMessage('Initiating search...');
     setDatasets([]);
@@ -132,7 +134,15 @@ export default function SearchPage() {
             setSearchProgress(prev => Math.min(prev + 3, 90));
           } 
           else if (chunk.type === 'dataset') {
-            setDatasets(prev => [...prev, chunk.data]);
+            setDatasets(prevDatasets => {
+              const newDatasets = [...prevDatasets, chunk.data];
+              // Only update the UI to show results, but keep both states
+              // to ensure the progress bar continues to display
+              if (prevDatasets.length === 0) {
+                setIsSearching(false);
+              }
+              return newDatasets;
+            });
             // Small progress boost for each dataset found
             setSearchProgress(prev => Math.min(prev + 1, 90));
           }
@@ -143,19 +153,14 @@ export default function SearchPage() {
             ));
           }
           else if (chunk.type === 'complete') {
-            // Search complete, set progress to 100%
+            // Search complete, set progress to 100% and mark search as complete
             setSearchProgress(100);
+            setSearchComplete(true);
             
             // Store the execution time from the backend
             if (chunk.data && chunk.data.execution_time) {
               setExecutionTime(chunk.data.execution_time);
             }
-            
-            // Ensure skeletons are visible for at least a short time for UX consistency
-            const minLoadingTime = 1000; // 1 second minimum loading time
-            setTimeout(() => {
-              setIsSearching(false);
-            }, minLoadingTime);
           }
         }
       );
@@ -163,11 +168,12 @@ export default function SearchPage() {
       console.error("Search error:", error);
       setStatusMessage(`Error: ${error.message || 'An unknown error occurred'}`);
       setIsSearching(false);
+      setSearchComplete(true);
     }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' && query.trim() && !isSearching) {
+    if (e.key === 'Enter' && query.trim() && searchProgress === 0) {
       handleSearch();
     }
   };
@@ -320,13 +326,13 @@ export default function SearchPage() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
-            disabled={isSearching}
+            disabled={searchProgress > 0 && searchProgress < 100}
           />
           <div 
-            className={`absolute left-4 top-1/2 -translate-y-1/2 transition-colors duration-200 ease-in-out z-20 ${!isSearching && query.trim() ? 'cursor-pointer' : ''}`}
-            onClick={!isSearching && query.trim() ? handleSearch : undefined}
+            className={`absolute left-4 top-1/2 -translate-y-1/2 transition-colors duration-200 ease-in-out z-20 ${!isSearching && query.trim() && searchProgress === 0 ? 'cursor-pointer' : ''}`}
+            onClick={!isSearching && query.trim() && searchProgress === 0 ? handleSearch : undefined}
           >
-            {isSearching ? (
+            {searchProgress > 0 && searchProgress < 100 ? (
               <motion.div
                 initial={{ opacity: 0, scale: 0.8 }}
                 animate={{ opacity: 1, scale: 1 }}
@@ -345,14 +351,14 @@ export default function SearchPage() {
             )}
           </div>
           
-          {!isSearching && query.trim() && (
+          {!isSearching && query.trim() && searchProgress === 0 && (
             <div className="absolute right-4 top-1/2 -translate-y-1/2 text-sm text-gray-400 opacity-70 z-20">
               Press Enter to search
             </div>
           )}
           
-          {/* Progress bar positioned inside the search input */}
-          {isSearching && (
+          {/* Progress bar positioned inside the search input - always show until complete message */}
+          {searchProgress > 0 && searchProgress < 100 && (
             <div className="absolute bottom-0 left-0 w-full h-0.5 z-0">
               <motion.div
                 initial={{ width: 0 }}
@@ -368,7 +374,7 @@ export default function SearchPage() {
       {/* Dataset results section - TABLE VIEW */}
       <div className="flex-1 max-w-7xl mx-auto w-full px-4 pb-12">
         <AnimatePresence>
-          {(isSearching || (!isSearching && datasets.length > 0)) && (
+          {(!searchComplete || (searchComplete && datasets.length > 0)) && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -378,7 +384,7 @@ export default function SearchPage() {
             >
               <div className="flex items-center justify-between mb-2">
                 <h2 className="text-sm text-gray-900">
-                  {isSearching ? (
+                  {searchProgress > 0 && searchProgress < 100 ? (
                     <span className="flex items-center">
                       <span className="text-gray-700">
                         {/* Remove any trailing ellipsis from the status message */}
@@ -387,7 +393,9 @@ export default function SearchPage() {
                       </span>
                     </span>
                   ) : (
-                    `Found ${datasets.length} datasets in ${executionTime.toFixed(1)} seconds.`
+                    datasets.length > 0 && searchProgress === 100 ? 
+                    `Found ${datasets.length} datasets in ${executionTime.toFixed(1)} seconds.` :
+                    ''
                   )}
                 </h2>
               </div>
@@ -403,8 +411,8 @@ export default function SearchPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {isSearching ? (
-                      // Skeleton rows when searching
+                    {searchProgress > 0 && searchProgress < 100 && datasets.length === 0 ? (
+                      // Skeleton rows when searching and no results yet
                       Array(3).fill(0).map((_, index) => (
                         <TableRow 
                           key={`skeleton-${index}`}
