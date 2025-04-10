@@ -155,12 +155,18 @@ def run_local_search():
         "query": "Philly crime stats",
         "similarity_threshold": 0.3,
         "search_method": None,  # None for hybrid search
-        "max_results": 20,
+        "max_results": 3,
         "census_max_results": 5,
         "relevance_threshold": 0.35
     }
     
-    print(f"Running search with query: {request_data['query']}")
+    print(f"\n🔍 Running search with query: '{request_data['query']}'")
+    print("=" * 80)
+    
+    # Track progress and store dataset updates
+    total_datasets = 0
+    relevant_datasets = 0
+    dataset_updates = {}  # Store dataset updates by ID
     
     # Process each chunk from the generator
     for chunk in local_stream_search_datasets(request_data):
@@ -172,27 +178,70 @@ def run_local_search():
             if event_type == "dataset":
                 # A new dataset result
                 dataset = data.get("data", {})
-                print(f"Received dataset: {dataset.get('title')}")
+                total_datasets += 1
+                
+                # Print dataset details
+                print(f"\n📊 Dataset {total_datasets}:")
+                print(f"Title: {dataset.get('title', 'N/A')}")
+                print(f"Description: {dataset.get('description', 'N/A')}")
+                print(f"Source: {dataset.get('source', 'N/A')}")
+                print("-" * 40)
+                
+            elif event_type == "dataset_update":
+                # Update about dataset relevance
+                update_data = data.get("data", {})
+                dataset_id = update_data.get("id")
+                relevance_info = update_data.get("relevance", {})
+                
+                # Store the update
+                dataset_updates[dataset_id] = {
+                    "relevance": relevance_info,
+                    "message": data.get("message", ""),
+                    "timestamp": data.get("timestamp", 0)
+                }
+                
+                # Print relevance update
+                print(f"\n📈 Relevance Update:")
+                print(f"Message: {data.get('message', '')}")
+                print(f"Score: {relevance_info.get('relevance_score', 0):.2f}")
+                print(f"Reasoning: {relevance_info.get('reasoning', 'N/A')}")
+                print("-" * 40)
+                
+                # Update relevant datasets count
+                if relevance_info.get('is_relevant', False):
+                    relevant_datasets += 1
                 
             elif event_type == "progress":
                 # Progress update
                 progress = data.get("data", {})
-                print(f"Progress: {progress.get('message', '')}")
+                print(f"\n🔄 {progress.get('message', '')}")
                 
             elif event_type == "complete":
                 # Final results
                 result = data.get("data", {})
-                print("\nSearch complete!")
-                print(f"Total results: {result.get('total_count', 0)}")
-                print(f"Execution time: {result.get('execution_time', 0)} seconds")
+                print("\n" + "=" * 80)
+                print("✨ Search Complete!")
+                print(f"Total datasets found: {total_datasets}")
+                print(f"Relevant datasets: {relevant_datasets}")
+                print(f"Execution time: {result.get('execution_time', 0):.2f} seconds")
+                
+                # Print summary of relevant datasets
+                if dataset_updates:
+                    print("\n📋 Relevance Summary:")
+                    for dataset_id, update in dataset_updates.items():
+                        if update["relevance"].get("is_relevant", False):
+                            print(f"\n• {update['message']}")
+                            print(f"  Reasoning: {update['relevance'].get('reasoning', 'N/A')}")
+                
+                print("=" * 80)
                 
             elif event_type == "error":
                 # Error occurred
                 error = data.get("data", {})
-                print(f"Error: {error.get('message', 'Unknown error')}")
+                print(f"\n❌ Error: {error.get('message', 'Unknown error')}")
                 
         except json.JSONDecodeError:
-            print(f"Could not parse chunk: {chunk}")
+            print(f"\n⚠️ Could not parse chunk: {chunk}")
 
 if __name__ == "__main__":
     # Run the local search function when script is executed directly

@@ -53,6 +53,7 @@ export default function SearchPage() {
   const [statusMessage, setStatusMessage] = useState('');
   const [datasets, setDatasets] = useState<any[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
+  const allDatasetsRef = useRef<any[]>([]);  // Store all datasets, relevant or not
   const [expandedDataset, setExpandedDataset] = useState<string | null>(null);
   const [executionTime, setExecutionTime] = useState<number>(0);
   const [ellipsis, setEllipsis] = useState('');
@@ -76,16 +77,23 @@ export default function SearchPage() {
     }
   }, [searchComplete, searchProgress]);
 
-  // Sort datasets by similarity score when the search is complete
+  // Update displayed datasets when search is complete
   useEffect(() => {
-    if (searchComplete && datasets.length > 0) {
-      // Sort datasets by similarity score (higher is better)
-      const sortedDatasets = [...datasets].sort((a, b) => 
-        (b.similarity || 0) - (a.similarity || 0)
-      );
-      setDatasets(sortedDatasets);
+    if (searchComplete) {
+      // Get all datasets from our ref
+      const allDatasets = allDatasetsRef.current;
+      
+      // Only show relevant datasets
+      const relevantDatasets = allDatasets
+        .filter(dataset => dataset.relevance && dataset.relevance.is_relevant === true)
+        .sort((a, b) => 
+          ((b.relevance?.relevance_score || b.similarity || 0) - 
+           (a.relevance?.relevance_score || a.similarity || 0))
+        );
+      
+      setDatasets(relevantDatasets);
     }
-  }, [searchComplete, datasets.length]);
+  }, [searchComplete]);
 
   // Add this effect to manage the ellipsis animation
   useEffect(() => {
@@ -115,6 +123,7 @@ export default function SearchPage() {
     setSearchProgress(0);
     setStatusMessage('Initiating search...');
     setDatasets([]);
+    allDatasetsRef.current = []; // Reset the raw datasets ref
     setExpandedDataset(null);
 
     try {
@@ -134,33 +143,56 @@ export default function SearchPage() {
             setSearchProgress(prev => Math.min(prev + 3, 90));
           } 
           else if (chunk.type === 'dataset') {
-            setDatasets(prevDatasets => {
-              const newDatasets = [...prevDatasets, chunk.data];
-              // Only update the UI to show results, but keep both states
-              // to ensure the progress bar continues to display
-              if (prevDatasets.length === 0) {
+            // Store dataset in our ref but don't display yet
+            const allDatasets = allDatasetsRef.current;
+            // Check if we already have this dataset ID
+            if (!allDatasets.some(d => d.id === chunk.data.id)) {
+              allDatasetsRef.current = [...allDatasets, chunk.data];
+              
+              // Update the UI state if this is the first dataset
+              if (allDatasets.length === 0) {
                 setIsSearching(false);
               }
-              return newDatasets;
-            });
+            }
+            
             // Small progress boost for each dataset found
             setSearchProgress(prev => Math.min(prev + 1, 90));
           }
           else if (chunk.type === 'dataset_update') {
-            // Update dataset with new information
-            setDatasets(prev => prev.map(d => 
+            // Update dataset in our ref
+            const allDatasets = allDatasetsRef.current;
+            const updatedDatasets = allDatasets.map(d => 
               d.id === chunk.data.id ? { ...d, ...chunk.data } : d
-            ));
+            );
+            allDatasetsRef.current = updatedDatasets;
+            
+            // Only display datasets with relevance evaluations that are relevant
+            const relevantDatasets = updatedDatasets.filter(dataset => 
+              dataset.relevance && dataset.relevance.is_relevant === true
+            );
+            
+            setDatasets(relevantDatasets);
           }
           else if (chunk.type === 'complete') {
             // Search complete, set progress to 100% and mark search as complete
             setSearchProgress(100);
             setSearchComplete(true);
             
-            // Store the execution time from the backend
+            // Store the execution time
             if (chunk.data && chunk.data.execution_time) {
               setExecutionTime(chunk.data.execution_time);
             }
+            
+            // Calculate our own relevant count based on actual processed datasets
+            const allDatasets = allDatasetsRef.current;
+            const relevantDatasets = allDatasets.filter(
+              dataset => dataset.relevance && dataset.relevance.is_relevant === true
+            );
+            
+            // Set status message with our calculated counts
+            setStatusMessage(
+              `Found ${relevantDatasets.length} relevant datasets out of ${allDatasets.length} total datasets.`
+            );
           }
         }
       );
@@ -189,7 +221,6 @@ export default function SearchPage() {
     
     // 1. Direct image_url on dataset
     if (dataset.image_url && typeof dataset.image_url === 'string') {
-      console.log('Found direct image_url:', dataset.image_url);
       return dataset.image_url;
     }
     
@@ -198,15 +229,12 @@ export default function SearchPage() {
       if (typeof dataset.organization === 'object') {
         // Check various possible field names
         if (dataset.organization.image_url) {
-          console.log('Found organization.image_url:', dataset.organization.image_url);
           return dataset.organization.image_url;
         }
         if (dataset.organization.logo) {
-          console.log('Found organization.logo:', dataset.organization.logo);
           return dataset.organization.logo;
         }
         if (dataset.organization.icon) {
-          console.log('Found organization.icon:', dataset.organization.icon);
           return dataset.organization.icon;
         }
       }
@@ -214,18 +242,8 @@ export default function SearchPage() {
     
     // 3. Check for separate organization_image_url field
     if (dataset.organization_image_url) {
-      console.log('Found organization_image_url:', dataset.organization_image_url);
       return dataset.organization_image_url;
     }
-    
-    // Add debugging to see the dataset structure
-    console.log('Dataset with missing image_url:', {
-      id: dataset.id,
-      title: dataset.title,
-      org: dataset.organization,
-      orgName: dataset.organization_name,
-      orgTitle: dataset.organization_title
-    });
     
     // Get organization name for the fallback initial
     let orgName = '';
@@ -394,7 +412,7 @@ export default function SearchPage() {
                     </span>
                   ) : (
                     datasets.length > 0 && searchProgress === 100 ? 
-                    `Found ${datasets.length} datasets in ${executionTime.toFixed(1)} seconds.` :
+                    `${statusMessage || `Found ${datasets.length} relevant datasets in ${executionTime.toFixed(1)} seconds.`}` :
                     ''
                   )}
                 </h2>
@@ -406,7 +424,8 @@ export default function SearchPage() {
                     <TableRow className="hover:!bg-transparent border-b border-gray-200">
                       <TableHead className="w-10 h-10 text-gray-700"></TableHead>
                       <TableHead className="w-40 font-medium text-gray-700">Source</TableHead>
-                      <TableHead className="w-[450px] font-medium text-gray-700">Dataset</TableHead>
+                      <TableHead className="w-[350px] font-medium text-gray-700">Dataset</TableHead>
+                      <TableHead className="w-24 text-center font-medium text-gray-700">Relevance</TableHead>
                       <TableHead className="w-28 text-center font-medium text-gray-700">Resources</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -429,10 +448,15 @@ export default function SearchPage() {
                               <Skeleton className="h-4 w-24 bg-gray-200" />
                             </div>
                           </TableCell>
-                          <TableCell className="py-4 max-w-[450px]">
+                          <TableCell className="py-4 max-w-[350px]">
                             <div className="space-y-2">
                               <Skeleton className="h-5 w-full max-w-[300px] bg-gray-200" />
                               <Skeleton className="h-3 w-3/4 bg-gray-200" />
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-4 text-center">
+                            <div className="flex justify-center">
+                              <Skeleton className="h-5 w-14 bg-gray-200 rounded-md" />
                             </div>
                           </TableCell>
                           <TableCell className="py-4 text-center">
@@ -479,12 +503,30 @@ export default function SearchPage() {
                                 </span>
                               </div>
                             </TableCell>
-                            <TableCell className="py-4 max-w-[450px]">
+                            <TableCell className="py-4 max-w-[350px]">
                               <div className="overflow-hidden">
                                 <h3 className="font-medium text-gray-900 line-clamp-2" title={dataset.title}>
                                   {dataset.title}
                                 </h3>
                               </div>
+                            </TableCell>
+                            <TableCell className="py-4 text-center">
+                              <Badge 
+                                variant="outline" 
+                                className={`font-medium text-xs ${
+                                  dataset.relevance?.relevance_score >= 0.7 
+                                    ? 'bg-green-50 text-green-700 border-green-200' 
+                                    : dataset.relevance?.relevance_score >= 0.5
+                                      ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                      : 'bg-gray-50 text-gray-700 border-gray-200'
+                                }`}
+                              >
+                                {dataset.relevance?.relevance_score 
+                                  ? (dataset.relevance.relevance_score * 100).toFixed(0) + '%' 
+                                  : dataset.similarity
+                                    ? (dataset.similarity * 100).toFixed(0) + '%'
+                                    : 'N/A'}
+                              </Badge>
                             </TableCell>
                             <TableCell className="py-4 text-center">
                               <Drawer>
@@ -592,6 +634,16 @@ export default function SearchPage() {
                                         {dataset.description || 'No description available'}
                                       </p>
                                     </div>
+                                    
+                                    {/* Relevance reasoning */}
+                                    {dataset.relevance && dataset.relevance.reasoning && (
+                                      <div className="mb-4 p-3 bg-gray-50 rounded-md border border-gray-100">
+                                        <h4 className="text-sm font-medium mb-1 text-gray-800">Relevance Assessment</h4>
+                                        <p className="text-sm text-gray-600">
+                                          {dataset.relevance.reasoning}
+                                        </p>
+                                      </div>
+                                    )}
                                     
                                     {/* Tags section */}
                                     {dataset.tags && dataset.tags.length > 0 && (
