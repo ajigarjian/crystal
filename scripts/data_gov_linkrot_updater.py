@@ -1039,7 +1039,8 @@ class DataGovArchiveProcessor:
                         self.process_dataset(local_path)
             
             # If not processing a single path, check for missing datasets
-            if not self.single_path and not self.process_new_only:
+            # Skip this check if using a limit to avoid false positives
+            if not self.single_path and not self.process_new_only and not self.limit:
                 missing_count = self.mark_missing_datasets(processed_dataset_names)
                 self.stats["datasets_missing"] = missing_count
             

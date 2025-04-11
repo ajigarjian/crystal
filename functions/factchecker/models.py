@@ -477,6 +477,15 @@ class DataGovArchiveCheck(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     error = models.TextField(blank=True, null=True)
+    
+    # New fields from migration 0016
+    last_available_in_datagov = models.DateTimeField(null=True, blank=True)
+    is_still_in_datagov = models.BooleanField(default=True)
+    had_resources = models.BooleanField(default=False)
+    has_usable_resources = models.BooleanField(default=False)
+    resources_gone_bad = models.BooleanField(default=False)
+    last_check_with_usable_resources = models.DateTimeField(null=True, blank=True)
+    availability_history = models.JSONField(default=list, blank=True, null=True)
 
     class Meta:
         app_label = 'factchecker'
