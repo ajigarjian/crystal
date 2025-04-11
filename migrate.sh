@@ -17,6 +17,6 @@ python factchecker/manage.py migrate
 
 # Run the extraction command to extract JSON data into structured fields
 echo "Running extraction command..."
-python factchecker/manage.py add_linkrot_tracking
+python factchecker/manage.py update_dataset_status_tracking
 
 echo "Migration completed."
