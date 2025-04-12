@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import React, { useState, useRef, useEffect } from 'react';
 import { Input } from "@/components/ui/input";
-import { Search, Loader2, ChevronDown, ChevronUp, FileText, ExternalLink, Info, ChevronRight, Download, X } from "lucide-react";
+import { Search, Loader2, ChevronDown, ChevronUp, FileText, ExternalLink, Info, ChevronRight, Download, X, Lock } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { streamSearchDatasets } from "@/lib/firebase";
 import { Badge } from "@/components/ui/badge";
@@ -44,6 +44,12 @@ import {
   DrawerClose,
 } from "@/components/ui/drawer";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
 
 export default function SearchPage() {
   const [query, setQuery] = useState('');
@@ -57,6 +63,7 @@ export default function SearchPage() {
   const [expandedDataset, setExpandedDataset] = useState<string | null>(null);
   const [executionTime, setExecutionTime] = useState<number>(0);
   const [ellipsis, setEllipsis] = useState('');
+  const [activeTab, setActiveTab] = useState<string>("data.gov");
 
   // Focus the input field when the page loads
   useEffect(() => {
@@ -418,20 +425,44 @@ export default function SearchPage() {
                 </h2>
               </div>
               
-              <div className="rounded-md border border-gray-200 bg-white">
-                <Table>
+              <Tabs 
+                defaultValue="data.gov" 
+                value={activeTab}
+                onValueChange={setActiveTab}
+                className="mb-0"
+              >
+                <TabsList className="bg-white border border-gray-200 rounded-md border-b-0 rounded-b-none">
+                  <TabsTrigger value="data.gov" className="data-[state=active]:bg-green-50 data-[state=active]:text-green-700">
+                    data.gov
+                  </TabsTrigger>
+                  <TabsTrigger 
+                    value="census" 
+                    disabled 
+                    className="opacity-60 cursor-not-allowed text-gray-400 hover:!bg-transparent hover:!text-gray-400 data-[state=active]:bg-transparent" 
+                  >
+                    <div className="flex items-center gap-1.5">
+                      U.S. Census Bureau
+                      <Lock className="h-3.5 w-3.5 text-gray-400" />
+                    </div>
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
+              
+              <div className="rounded-md rounded-tl-none border border-gray-200 bg-white">
+                <Table className="table-fixed">
                   <TableHeader>
                     <TableRow className="hover:!bg-transparent border-b border-gray-200">
-                      <TableHead className="w-10 h-10 text-gray-700"></TableHead>
-                      <TableHead className="w-40 font-medium text-gray-700">Source</TableHead>
-                      <TableHead className="w-[350px] font-medium text-gray-700">Dataset</TableHead>
-                      <TableHead className="w-24 text-center font-medium text-gray-700">Relevance</TableHead>
-                      <TableHead className="w-28 text-center font-medium text-gray-700">Resources</TableHead>
+                      <TableHead className="w-8 h-10 text-gray-700"></TableHead>
+                      <TableHead className="w-[20%] font-medium text-gray-700">Source</TableHead>
+                      <TableHead className="w-[60%] font-medium text-gray-700">Dataset</TableHead>
+                      <TableHead className="w-[10%] text-center font-medium text-gray-700">Relevance</TableHead>
+                      <TableHead className="w-[10%] text-center font-medium text-gray-700">Resources</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {searchProgress > 0 && searchProgress < 100 && datasets.length === 0 ? (
-                      // Skeleton rows when searching and no results yet
+                    {/* Show skeleton rows as long as the search is not complete */}
+                    {!searchComplete && (
+                      // Skeleton rows when searching
                       Array(6).fill(0).map((_, index) => (
                         <TableRow 
                           key={`skeleton-${index}`}
@@ -444,239 +475,253 @@ export default function SearchPage() {
                           </TableCell>
                           <TableCell className="py-4">
                             <div className="flex items-center gap-2">
-                              <Skeleton className="h-6 w-6 rounded-full bg-gray-200" />
-                              <Skeleton className="h-4 w-24 bg-gray-200" />
+                              <Skeleton className="h-6 w-6 rounded-full bg-gray-200 shrink-0" />
+                              <div className="relative overflow-hidden flex-1">
+                                <Skeleton className="h-4 w-full bg-gray-200" />
+                              </div>
                             </div>
                           </TableCell>
-                          <TableCell className="py-4 max-w-[350px]">
-                            <div className="space-y-2">
-                              <Skeleton className="h-5 w-full max-w-[300px] bg-gray-200" />
-                              <Skeleton className="h-3 w-3/4 bg-gray-200" />
-                            </div>
-                          </TableCell>
-                          <TableCell className="py-4 text-center">
-                            <div className="flex justify-center">
-                              <Skeleton className="h-5 w-14 bg-gray-200 rounded-md" />
+                          <TableCell className="py-4">
+                            {/* Single skeleton for dataset title that matches width */}
+                            <div className="relative overflow-hidden">
+                              <Skeleton className="h-5 w-[90%] bg-gray-200" />
                             </div>
                           </TableCell>
                           <TableCell className="py-4 text-center">
                             <div className="flex justify-center">
-                              <Skeleton className="h-6 w-20 bg-gray-200 rounded-full" />
+                              {/* Match the badge shape/size in the Relevance column */}
+                              <Skeleton className="h-6 w-16 bg-gray-200 rounded-full" />
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-4 text-center">
+                            <div className="flex justify-center">
+                              {/* Match the badge shape/size in the Resources column */}
+                              <Skeleton className="h-7 w-20 bg-gray-200 rounded-full" />
                             </div>
                           </TableCell>
                         </TableRow>
                       ))
-                    ) : (
-                      // Real data rows when search is complete
-                      datasets.map((dataset, index) => (
-                        <React.Fragment key={dataset.id}>
-                          <TableRow 
-                            className={`border-b border-gray-200 hover:bg-gray-50 transition-colors cursor-pointer ${
-                              expandedDataset === dataset.id ? 'bg-gray-50' : ''
-                            }`}
-                            onClick={() => toggleExpand(dataset.id)}
-                          >
-                            <TableCell className="py-4 px-4">
-                              <motion.div
-                                initial={{ rotate: 0 }}
-                                animate={{ rotate: expandedDataset === dataset.id ? 90 : 0 }}
-                                transition={{ duration: 0.2 }}
-                                className="flex items-center justify-center w-5 h-5"
-                              >
-                                <ChevronRight className="h-4 w-4 text-gray-500" />
-                              </motion.div>
-                            </TableCell>
-                            <TableCell className="py-4">
-                              <div className="flex items-center gap-2">
-                                <Avatar className="h-6 w-6 rounded shrink-0">
-                                  {typeof getOrganizationImage(dataset) === 'string' && 
-                                   getOrganizationImage(dataset).length > 1 ? (
-                                    <AvatarImage src={getOrganizationImage(dataset) as string} />
-                                  ) : (
-                                    <AvatarFallback className="rounded bg-green-100 text-green-600 text-xs">
-                                      {getOrganizationImage(dataset)}
-                                    </AvatarFallback>
-                                  )}
-                                </Avatar>
-                                <span className="text-sm line-clamp-2 text-gray-800 leading-tight" title={getOrganizationName(dataset)}>
+                    )}
+                    
+                    {/* Always show real dataset rows if we have any */}
+                    {datasets.map((dataset, index) => (
+                      <React.Fragment key={dataset.id}>
+                        <TableRow 
+                          className={`border-b border-gray-200 hover:bg-gray-50 transition-colors cursor-pointer ${
+                            expandedDataset === dataset.id ? 'bg-gray-50' : ''
+                          }`}
+                          onClick={() => toggleExpand(dataset.id)}
+                        >
+                          <TableCell className="py-4 px-4">
+                            <motion.div
+                              initial={{ rotate: 0 }}
+                              animate={{ rotate: expandedDataset === dataset.id ? 90 : 0 }}
+                              transition={{ duration: 0.2 }}
+                              className="flex items-center justify-center w-5 h-5"
+                            >
+                              <ChevronRight className="h-4 w-4 text-gray-500" />
+                            </motion.div>
+                          </TableCell>
+                          <TableCell className="py-4">
+                            <div className="flex items-center gap-2">
+                              <Avatar className="h-6 w-6 rounded shrink-0">
+                                {typeof getOrganizationImage(dataset) === 'string' && 
+                                 getOrganizationImage(dataset).length > 1 ? (
+                                  <AvatarImage src={getOrganizationImage(dataset) as string} />
+                                ) : (
+                                  <AvatarFallback className="rounded bg-green-100 text-green-600 text-xs">
+                                    {getOrganizationImage(dataset)}
+                                  </AvatarFallback>
+                                )}
+                              </Avatar>
+                              <div className="relative overflow-hidden w-full">
+                                <span 
+                                  className="text-sm block text-gray-800 leading-tight pr-6"
+                                  title={getOrganizationName(dataset)}
+                                >
                                   {getOrganizationName(dataset)}
                                 </span>
+                                <div className="absolute inset-y-0 right-0 w-8 bg-gradient-to-r from-transparent to-white pointer-events-none"></div>
                               </div>
-                            </TableCell>
-                            <TableCell className="py-4 max-w-[350px]">
-                              <div className="overflow-hidden">
-                                <h3 className="font-medium text-gray-900 line-clamp-2" title={dataset.title}>
-                                  {dataset.title}
-                                </h3>
-                              </div>
-                            </TableCell>
-                            <TableCell className="py-4 text-center">
-                              <Badge 
-                                variant="outline" 
-                                className={`font-medium text-xs ${
-                                  dataset.relevance?.relevance_score >= 0.7 
-                                    ? 'bg-green-50 text-green-700 border-green-200' 
-                                    : dataset.relevance?.relevance_score >= 0.5
-                                      ? 'bg-blue-50 text-blue-700 border-blue-200'
-                                      : 'bg-gray-50 text-gray-700 border-gray-200'
-                                }`}
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-4">
+                            <div className="relative overflow-hidden">
+                              <h3 
+                                className="font-medium text-gray-900 pr-8" 
+                                title={dataset.title}
                               >
-                                {dataset.relevance?.relevance_score 
-                                  ? (dataset.relevance.relevance_score * 100).toFixed(0) + '%' 
-                                  : dataset.similarity
-                                    ? (dataset.similarity * 100).toFixed(0) + '%'
-                                    : 'N/A'}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="py-4 text-center">
-                              <Drawer>
-                                <DrawerTrigger asChild>
-                                  <Badge 
-                                    variant="outline" 
-                                    className="font-medium text-gray-700 border border-gray-200 bg-transparent hover:bg-gray-100 cursor-pointer inline-flex items-center gap-1.5 transition-colors px-3 py-1"
-                                  >
-                                    <Download className="h-3 w-3" />
-                                    {(dataset.resources || []).length}
-                                  </Badge>
-                                </DrawerTrigger>
-                                <DrawerContent className="bg-white text-gray-900">
-                                  <DrawerHeader className="border-b border-gray-100">
-                                    <DrawerTitle className="text-xl font-semibold text-gray-900">Resources</DrawerTitle>
-                                    <DrawerDescription className="text-gray-600">
-                                      Available resources for "{dataset.title}"
-                                    </DrawerDescription>
-                                  </DrawerHeader>
-                                  <div className="p-4">
-                                    {dataset.resources && dataset.resources.length > 0 ? (
-                                      <Table>
-                                        <TableHeader>
-                                          <TableRow className="border-b border-gray-200 hover:!bg-gray-50">
-                                            <TableHead className="w-[100px] text-gray-700">Type</TableHead>
-                                            <TableHead className="text-gray-700">Name</TableHead>
-                                            <TableHead className="text-right text-gray-700">Access</TableHead>
+                                {dataset.title}
+                              </h3>
+                              <div className="absolute inset-y-0 right-0 w-12 bg-gradient-to-r from-transparent to-white pointer-events-none"></div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-4 text-center">
+                            <Badge 
+                              variant="outline" 
+                              className={`font-medium text-xs ${
+                                dataset.relevance?.relevance_score >= 0.7 
+                                  ? 'bg-green-50 text-green-700 border-green-200' 
+                                  : dataset.relevance?.relevance_score >= 0.5
+                                    ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                    : 'bg-gray-50 text-gray-700 border-gray-200'
+                              }`}
+                            >
+                              {dataset.relevance?.relevance_score 
+                                ? (dataset.relevance.relevance_score * 100).toFixed(0) + '%' 
+                                : dataset.similarity
+                                  ? (dataset.similarity * 100).toFixed(0) + '%'
+                                  : 'N/A'}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="py-4 text-center">
+                            <Drawer>
+                              <DrawerTrigger asChild>
+                                <Badge 
+                                  variant="outline" 
+                                  className="font-medium text-gray-700 border border-gray-200 bg-transparent hover:bg-gray-100 cursor-pointer inline-flex items-center gap-1.5 transition-colors px-3 py-1"
+                                >
+                                  <Download className="h-3 w-3" />
+                                  {(dataset.resources || []).length}
+                                </Badge>
+                              </DrawerTrigger>
+                              <DrawerContent className="bg-white text-gray-900">
+                                <DrawerHeader className="border-b border-gray-100">
+                                  <DrawerTitle className="text-xl font-semibold text-gray-900">Resources</DrawerTitle>
+                                  <DrawerDescription className="text-gray-600">
+                                    Available resources for "{dataset.title}"
+                                  </DrawerDescription>
+                                </DrawerHeader>
+                                <div className="p-4">
+                                  {dataset.resources && dataset.resources.length > 0 ? (
+                                    <Table>
+                                      <TableHeader>
+                                        <TableRow className="border-b border-gray-200 hover:!bg-gray-50">
+                                          <TableHead className="w-[100px] text-gray-700">Type</TableHead>
+                                          <TableHead className="text-gray-700">Name</TableHead>
+                                          <TableHead className="text-right text-gray-700">Access</TableHead>
+                                        </TableRow>
+                                      </TableHeader>
+                                      <TableBody>
+                                        {dataset.resources.map((resource: any, resourceIndex: number) => (
+                                          <TableRow 
+                                            key={resource.id || resourceIndex}
+                                            className="border-b border-gray-100 hover:!bg-gray-50 hover:!text-gray-900"
+                                          >
+                                            <TableCell className="font-medium text-gray-900">
+                                              {getFileType(resource)}
+                                            </TableCell>
+                                            <TableCell className="text-gray-800">
+                                              {resource.name || 'Unnamed resource'}
+                                            </TableCell>
+                                            <TableCell className="text-right">
+                                              <Button 
+                                                size="sm" 
+                                                variant="ghost"
+                                                className="h-8 w-8 p-0 text-gray-700 hover:!bg-gray-100 hover:!text-gray-900"
+                                                asChild
+                                              >
+                                                <a href={resource.url} target="_blank" rel="noopener noreferrer">
+                                                  <ExternalLink className="h-4 w-4" />
+                                                </a>
+                                              </Button>
+                                            </TableCell>
                                           </TableRow>
-                                        </TableHeader>
-                                        <TableBody>
-                                          {dataset.resources.map((resource: any, resourceIndex: number) => (
-                                            <TableRow 
-                                              key={resource.id || resourceIndex}
-                                              className="border-b border-gray-100 hover:!bg-gray-50 hover:!text-gray-900"
-                                            >
-                                              <TableCell className="font-medium text-gray-900">
-                                                {getFileType(resource)}
-                                              </TableCell>
-                                              <TableCell className="text-gray-800">
-                                                {resource.name || 'Unnamed resource'}
-                                              </TableCell>
-                                              <TableCell className="text-right">
-                                                <Button 
-                                                  size="sm" 
-                                                  variant="ghost"
-                                                  className="h-8 w-8 p-0 text-gray-700 hover:!bg-gray-100 hover:!text-gray-900"
-                                                  asChild
-                                                >
-                                                  <a href={resource.url} target="_blank" rel="noopener noreferrer">
-                                                    <ExternalLink className="h-4 w-4" />
-                                                  </a>
-                                                </Button>
-                                              </TableCell>
-                                            </TableRow>
-                                          ))}
-                                        </TableBody>
-                                      </Table>
-                                    ) : (
-                                      <p className="text-sm text-gray-500 italic">No resources available</p>
-                                    )}
+                                        ))}
+                                      </TableBody>
+                                    </Table>
+                                  ) : (
+                                    <p className="text-sm text-gray-500 italic">No resources available</p>
+                                  )}
+                                </div>
+                                <DrawerFooter className="border-t border-gray-100 bg-white">
+                                  <div className="flex justify-end w-full">
+                                    <Button 
+                                      variant="default" 
+                                      className="gap-1 bg-green-500 text-white hover:!bg-green-600"
+                                      onClick={() => {
+                                        // Logic to download all resources
+                                        if (dataset.resources && dataset.resources.length > 0) {
+                                          window.open(dataset.resources[0].url, '_blank');
+                                        }
+                                      }}
+                                    >
+                                      <Download className="h-4 w-4" />
+                                      Download All
+                                    </Button>
                                   </div>
-                                  <DrawerFooter className="border-t border-gray-100 bg-white">
-                                    <div className="flex justify-end w-full">
-                                      <Button 
-                                        variant="default" 
-                                        className="gap-1 bg-green-500 text-white hover:!bg-green-600"
-                                        onClick={() => {
-                                          // Logic to download all resources
-                                          if (dataset.resources && dataset.resources.length > 0) {
-                                            window.open(dataset.resources[0].url, '_blank');
-                                          }
-                                        }}
-                                      >
-                                        <Download className="h-4 w-4" />
-                                        Download All
-                                      </Button>
-                                    </div>
-                                  </DrawerFooter>
-                                </DrawerContent>
-                              </Drawer>
-                            </TableCell>
-                          </TableRow>
-                          
-                          {/* Expandable row for resources */}
-                          <AnimatePresence>
-                            {expandedDataset === dataset.id && (
-                              <motion.tr
-                                initial={{ opacity: 0, height: 0 }}
-                                animate={{ opacity: 1, height: 'auto' }}
-                                exit={{ opacity: 0, height: 0 }}
-                                transition={{ duration: 0.2 }}
-                                className="bg-gray-50"
-                              >
-                                <td colSpan={5} className="p-0 border-b border-gray-200">
-                                  <motion.div
-                                    initial={{ opacity: 0 }}
-                                    animate={{ opacity: 1 }}
-                                    exit={{ opacity: 0 }}
-                                    transition={{ duration: 0.2, delay: 0.1 }}
-                                    className="px-4 py-4"
-                                  >
-                                    {/* Full description */}
+                                </DrawerFooter>
+                              </DrawerContent>
+                            </Drawer>
+                          </TableCell>
+                        </TableRow>
+                        
+                        {/* Expandable row for resources */}
+                        <AnimatePresence>
+                          {expandedDataset === dataset.id && (
+                            <motion.tr
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: 'auto' }}
+                              exit={{ opacity: 0, height: 0 }}
+                              transition={{ duration: 0.2 }}
+                              className="bg-gray-50"
+                            >
+                              <td colSpan={5} className="p-0 border-b border-gray-200">
+                                <motion.div
+                                  initial={{ opacity: 0 }}
+                                  animate={{ opacity: 1 }}
+                                  exit={{ opacity: 0 }}
+                                  transition={{ duration: 0.2, delay: 0.1 }}
+                                  className="px-4 py-4"
+                                >
+                                  {/* Full description */}
+                                  <div className="mb-4">
+                                    <h4 className="text-sm font-medium mb-1 text-gray-800">Description</h4>
+                                    <p className="text-sm text-gray-600">
+                                      {dataset.description || 'No description available'}
+                                    </p>
+                                  </div>
+                                  
+                                  {/* Relevance reasoning */}
+                                  {dataset.relevance && dataset.relevance.reasoning && (
                                     <div className="mb-4">
-                                      <h4 className="text-sm font-medium mb-1 text-gray-800">Description</h4>
+                                      <h4 className="text-sm font-medium mb-1 text-gray-800">Relevance Assessment</h4>
                                       <p className="text-sm text-gray-600">
-                                        {dataset.description || 'No description available'}
+                                        {dataset.relevance.reasoning}
                                       </p>
                                     </div>
-                                    
-                                    {/* Relevance reasoning */}
-                                    {dataset.relevance && dataset.relevance.reasoning && (
-                                      <div className="mb-4">
-                                        <h4 className="text-sm font-medium mb-1 text-gray-800">Relevance Assessment</h4>
-                                        <p className="text-sm text-gray-600">
-                                          {dataset.relevance.reasoning}
-                                        </p>
+                                  )}
+                                  
+                                  {/* Tags section */}
+                                  {dataset.tags && dataset.tags.length > 0 && (
+                                    <div>
+                                      <h4 className="text-sm font-medium mb-2 text-gray-800">Tags</h4>
+                                      <div className="flex flex-wrap gap-1.5">
+                                        {dataset.tags.map((tag: any, tagIndex: number) => {
+                                          const tagText = typeof tag === 'string' 
+                                            ? tag 
+                                            : (tag.display_name || tag.name || '');
+                                            
+                                          return (
+                                            <Badge 
+                                              key={tagIndex} 
+                                              variant="secondary"
+                                              className="text-xs text-gray-700 bg-gray-100 hover:bg-gray-200"
+                                            >
+                                              {tagText}
+                                            </Badge>
+                                          );
+                                        })}
                                       </div>
-                                    )}
-                                    
-                                    {/* Tags section */}
-                                    {dataset.tags && dataset.tags.length > 0 && (
-                                      <div>
-                                        <h4 className="text-sm font-medium mb-2 text-gray-800">Tags</h4>
-                                        <div className="flex flex-wrap gap-1.5">
-                                          {dataset.tags.map((tag: any, tagIndex: number) => {
-                                            const tagText = typeof tag === 'string' 
-                                              ? tag 
-                                              : (tag.display_name || tag.name || '');
-                                              
-                                            return (
-                                              <Badge 
-                                                key={tagIndex} 
-                                                variant="secondary"
-                                                className="text-xs text-gray-700 bg-gray-100 hover:bg-gray-200"
-                                              >
-                                                {tagText}
-                                              </Badge>
-                                            );
-                                          })}
-                                        </div>
-                                      </div>
-                                    )}
-                                  </motion.div>
-                                </td>
-                              </motion.tr>
-                            )}
-                          </AnimatePresence>
-                        </React.Fragment>
-                      ))
-                    )}
+                                    </div>
+                                  )}
+                                </motion.div>
+                              </td>
+                            </motion.tr>
+                          )}
+                        </AnimatePresence>
+                      </React.Fragment>
+                    ))}
                   </TableBody>
                 </Table>
               </div>
