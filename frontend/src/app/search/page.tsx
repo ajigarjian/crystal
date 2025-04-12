@@ -637,7 +637,7 @@ export default function SearchPage() {
                                     
                                     {/* Relevance reasoning */}
                                     {dataset.relevance && dataset.relevance.reasoning && (
-                                      <div className="mb-4 p-3 bg-gray-50 rounded-md border border-gray-100">
+                                      <div className="mb-4">
                                         <h4 className="text-sm font-medium mb-1 text-gray-800">Relevance Assessment</h4>
                                         <p className="text-sm text-gray-600">
                                           {dataset.relevance.reasoning}
