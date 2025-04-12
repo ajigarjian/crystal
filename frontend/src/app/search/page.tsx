@@ -181,8 +181,8 @@ export default function SearchPage() {
             setDatasets(relevantDatasets);
           }
           else if (chunk.type === 'complete') {
-            // Search complete, set progress to 100% and mark search as complete
-            setSearchProgress(100);
+            // Search complete, set progress to 0% and mark search as complete
+            setSearchProgress(0);
             setSearchComplete(true);
             
             // Store the execution time
