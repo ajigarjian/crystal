@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import React, { useState, useRef, useEffect } from 'react';
 import { Input } from "@/components/ui/input";
-import { Search, Loader2, ChevronDown, ChevronUp, FileText, ExternalLink, Info, ChevronRight, Download, X, Lock, AlertCircle, Lightbulb, MessageSquare, ThumbsUp, Bug } from "lucide-react";
+import { Search, Loader2, ChevronDown, ChevronUp, FileText, ExternalLink, Info, ChevronRight, Download, X, Lock, AlertCircle, Lightbulb, MessageSquare, ThumbsUp, Bug, ArrowRight } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { streamSearchDatasets } from "@/lib/firebase";
 import { Badge } from "@/components/ui/badge";
@@ -580,8 +580,21 @@ export default function SearchPage() {
           </Link>
         </div>
         
-        {/* Add this line to include the FeedbackWidget */}
-        <FeedbackWidget />
+        {/* Add navigation links including waitlist in the same style as landing page */}
+        <div className="flex gap-4 items-center">
+          <Link href="/waitlist" target="_blank">
+            <Button 
+              variant="link" 
+              className="text-gray-900 flex items-center gap-2 hover:text-gray-700 transition-colors"
+              style={{ fontFamily: 'var(--font-geist-sans)' }}
+            >
+              Join <Badge className="bg-purple-500 hover:bg-purple-500 text-xs py-0 px-1.5 text-white font-normal rounded-sm">BETA</Badge> Waitlist <ArrowRight className="h-4 w-4" />
+            </Button>
+          </Link>
+          
+          {/* Feedback widget */}
+          <FeedbackWidget />
+        </div>
       </div>
       
       {/* Search section */}
