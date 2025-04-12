@@ -62,8 +62,8 @@ def create_error_message(message, details=None, start_time=None):
         error_obj['details'] = details
     return json.dumps(error_obj, cls=NumpyEncoder) + '\n'
 
-def process_and_yield_dataset(dataset, source, all_datasets_count, start_time):
-    """Process a dataset and yield appropriate messages"""
+def process_and_yield_dataset(dataset, source, all_datasets_count, start_time, query=None, relevance_threshold=None, executor=None):
+    """Process a dataset and yield appropriate messages without relevance assessment"""
     dataset_id = dataset['id']
     dataset_title = dataset['title']
     
@@ -89,31 +89,165 @@ def process_and_yield_dataset(dataset, source, all_datasets_count, start_time):
         'timestamp': time.time() - start_time
     }, cls=NumpyEncoder) + '\n'
 
+def assess_and_create_update(query, dataset, relevance_threshold, start_time):
+    """Helper function to assess relevance and create update message, intended for thread pool"""
+    # Pull out only the fields we need to minimize memory footprint
+    dataset_id = dataset.get('id', 'unknown')
+    dataset_title = dataset.get('title', 'Unnamed Dataset')
+    # Time tracking for performance monitoring
+    assessment_start = time.time()
+    
+    try:
+        # Call the pre-download assessment function
+        assessment_result = assess_datafile_relevance_predownload(
+            query, 
+            dataset,
+            relevance_threshold=relevance_threshold
+        )
+        
+        # Extract values from the result dictionary
+        is_relevant = assessment_result["is_relevant"]
+        relevance_score = assessment_result["relevance_score"]
+        reasoning = assessment_result["reasoning"]
+        
+        # Store the relevance information in the dataset
+        dataset['relevance'] = {
+            'is_relevant': is_relevant,
+            'relevance_score': relevance_score,
+            'reasoning': reasoning
+        }
+        
+        # If resource_url is in the assessment result, add it to the dataset
+        if "resource_url" in assessment_result:
+            dataset['resource_url'] = assessment_result["resource_url"]
+        
+        # Create and return update message
+        update_message = json.dumps({
+            'type': 'dataset_update',
+            'data': {
+                'id': dataset_id,
+                'relevance': dataset['relevance']
+            },
+            'message': f'{"✓" if is_relevant else "✗"} Dataset {dataset_title} is {"likely relevant" if is_relevant else "not relevant"} (Score: {relevance_score:.2f})',
+            'timestamp': time.time() - start_time
+        }, cls=NumpyEncoder) + '\n'
+        
+        assessment_duration = time.time() - assessment_start
+        logger.info(f"Dataset {dataset_id} assessment completed in {assessment_duration:.2f}s")
+        return update_message, dataset
+        
+    except Exception as e:
+        assessment_duration = time.time() - assessment_start
+        logger.error(f"Error assessing relevance (after {assessment_duration:.2f}s): {str(e)}")
+        # Store error information in the dataset
+        dataset['relevance'] = {
+            'is_relevant': False,
+            'relevance_score': 0.0,
+            'reasoning': f"Error during assessment: {str(e)}",
+            'error': str(e)
+        }
+        
+        # Create and return error update
+        error_message = json.dumps({
+            'type': 'dataset_update',
+            'data': {
+                'id': dataset_id,
+                'relevance': dataset['relevance']
+            },
+            'message': f'Error assessing dataset {dataset_title}: {str(e)}',
+            'timestamp': time.time() - start_time
+        }, cls=NumpyEncoder) + '\n'
+        
+        return error_message, dataset
+
 def search_census_data(query, similarity_threshold, max_results, start_time):
     """Search Census data and yield status updates and results"""
     yield create_status_message('Census search functionality is temporarily disabled.', start_time)
     return []
 
-def search_vector_datasets(query, similarity_threshold, max_results, start_time):
+def search_vector_datasets(query, similarity_threshold, max_results, start_time, relevance_threshold=0.4):
     """Search datasets using vector search and yield results"""
     yield create_status_message('I\'m searching through data.gov datasets...', start_time)
     
     try:
-        # Perform parallel search
+        # Initialize Pinecone early
+        from factchecker.search.pinecone_search import get_pinecone_client
+        pc = get_pinecone_client()
+        logger.info(f"Pinecone client initialized at timestamp: {time.time() - start_time:.2f} seconds")
+        
+        # Log start of parallel search
+        logger.info(f"Starting parallel search at timestamp: {time.time() - start_time:.2f} seconds")
+        
+        # Initialize vector_datasets list
+        vector_datasets = []
+        
+        # Perform parallel search with streaming enabled
         results = parallel_search(
             query,
             search_function=vector_search_datasets,
+            start_time=start_time,
             similarity_threshold=similarity_threshold,
             max_results=max_results,
             use_variations=True,
-            verbose=False
+            verbose=False,
+            stream_results=True,  # Enable streaming results
+            pinecone_client=pc  # Pass the initialized client
         )
         
-        # Convert generator to list if needed
-        if hasattr(results, '__iter__') and not isinstance(results, list):
-            results = list(results)
+        # For streaming, we need to process the results as they come in
+        seen_vector_ids = set()
+        all_datasets_count = 0
         
-        yield results  # Yield the results instead of returning them
+        # Process results by query variation batches
+        current_variation = None
+        current_batch = []
+        
+        # Process each result as it's yielded
+        for result in results:
+            dataset_id = result['id']
+            if dataset_id not in seen_vector_ids:
+                seen_vector_ids.add(dataset_id)
+                all_datasets_count += 1
+                vector_datasets.append(result)
+                
+                # Get the query variation
+                query_variation = result.get('query_variation', query)
+                
+                # First just yield the dataset without relevance assessment for immediate display
+                for chunk in process_and_yield_dataset(result, 'vector', all_datasets_count, start_time):
+                    yield chunk
+                
+                # Check if this is a new variation batch
+                if current_variation != query_variation and current_batch:
+                    # Process the previous complete batch
+                    logger.info(f"Processing vector batch for variation '{current_variation}' with {len(current_batch)} datasets")
+                    batch_start = time.time()
+                    
+                    # Process this batch in parallel
+                    for update in process_dataset_batch(current_batch, query, relevance_threshold, start_time):
+                        yield update
+                        
+                    logger.info(f"Vector batch processed in {time.time() - batch_start:.2f}s")
+                    current_batch = []
+                
+                # Track this result in the current batch
+                current_batch.append(result)
+                current_variation = query_variation
+        
+        # Process the final batch
+        if current_batch:
+            logger.info(f"Processing final vector batch for variation '{current_variation}' with {len(current_batch)} datasets")
+            batch_start = time.time()
+            
+            # Process this batch in parallel
+            for update in process_dataset_batch(current_batch, query, relevance_threshold, start_time):
+                yield update
+                
+            logger.info(f"Final vector batch processed in {time.time() - batch_start:.2f}s")
+        
+        # Log completion of parallel search
+        logger.info(f"Parallel search completed at timestamp: {time.time() - start_time:.2f} seconds")
+        
     except Exception as e:
         logger.error(f"Error in vector search: {e}")
         yield []  # Yield empty list instead of returning it
@@ -125,13 +259,18 @@ def search_keyword_datasets(query, gov_api_key, keyword_threshold, start_time):
     try:
         # Get keyword search results
         keyword_results = search_datasets(query, gov_api_key, similarity_threshold=keyword_threshold)
-        return keyword_results
+        # Return the results - they'll be processed by the caller
+        # Wrap the results in a JSON object so it's a string not a list
+        yield json.dumps({
+            'type': 'keyword_results',
+            'data': keyword_results,
+            'timestamp': time.time() - start_time
+        }, cls=NumpyEncoder) + '\n'
     except Exception as e:
         yield create_error_message(
             f'I ran into a problem finding additional datasets: {str(e)}',
             start_time=start_time
         )
-        return []
 
 def assess_dataset_relevance(query, dataset, relevance_threshold, start_time, dataset_index, total_datasets):
     """Assess dataset relevance before downloading and yield status updates"""
@@ -206,7 +345,7 @@ def assess_dataset_relevance(query, dataset, relevance_threshold, start_time, da
         return dataset
 
 # Add this new function for concurrent assessment
-def assess_datasets_concurrently(query, datasets, relevance_threshold, start_time, max_workers=3):
+def assess_datasets_concurrently(query, datasets, relevance_threshold, start_time, max_workers=20):
     """Assess multiple datasets concurrently and yield status updates"""
     total_datasets = len(datasets)
     processed_datasets = []
@@ -288,6 +427,90 @@ def assess_datasets_concurrently(query, datasets, relevance_threshold, start_tim
     
     return processed_datasets
 
+def process_dataset_batch(datasets, query, relevance_threshold, start_time):
+    """
+    Process a batch of datasets for relevance in parallel
+    
+    Args:
+        datasets: List of datasets to assess
+        query: User query
+        relevance_threshold: Threshold for relevance
+        start_time: Start time for timestamp calculation
+        
+    Returns:
+        Generator of results messages
+    """
+    # Create a thread pool just for this batch
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(datasets)) as executor:
+        # Submit all assessments to the thread pool
+        future_to_dataset = {
+            executor.submit(
+                assess_datafile_relevance_predownload,
+                query,
+                dataset,
+                relevance_threshold=relevance_threshold
+            ): dataset 
+            for dataset in datasets
+        }
+        
+        # Process as they complete
+        for future in concurrent.futures.as_completed(future_to_dataset):
+            dataset = future_to_dataset[future]
+            dataset_id = dataset.get('id', 'unknown')
+            dataset_title = dataset.get('title', 'Unnamed Dataset')
+            
+            try:
+                # Get the assessment result
+                assessment_result = future.result()
+                
+                # Extract values from the result dictionary
+                is_relevant = assessment_result["is_relevant"]
+                relevance_score = assessment_result["relevance_score"]
+                reasoning = assessment_result["reasoning"]
+                
+                # Store the relevance information in the dataset
+                dataset['relevance'] = {
+                    'is_relevant': is_relevant,
+                    'relevance_score': relevance_score,
+                    'reasoning': reasoning
+                }
+                
+                # If resource_url is in the assessment result, add it to the dataset
+                if "resource_url" in assessment_result:
+                    dataset['resource_url'] = assessment_result["resource_url"]
+                
+                # Yield dataset update with relevance information
+                yield json.dumps({
+                    'type': 'dataset_update',
+                    'data': {
+                        'id': dataset_id,
+                        'relevance': dataset['relevance']
+                    },
+                    'message': f'{"✓" if is_relevant else "✗"} Dataset {dataset_title} is {"likely relevant" if is_relevant else "not relevant"} (Score: {relevance_score:.2f})',
+                    'timestamp': time.time() - start_time
+                }, cls=NumpyEncoder) + '\n'
+                
+            except Exception as e:
+                logger.error(f"Error assessing dataset {dataset_id}: {str(e)}")
+                # Store error information in the dataset
+                dataset['relevance'] = {
+                    'is_relevant': False,
+                    'relevance_score': 0.0,
+                    'reasoning': f"Error during assessment: {str(e)}",
+                    'error': str(e)
+                }
+                
+                # Yield error update
+                yield json.dumps({
+                    'type': 'dataset_update',
+                    'data': {
+                        'id': dataset_id,
+                        'relevance': dataset['relevance']
+                    },
+                    'message': f'Error assessing dataset {dataset_title}: {str(e)}',
+                    'timestamp': time.time() - start_time
+                }, cls=NumpyEncoder) + '\n'
+
 def stream_search_datasets_helper(query, similarity_threshold=0.25, search_method=None, 
                                  max_results=50, census_max_results=5, relevance_threshold=0.4):
     """
@@ -296,6 +519,11 @@ def stream_search_datasets_helper(query, similarity_threshold=0.25, search_metho
     try:
         start_time = time.time()
         all_datasets_count = 0
+        
+        # Data structures to hold batches of datasets for parallel processing
+        vector_batch = []
+        keyword_batch = []
+        batch_size = 20  # Process 20 datasets at a time
         
         # Send initial message
         yield create_status_message(
@@ -319,14 +547,12 @@ def stream_search_datasets_helper(query, similarity_threshold=0.25, search_metho
         vector_datasets = []
         keyword_datasets = []
         census_datasets = []
-        
-        # Search Census data - this is a generator that yields status updates
-        # We need to collect the actual datasets separately
-        #for chunk in search_census_data(query, similarity_threshold, census_max_results, start_time):
-        #    yield chunk
+        processed_dataset_ids = set()
         
         # Census functionality is temporarily disabled
         census_datasets = []
+        
+        # No more complex functions for assessment - everything is done directly in process_and_yield_dataset
         
         # Now launch Data.gov searches
         with concurrent.futures.ThreadPoolExecutor() as executor:
@@ -334,7 +560,7 @@ def stream_search_datasets_helper(query, similarity_threshold=0.25, search_metho
             if search_method in ['vector', None]:  # Vector or hybrid
                 try:
                     # Get vector search results - this is now a generator that yields both status and results
-                    vector_generator = search_vector_datasets(query, similarity_threshold, max_results, start_time)
+                    vector_generator = search_vector_datasets(query, similarity_threshold, max_results, start_time, relevance_threshold)
                     
                     # Process the generator - first item is status message, second is the actual results
                     for item in vector_generator:
@@ -355,16 +581,47 @@ def stream_search_datasets_helper(query, similarity_threshold=0.25, search_metho
                                     start_time
                                 )
                             
-                            # Process and yield each result
-                            seen_vector_ids = set()
-                            # Check if vector_results is a list of dictionaries
+                            # Process and yield each result immediately
                             if isinstance(vector_results, list) and all(isinstance(item, dict) for item in vector_results):
+                                # Start processing results immediately
                                 for result in vector_results:
-                                    seen_vector_ids.add(result['id'])
-                                    vector_datasets.append(result)
-                                    all_datasets_count += 1
-                                    for chunk in process_and_yield_dataset(result, 'vector', all_datasets_count, start_time):
-                                        yield chunk
+                                    dataset_id = result.get('id')
+                                    if dataset_id and dataset_id not in processed_dataset_ids:
+                                        processed_dataset_ids.add(dataset_id)
+                                        vector_datasets.append(result)
+                                        all_datasets_count += 1
+                                        
+                                        # Process the dataset and submit async assessment
+                                        for chunk in process_and_yield_dataset(result, 'vector', all_datasets_count, start_time, query, relevance_threshold, relevance_executor):
+                                            yield chunk
+                                        
+                                        # Submit assessment to the thread pool
+                                        future = relevance_executor.submit(
+                                            assess_and_create_update,
+                                            query,
+                                            result,
+                                            relevance_threshold,
+                                            start_time
+                                        )
+                                        futures.append(future)
+                                        
+                                        # Check for completed futures periodically 
+                                        # (every 5 datasets or if we have more than 10 pending)
+                                        if all_datasets_count % 5 == 0 or len(futures) > 10:
+                                            completed_futures = []
+                                            for i, f in enumerate(futures):
+                                                if f.done():
+                                                    try:
+                                                        update_message, updated_dataset = f.result()
+                                                        # Yield the update message to the client
+                                                        yield update_message
+                                                    except Exception as e:
+                                                        logger.error(f"Error processing future: {str(e)}")
+                                                    completed_futures.append(i)
+                                            
+                                            # Remove completed futures (in reverse order)
+                                            for i in sorted(completed_futures, reverse=True):
+                                                futures.pop(i)
                             else:
                                 # Log error about unexpected format
                                 logger.error(f"Unexpected vector search results format: {type(vector_results)}")
@@ -379,20 +636,63 @@ def stream_search_datasets_helper(query, similarity_threshold=0.25, search_metho
                         start_time
                     )
             
+            # Log search progress
+            logger.info(f"Parallel search completed at timestamp: {time.time() - start_time:.2f} seconds")
+            
+            # Log transition between search phases
+            logger.info(f"Moving from vector to keyword search at {time.time() - start_time:.2f} seconds")
+            
             # Keyword search
             if search_method in ['keyword', None]:  # Keyword or hybrid
                 try:
                     # Get keyword search results
                     for chunk in search_keyword_datasets(query, gov_api_key, keyword_threshold, start_time):
-                        yield chunk
-                    
-                    keyword_results = search_datasets(query, gov_api_key, similarity_threshold=keyword_threshold)
-                    
-                    # Ensure keyword_results is a list
-                    if hasattr(keyword_results, '__iter__') and not isinstance(keyword_results, list):
-                        keyword_results = list(keyword_results)
-                    
-                    keyword_datasets = keyword_results if isinstance(keyword_results, list) else []
+                        if isinstance(chunk, str) and '"type": "keyword_results"' in chunk:
+                            try:
+                                # Parse the keyword results JSON and process each dataset
+                                keyword_data = json.loads(chunk.strip())
+                                if keyword_data.get('type') == 'keyword_results' and 'data' in keyword_data:
+                                    keyword_result_data = keyword_data.get('data', [])
+                                    
+                                    # Populate the keyword_datasets list for later reference
+                                    keyword_datasets = keyword_result_data if isinstance(keyword_result_data, list) else []
+                                    
+                                    # This is a batch of keyword search results - process it
+                                    batch_datasets = []
+                                    
+                                    # First display all datasets
+                                    for result in keyword_result_data:
+                                        dataset_id = result.get('id')
+                                        if dataset_id and dataset_id not in processed_dataset_ids:
+                                            processed_dataset_ids.add(dataset_id)
+                                            keyword_datasets.append(result)  # Add to our tracking list
+                                            all_datasets_count += 1
+                                            
+                                            # Just yield the dataset without assessment
+                                            for chunk in process_and_yield_dataset(result, 'keyword', all_datasets_count, start_time):
+                                                yield chunk
+                                            
+                                            # Add to this batch for parallel processing
+                                            batch_datasets.append(result)
+                                    
+                                    # Process this keyword batch all at once
+                                    if batch_datasets:
+                                        logger.info(f"Processing keyword search batch of {len(batch_datasets)} datasets")
+                                        batch_start = time.time()
+                                        
+                                        # Process the batch in parallel
+                                        for update in process_dataset_batch(batch_datasets, query, relevance_threshold, start_time):
+                                            yield update
+                                            
+                                        logger.info(f"Keyword batch processed in {time.time() - batch_start:.2f}s")
+                            except json.JSONDecodeError:
+                                logger.error(f"Failed to parse keyword_results JSON: {chunk}")
+                                yield chunk  # Pass along the original message
+                        else:
+                            # Pass through other messages (like status updates)
+                            yield chunk
+                        
+                        # Simply pass through messages
                     
                     # In hybrid mode, only yield keyword results that weren't found by vector search
                     if search_method is None:  # hybrid mode
@@ -422,18 +722,56 @@ def stream_search_datasets_helper(query, similarity_threshold=0.25, search_metho
                                 start_time
                             )
                         
-                        # Process and yield only new keyword datasets
+                        # Find datasets unique to keyword search
+                        unique_keyword_datasets = []
+                        
+                        # First collect and display these datasets
                         for dataset in keyword_datasets:
-                            if dataset['id'] not in vector_ids:
+                            dataset_id = dataset['id']
+                            if dataset_id not in processed_dataset_ids:
+                                processed_dataset_ids.add(dataset_id)
                                 all_datasets_count += 1
+                                
+                                # Just yield the dataset for display
                                 for chunk in process_and_yield_dataset(dataset, 'keyword', all_datasets_count, start_time):
                                     yield chunk
+                                
+                                # Add to batch for parallel processing
+                                unique_keyword_datasets.append(dataset)
+                        
+                        # Process this batch if we have unique datasets
+                        if unique_keyword_datasets:
+                            logger.info(f"Processing batch of {len(unique_keyword_datasets)} unique keyword datasets")
+                            batch_start = time.time()
+                            
+                            # Process this batch in parallel
+                            for update in process_dataset_batch(unique_keyword_datasets, query, relevance_threshold, start_time):
+                                yield update
+                                
+                            logger.info(f"Unique keyword batch processed in {time.time() - batch_start:.2f}s")
                     else:
-                        # In keyword-only mode, yield all results
-                        for dataset in keyword_datasets:
-                            all_datasets_count += 1
-                            for chunk in process_and_yield_dataset(dataset, 'keyword', all_datasets_count, start_time):
-                                yield chunk
+                        # In keyword-only mode, process the whole batch
+                        if keyword_datasets:
+                            # First display all datasets 
+                            for dataset in keyword_datasets:
+                                dataset_id = dataset['id']
+                                if dataset_id not in processed_dataset_ids:
+                                    processed_dataset_ids.add(dataset_id)
+                                    all_datasets_count += 1
+                                    
+                                    # Just yield the dataset for display
+                                    for chunk in process_and_yield_dataset(dataset, 'keyword', all_datasets_count, start_time):
+                                        yield chunk
+                            
+                            # Now process all datasets as a single batch
+                            logger.info(f"Processing keyword-only batch of {len(keyword_datasets)} datasets")
+                            batch_start = time.time()
+                            
+                            # Process the entire batch in parallel
+                            for update in process_dataset_batch(keyword_datasets, query, relevance_threshold, start_time):
+                                yield update
+                                
+                            logger.info(f"Keyword-only batch processed in {time.time() - batch_start:.2f}s")
                 except Exception as e:
                     logger.error(f"Error in keyword search: {str(e)}")
                     yield create_status_message(
@@ -482,34 +820,11 @@ def stream_search_datasets_helper(query, similarity_threshold=0.25, search_metho
             'timestamp': search_execution_time
         }, cls=NumpyEncoder) + '\n'
         
-        # Now begin pre-download assessment of the datasets
-        yield create_status_message(
-            'I\'m removing irrelevant datasets...',
-            start_time
-        )
+        # Log final search status
+        logger.info(f"Completed all dataset relevance checks at timestamp: {time.time() - start_time:.2f} seconds")
         
-        # Use concurrent assessment instead of sequential
-        try:
-            # Process datasets concurrently in batches of 3
-            relevant_datasets = []
-            for chunk in assess_datasets_concurrently(
-                query, 
-                all_datasets, 
-                relevance_threshold, 
-                start_time, 
-                max_workers=3
-            ):
-                yield chunk
-            
-            # Filter relevant datasets
-            relevant_datasets = [d for d in all_datasets if d.get('relevance', {}).get('is_relevant', False)]
-        except Exception as e:
-            logger.error(f"Error in concurrent dataset assessment: {str(e)}")
-            yield create_error_message(
-                "I encountered an issue while assessing datasets. Some results may be incomplete.",
-                details=str(e),
-                start_time=start_time
-            )
+        # Filter relevant datasets
+        relevant_datasets = [d for d in all_datasets if d.get('relevance', {}).get('is_relevant', False)]
         
         # Final execution time
         final_execution_time = time.time() - start_time

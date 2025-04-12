@@ -105,7 +105,9 @@ def assess_datafile_relevance_predownload(
         }
     """
     # Debug print the dataset we're assessing
-    logger.debug(f"DATASET that we're assessing datafile relevance on: {dataset_metadata}")
+    dataset_id = dataset_metadata.get('id', 'Unknown ID')
+    dataset_title = dataset_metadata.get('title', 'Unknown Title')
+    logger.info(f"Starting relevance assessment for dataset: {dataset_id} - {dataset_title}")
     
     # Get dataset information
     title = dataset_metadata.get('title', 'Unknown')
@@ -249,7 +251,8 @@ RESOURCE_REASONING: [brief explanation or "not applicable" if score < 0.4]
                         resource_format = resources[0].get('format')
             
             # Return the assessment results as a dictionary
-            return {
+
+            relevance_dict = {
                 'is_relevant': is_relevant,
                 'relevance_score': score,
                 'reasoning': reasoning,
@@ -257,6 +260,8 @@ RESOURCE_REASONING: [brief explanation or "not applicable" if score < 0.4]
                 'resource_format': resource_format,
                 'resource_reasoning': resource_reasoning
             }
+            print("Debug relevance:", relevance_dict)
+            return relevance_dict
         else:
             logger.warning(f"Failed to parse relevance assessment response: {response_text}")
             return {

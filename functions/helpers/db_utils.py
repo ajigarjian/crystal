@@ -21,7 +21,7 @@ _Session = None
 # Global connection pool
 _pool = None
 
-def get_connection_pool(min_conn=1, max_conn=5):
+def get_connection_pool(min_conn=1, max_conn=20):
     """Create or get the connection pool"""
     global _pool
     

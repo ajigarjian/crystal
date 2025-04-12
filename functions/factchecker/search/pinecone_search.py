@@ -214,6 +214,7 @@ def get_pinecone_client():
 
 def vector_search_datasets_pinecone(
     query: str,
+    start_time: float,
     pinecone_api_key: Optional[str] = None,
     pinecone_environment: Optional[str] = None,
     index_name: str = "dataset-embeddings",
@@ -221,6 +222,7 @@ def vector_search_datasets_pinecone(
     top_k: int = 100,
     max_results: Optional[int] = None,
     verbose: bool = False,
+    pinecone_client: Optional[Any] = None,
 ) -> List[Dict[str, Any]]:
     """
     Search for datasets using vector similarity with Pinecone, 
@@ -228,6 +230,7 @@ def vector_search_datasets_pinecone(
     
     Args:
         query: The search query string.
+        start_time: Start time for measuring Pinecone query duration
         pinecone_api_key: Pinecone API key; if None, read from env var PINECONE_API_KEY.
         pinecone_environment: Pinecone environment (e.g., 'us-east-1-gcp'); if None, read from env var PINECONE_ENVIRONMENT.
         index_name: Name of the Pinecone index to query.
@@ -235,16 +238,7 @@ def vector_search_datasets_pinecone(
         top_k: Maximum number of results to return (default 100).
         max_results: If provided, overrides top_k.
         verbose: If True, prints debug info to stdout.
-
-    Returns:
-        A list of dataset dicts. Each dict contains:
-            - "id": dataset_id
-            - "title": dataset title
-            - "description": dataset notes
-            - "organization": organization title
-            - "similarity": float match score
-            - "resources": list of resource dicts
-            - "search_source": "vector"
+        pinecone_client: Pre-initialized Pinecone client to use (optional)
     """
     try:
         import time  # Add import at the top of the file
@@ -253,24 +247,30 @@ def vector_search_datasets_pinecone(
         if max_results is not None:
             top_k = max_results
 
-        # Pull Pinecone credentials from function args or environment
-        api_key = pinecone_api_key or os.environ.get("PINECONE_API_KEY")
-        env = pinecone_environment or os.environ.get("PINECONE_ENVIRONMENT")
-        if not api_key:
+        # Use provided client or create a new one
+        if pinecone_client:
+            pc = pinecone_client
             if verbose:
-                print("Pinecone credentials not provided - returning no results.")
-            return []
+                print("Using provided Pinecone client")
+        else:
+            # Pull Pinecone credentials from function args or environment
+            api_key = pinecone_api_key or os.environ.get("PINECONE_API_KEY")
+            env = pinecone_environment or os.environ.get("PINECONE_ENVIRONMENT")
+            if not api_key:
+                if verbose:
+                    print("Pinecone credentials not provided - returning no results.")
+                return []
 
+            if verbose:
+                print(f"Initializing Pinecone client (index='{index_name}')...")
+            
+            # Create a new Pinecone client object
+            pc = Pinecone(api_key=api_key)
+        
         # Create embedding with your chosen embedding function
         from factchecker.utils.openai_client import create_embeddings
         query_embedding = create_embeddings(query)
 
-        if verbose:
-            print(f"Initializing Pinecone client (index='{index_name}')...")
-
-        # Create a new Pinecone client object
-        pc = Pinecone(api_key=api_key)
-        
         # Ensure index exists
         existing_indexes = [i.name for i in pc.list_indexes()]
         if index_name not in existing_indexes:
@@ -293,6 +293,9 @@ def vector_search_datasets_pinecone(
             top_k=top_k * 3,  # over-fetch so we can threshold
             include_metadata=False
         )
+
+        # Log when results are returned from Pinecone API
+        logger.info(f'Pinecone index.query completed for "{query}" at timestamp: {time.time() - start_time:.2f} seconds')
 
         if verbose:
             print(f"Retrieved {len(results.matches)} matches from Pinecone before filtering.")
