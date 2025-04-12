@@ -579,7 +579,14 @@ export default function SearchPage() {
                 alt="Crystal Logo" 
                 className="h-6 w-6 filter brightness-0" 
               />
-              <h1 className="text-lg font-bold text-gray-900" style={{ fontFamily: 'Satoshi, sans-serif' }}>Crystal</h1>
+              <div className="relative inline-flex items-center">
+                <h1 className="text-lg font-bold text-gray-900" style={{ fontFamily: 'Satoshi, sans-serif' }}>Crystal</h1>
+                <Badge
+                  className="rounded-xs text-[6px] px-1 py-0 h-3 absolute -top-1.5 -right-9 bg-green-500 hover:bg-green-500 font-normal uppercase tracking-wide"
+                >
+                  Alpha
+                </Badge>
+              </div>
             </div>
           </Link>
         </div>
