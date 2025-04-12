@@ -620,7 +620,7 @@ export default function SearchPage() {
                                 transition={{ duration: 0.2 }}
                                 className="bg-gray-50"
                               >
-                                <td colSpan={4} className="p-0 border-b border-gray-200">
+                                <td colSpan={5} className="p-0 border-b border-gray-200">
                                   <motion.div
                                     initial={{ opacity: 0 }}
                                     animate={{ opacity: 1 }}
