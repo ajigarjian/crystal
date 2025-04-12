@@ -351,7 +351,7 @@ export default function SearchPage() {
   return (
     <div className="flex flex-col min-h-screen bg-gray-50 text-gray-900">
       {/* Header with logo */}
-      <div className="flex h-16 shrink-0 items-center justify-between px-4 border-b bg-white">
+      <div className="flex h-16 shrink-0 items-center justify-between px-4">
         <div className="flex items-center">
           <Link href="/">
             <div className="flex items-center cursor-pointer hover:opacity-80 transition-opacity">
