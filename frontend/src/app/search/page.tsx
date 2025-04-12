@@ -577,7 +577,7 @@ export default function SearchPage() {
               <img 
                 src="/images/crystal-icon.png" 
                 alt="Crystal Logo" 
-                className="h-6 w-6 mr-2 filter brightness-0" 
+                className="h-6 w-6 filter brightness-0" 
               />
               <h1 className="text-lg font-bold text-gray-900" style={{ fontFamily: 'Satoshi, sans-serif' }}>Crystal</h1>
             </div>
@@ -606,7 +606,7 @@ export default function SearchPage() {
         <div className="relative w-full transition-all overflow-hidden rounded-xl">
           <Input
             ref={inputRef}
-            placeholder="Search for datasets..."
+            placeholder="Search for gov't datasets..."
             className="pl-12 pr-4 py-7 text-lg w-full rounded-xl border-gray-300 transition-all shadow-sm hover:shadow focus:shadow-md relative z-10 bg-white text-gray-900 selection:bg-green-100 selection:text-green-900"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
