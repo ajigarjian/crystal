@@ -368,11 +368,11 @@ export default function SearchPage() {
       
       {/* Search section */}
       <div className="max-w-3xl mx-auto w-full px-4 pt-12 pb-8">
-        <div className="relative w-full transition-all overflow-hidden rounded-full">
+        <div className="relative w-full transition-all overflow-hidden rounded-xl">
           <Input
             ref={inputRef}
             placeholder="Search for datasets..."
-            className="pl-12 pr-4 py-7 text-lg w-full rounded-full border-gray-300 transition-all shadow-sm hover:shadow focus:shadow-md relative z-10 bg-white text-gray-900 selection:bg-green-100 selection:text-green-900"
+            className="pl-12 pr-4 py-7 text-lg w-full rounded-xl border-gray-300 transition-all shadow-sm hover:shadow focus:shadow-md relative z-10 bg-white text-gray-900 selection:bg-green-100 selection:text-green-900"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
