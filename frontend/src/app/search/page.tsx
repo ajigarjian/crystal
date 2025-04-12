@@ -86,8 +86,8 @@ export default function SearchPage() {
 
   // Update displayed datasets when search is complete
   useEffect(() => {
-    if (searchComplete) {
-      // Get all datasets from our ref
+    if (searchComplete && executionTime > 0) {
+      // Only run this effect when a search is actually complete, not on initial load
       const allDatasets = allDatasetsRef.current;
       
       // Only show relevant datasets
@@ -100,7 +100,7 @@ export default function SearchPage() {
       
       setDatasets(relevantDatasets);
     }
-  }, [searchComplete]);
+  }, [searchComplete, executionTime]);
 
   // Add this effect to manage the ellipsis animation
   useEffect(() => {
@@ -124,7 +124,7 @@ export default function SearchPage() {
     if (e) e.preventDefault();
     if (!query.trim() || isSearching) return;
 
-    // Reset state for new search
+    // Reset state for new search - more thorough cleanup
     setIsSearching(true);
     setSearchComplete(false);
     setSearchProgress(0);
@@ -132,6 +132,8 @@ export default function SearchPage() {
     setDatasets([]);
     allDatasetsRef.current = []; // Reset the raw datasets ref
     setExpandedDataset(null);
+    setExecutionTime(0); // Reset execution time as well
+    setEllipsis(''); // Ensure ellipsis is reset
 
     try {
       // Start the streaming search
@@ -154,31 +156,53 @@ export default function SearchPage() {
             const allDatasets = allDatasetsRef.current;
             // Check if we already have this dataset ID
             if (!allDatasets.some(d => d.id === chunk.data.id)) {
-              allDatasetsRef.current = [...allDatasets, chunk.data];
+              // Use immutable update but more efficiently
+              allDatasetsRef.current.push(chunk.data);
               
               // Update the UI state if this is the first dataset
               if (allDatasets.length === 0) {
                 setIsSearching(false);
               }
+
+              // Show datasets immediately as they come in - more efficiently
+              setDatasets(prev => {
+                const newDatasets = [...prev];
+                newDatasets.push(chunk.data);
+                return newDatasets;
+              });
             }
             
             // Small progress boost for each dataset found
             setSearchProgress(prev => Math.min(prev + 1, 90));
           }
           else if (chunk.type === 'dataset_update') {
-            // Update dataset in our ref
+            // Update dataset in our ref - more efficiently
             const allDatasets = allDatasetsRef.current;
-            const updatedDatasets = allDatasets.map(d => 
-              d.id === chunk.data.id ? { ...d, ...chunk.data } : d
-            );
-            allDatasetsRef.current = updatedDatasets;
+            for (let i = 0; i < allDatasets.length; i++) {
+              if (allDatasets[i].id === chunk.data.id) {
+                allDatasetsRef.current[i] = { ...allDatasets[i], ...chunk.data };
+                break;
+              }
+            }
             
-            // Only display datasets with relevance evaluations that are relevant
-            const relevantDatasets = updatedDatasets.filter(dataset => 
-              dataset.relevance && dataset.relevance.is_relevant === true
-            );
-            
-            setDatasets(relevantDatasets);
+            // Update the displayed datasets, maintaining order but updating relevance
+            setDatasets(prev => {
+              const updatedDatasets = [...prev];
+              let updated = false;
+              
+              for (let i = 0; i < updatedDatasets.length; i++) {
+                if (updatedDatasets[i].id === chunk.data.id) {
+                  updatedDatasets[i] = { ...updatedDatasets[i], ...chunk.data };
+                  updated = true;
+                  break;
+                }
+              }
+              
+              // Filter out irrelevant datasets
+              return updatedDatasets.filter(dataset => 
+                !dataset.relevance || dataset.relevance.is_relevant !== false
+              );
+            });
           }
           else if (chunk.type === 'complete') {
             // Search complete, set progress to 0% and mark search as complete
@@ -208,6 +232,7 @@ export default function SearchPage() {
       setStatusMessage(`Error: ${error.message || 'An unknown error occurred'}`);
       setIsSearching(false);
       setSearchComplete(true);
+      setSearchProgress(0); // Ensure search progress is reset on error as well
     }
   };
 
@@ -407,7 +432,12 @@ export default function SearchPage() {
               transition={{ duration: 0.5 }}
               className="mt-6"
             >
-              <div className="flex items-center justify-between mb-2">
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.5 }}
+                className="flex items-center justify-between mb-2"
+              >
                 <h2 className="text-sm text-gray-900">
                   {searchProgress > 0 && searchProgress < 100 ? (
                     <span className="flex items-center">
@@ -423,7 +453,7 @@ export default function SearchPage() {
                     ''
                   )}
                 </h2>
-              </div>
+              </motion.div>
               
               <Tabs 
                 defaultValue="data.gov" 
