@@ -266,11 +266,17 @@ const FeedbackWidget = () => {
   );
 };
 
+// Add the new enum and state
+enum SearchStatus {
+  IDLE = "idle",          
+  SEARCHING = "searching",
+  COMPLETE = "complete"   
+}
+
 export default function SearchPage() {
   const [query, setQuery] = useState('');
-  const [isSearching, setIsSearching] = useState(false);
+  const [searchStatus, setSearchStatus] = useState<SearchStatus>(SearchStatus.IDLE);
   const [searchProgress, setSearchProgress] = useState(0);
-  const [searchComplete, setSearchComplete] = useState(true);
   const [statusMessage, setStatusMessage] = useState('');
   const [datasets, setDatasets] = useState<any[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -287,9 +293,9 @@ export default function SearchPage() {
     }
   }, []);
 
-  // Automatically increment progress for perceived performance
+  // Update the progress increment effect
   useEffect(() => {
-    if (!searchComplete && searchProgress < 90) {
+    if (searchStatus === SearchStatus.SEARCHING && searchProgress < 90) {
       const timer = setTimeout(() => {
         // Accelerate at the beginning and slow down near 90%
         const increment = searchProgress < 30 ? 5 : searchProgress < 60 ? 2 : 0.5;
@@ -297,11 +303,11 @@ export default function SearchPage() {
       }, 500);
       return () => clearTimeout(timer);
     }
-  }, [searchComplete, searchProgress]);
+  }, [searchStatus, searchProgress]);
 
-  // Update displayed datasets when search is complete
+  // Update the dataset filter effect
   useEffect(() => {
-    if (searchComplete && executionTime > 0) {
+    if (searchStatus === SearchStatus.COMPLETE && executionTime > 0) {
       // Only run this effect when a search is actually complete, not on initial load
       const allDatasets = allDatasetsRef.current;
       
@@ -315,11 +321,11 @@ export default function SearchPage() {
       
       setDatasets(relevantDatasets);
     }
-  }, [searchComplete, executionTime]);
+  }, [searchStatus, executionTime]);
 
-  // Add this effect to manage the ellipsis animation
+  // Update the ellipsis animation effect
   useEffect(() => {
-    if (!searchComplete) {
+    if (searchStatus === SearchStatus.SEARCHING) {
       const ellipsisAnimation = setInterval(() => {
         setEllipsis(prev => {
           if (prev === '') return '.';
@@ -327,21 +333,21 @@ export default function SearchPage() {
           if (prev === '..') return '...';
           return '';
         });
-      }, 1000); // Change ellipsis state every second for a nice pace
+      }, 1000);
       
       return () => clearInterval(ellipsisAnimation);
     } else {
       setEllipsis('');
     }
-  }, [searchComplete]);
+  }, [searchStatus]);
 
+  // Update the search handler
   const handleSearch = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!query.trim() || isSearching) return;
+    if (!query.trim() || searchStatus === SearchStatus.SEARCHING) return;
 
     // Reset state for new search - more thorough cleanup
-    setIsSearching(true);
-    setSearchComplete(false);
+    setSearchStatus(SearchStatus.SEARCHING);
     setSearchProgress(0);
     setStatusMessage('Initiating search...');
     setDatasets([]);
@@ -374,11 +380,6 @@ export default function SearchPage() {
               // Use immutable update but more efficiently
               allDatasetsRef.current.push(chunk.data);
               
-              // Update the UI state if this is the first dataset
-              if (allDatasets.length === 0) {
-                setIsSearching(false);
-              }
-
               // Show datasets immediately as they come in - more efficiently
               setDatasets(prev => {
                 const newDatasets = [...prev];
@@ -403,12 +404,10 @@ export default function SearchPage() {
             // Update the displayed datasets, maintaining order but updating relevance
             setDatasets(prev => {
               const updatedDatasets = [...prev];
-              let updated = false;
               
               for (let i = 0; i < updatedDatasets.length; i++) {
                 if (updatedDatasets[i].id === chunk.data.id) {
                   updatedDatasets[i] = { ...updatedDatasets[i], ...chunk.data };
-                  updated = true;
                   break;
                 }
               }
@@ -420,39 +419,44 @@ export default function SearchPage() {
             });
           }
           else if (chunk.type === 'complete') {
-            // Search complete, set progress to 0% and mark search as complete
-            setSearchProgress(0);
-            setSearchComplete(true);
+            // Search complete
+            setSearchProgress(100); // Set to 100% before transitioning to complete
             
-            // Store the execution time
-            if (chunk.data && chunk.data.execution_time) {
-              setExecutionTime(chunk.data.execution_time);
-            }
-            
-            // Calculate our own relevant count based on actual processed datasets
-            const allDatasets = allDatasetsRef.current;
-            const relevantDatasets = allDatasets.filter(
-              dataset => dataset.relevance && dataset.relevance.is_relevant === true
-            );
-            
-            // Set status message with our calculated counts
-            setStatusMessage(
-              `Found ${relevantDatasets.length} relevant datasets.`
-            );
+            // Add a small delay before fully completing, to show the 100% state briefly
+            setTimeout(() => {
+              setSearchStatus(SearchStatus.COMPLETE);
+              setSearchProgress(0);
+              
+              // Store the execution time
+              if (chunk.data && chunk.data.execution_time) {
+                setExecutionTime(chunk.data.execution_time);
+              }
+              
+              // Calculate our own relevant count based on actual processed datasets
+              const allDatasets = allDatasetsRef.current;
+              const relevantDatasets = allDatasets.filter(
+                dataset => dataset.relevance && dataset.relevance.is_relevant === true
+              );
+              
+              // Set status message with our calculated counts
+              setStatusMessage(
+                `Found ${relevantDatasets.length} relevant datasets.`
+              );
+            }, 300); // Brief delay to show 100% state
           }
         }
       );
     } catch (error: any) {
       console.error("Search error:", error);
       setStatusMessage(`Error: ${error.message || 'An unknown error occurred'}`);
-      setIsSearching(false);
-      setSearchComplete(true);
-      setSearchProgress(0); // Ensure search progress is reset on error as well
+      setSearchStatus(SearchStatus.COMPLETE);
+      setSearchProgress(0);
     }
   };
 
+  // Update key down handler
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' && query.trim() && searchProgress === 0) {
+    if (e.key === 'Enter' && query.trim() && searchStatus !== SearchStatus.SEARCHING) {
       handleSearch();
     }
   };
@@ -607,13 +611,15 @@ export default function SearchPage() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
-            disabled={searchProgress > 0 && searchProgress < 100}
+            disabled={searchStatus === SearchStatus.SEARCHING}
           />
           <div 
-            className={`absolute left-4 top-1/2 -translate-y-1/2 transition-colors duration-200 ease-in-out z-20 ${!isSearching && query.trim() && searchProgress === 0 ? 'cursor-pointer' : ''}`}
-            onClick={!isSearching && query.trim() && searchProgress === 0 ? handleSearch : undefined}
+            className={`absolute left-4 top-1/2 -translate-y-1/2 transition-colors duration-200 ease-in-out z-20 ${
+              searchStatus !== SearchStatus.SEARCHING && query.trim() ? 'cursor-pointer' : ''
+            }`}
+            onClick={searchStatus !== SearchStatus.SEARCHING && query.trim() ? handleSearch : undefined}
           >
-            {searchProgress > 0 && searchProgress < 100 ? (
+            {searchStatus === SearchStatus.SEARCHING ? (
               <motion.div
                 initial={{ opacity: 0, scale: 0.8 }}
                 animate={{ opacity: 1, scale: 1 }}
@@ -632,14 +638,13 @@ export default function SearchPage() {
             )}
           </div>
           
-          {!isSearching && query.trim() && searchProgress === 0 && (
+          {searchStatus !== SearchStatus.SEARCHING && query.trim() && (
             <div className="absolute right-4 top-1/2 -translate-y-1/2 text-sm text-gray-400 opacity-70 z-20">
               Press Enter to search
             </div>
           )}
           
-          {/* Progress bar positioned inside the search input - always show until complete message */}
-          {searchProgress > 0 && searchProgress < 100 && (
+          {searchStatus === SearchStatus.SEARCHING && searchProgress > 0 && (
             <div className="absolute bottom-0 left-0 w-full h-0.5 z-0">
               <motion.div
                 initial={{ width: 0 }}
@@ -655,7 +660,8 @@ export default function SearchPage() {
       {/* Dataset results section - TABLE VIEW */}
       <div className="flex-1 max-w-7xl mx-auto w-full px-4 pb-12">
         <AnimatePresence>
-          {(!searchComplete || (searchComplete && datasets.length > 0)) && (
+          {(searchStatus === SearchStatus.SEARCHING || 
+            (searchStatus === SearchStatus.COMPLETE && datasets.length > 0)) && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -670,7 +676,7 @@ export default function SearchPage() {
                 className="flex items-center justify-between mb-2"
               >
                 <h2 className="text-sm text-gray-900">
-                  {searchProgress > 0 && searchProgress < 100 ? (
+                  {searchStatus === SearchStatus.SEARCHING ? (
                     <span className="flex items-center">
                       <span className="text-gray-700">
                         {/* Remove any trailing ellipsis from the status message */}
@@ -679,7 +685,7 @@ export default function SearchPage() {
                       </span>
                     </span>
                   ) : (
-                    datasets.length > 0 && searchProgress === 100 ? 
+                    searchStatus === SearchStatus.COMPLETE && datasets.length > 0 ? 
                     `${statusMessage || `Found ${datasets.length} relevant datasets in ${executionTime.toFixed(1)} seconds.`}` :
                     ''
                   )}
@@ -1141,8 +1147,8 @@ export default function SearchPage() {
                         </React.Fragment>
                     ))}
                     
-                    {/* Show skeleton rows as long as the search is not complete */}
-                    {!searchComplete && (
+                    {/* Show skeleton rows only when searching */}
+                    {searchStatus === SearchStatus.SEARCHING && (
                       // Skeleton rows when searching
                       Array(6).fill(0).map((_, index) => (
                         <TableRow 
