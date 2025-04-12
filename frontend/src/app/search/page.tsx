@@ -630,6 +630,7 @@ export default function SearchPage() {
                                   >
                                     {/* Full description */}
                                     <div className="mb-4">
+                                      <h4 className="text-sm font-medium mb-1 text-gray-800">Description</h4>
                                       <p className="text-sm text-gray-600">
                                         {dataset.description || 'No description available'}
                                       </p>
