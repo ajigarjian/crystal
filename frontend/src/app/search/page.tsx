@@ -1160,26 +1160,26 @@ export default function SearchPage() {
                               <Skeleton className="h-4 w-4 bg-gray-200 rounded-sm" />
                             </div>
                           </TableCell>
-                          <TableCell className="py-4">
+                          <TableCell className="py-4 max-w-[200px]">
                             <div className="flex items-center gap-2">
                               <Skeleton className="h-6 w-6 rounded-full bg-gray-200 shrink-0" />
-                              <div className="flex-1">
+                              <div className="min-w-0 flex-1">
                                 <Skeleton className="h-4 w-full bg-gray-200" />
                               </div>
                             </div>
                           </TableCell>
                           <TableCell className="py-4">
-                            <Skeleton className="h-5 w-[90%] bg-gray-200" />
+                            <div>
+                              <Skeleton className="h-5 w-full bg-gray-200" />
+                            </div>
                           </TableCell>
                           <TableCell className="py-4 text-center">
                             <div className="flex justify-center">
-                              {/* Match the badge shape/size in the Relevance column */}
                               <Skeleton className="h-6 w-16 bg-gray-200 rounded-full" />
                             </div>
                           </TableCell>
                           <TableCell className="py-4 text-center">
                             <div className="flex justify-center">
-                              {/* Match the badge shape/size in the Resources column */}
                               <Skeleton className="h-7 w-20 bg-gray-200 rounded-full" />
                             </div>
                           </TableCell>
