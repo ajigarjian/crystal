@@ -20,7 +20,6 @@ export default function Home() {
   const trailPositions = useRef<Array<{x: number, y: number}>>([]);
   const requestRef = useRef<number | undefined>(undefined);
   const previousTimeRef = useRef<number | undefined>(undefined);
-  const [query, setQuery] = useState("");
   const [isMobile, setIsMobile] = useState(false);
   const router = useRouter();
   
@@ -256,29 +255,11 @@ export default function Home() {
   // Get displayed examples based on screen size
   const displayedExamples = isMobile ? exampleQueries.slice(0, 3) : exampleQueries;
   
-  // Add this handler for example clicks
-  const handleExampleClick = (exampleQuery: string) => {
-    router.push(`/alpha?query=${encodeURIComponent(exampleQuery)}`);
+  // Modified handler for the Let's Go button click
+  const handleGoButtonClick = () => {
+    router.push('/search');
   };
   
-  // Add this handler for search submission
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (query.trim()) {
-      router.push(`/alpha?query=${encodeURIComponent(query)}`);
-    }
-  };
-  
-  // Add this handler for keydown events
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      if (query.trim()) {
-        router.push(`/alpha?query=${encodeURIComponent(query)}`);
-      }
-    }
-  };
-
   return (
     <div className="flex items-center justify-center min-h-screen bg-neutral-50 dark:bg-neutral-50 p-4">
       <div
@@ -376,43 +357,20 @@ export default function Home() {
         </div>
         <div className="relative p-2 mt-2 z-20 text-center w-full">
           <h2 className="relative text-xl sm:text-2xl text-white" style={{ fontFamily: 'var(--font-geist-sans)' }}>
-            Querying for Deep<span className="text-green-500 animate-pulse drop-shadow-[0_0_8px_rgba(34,197,94,0.8)]" style={{ textShadow: '0 0 10px rgba(34, 197, 94, 0.8)' }}>er</span> Research into Public Records
+            The Most <span className="text-green-500 animate-pulse drop-shadow-[0_0_8px_rgba(34,197,94,0.8)]" style={{ textShadow: '0 0 10px rgba(34, 197, 94, 0.8)' }}>Accurate</span> Government Data Search Tool
           </h2>
         </div>
         
-        {/* Example queries */}
-        <div className="z-20 relative w-full max-w-3xl mx-auto px-4 mt-8">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {displayedExamples.map((exampleQuery, index) => (
-              <button
-                key={index}
-                onClick={() => handleExampleClick(exampleQuery)}
-                className="bg-white/10 hover:bg-white/20 text-white text-sm p-3 rounded-lg border border-white/20 transition-colors text-left hover:border-green-400/50"
-              >
-                {exampleQuery}
-              </button>
-            ))}
-          </div>
-        </div>
-        
-        {/* Search input */}
-        <div className="z-20 relative w-full max-w-md mx-auto px-4 mt-8">
-          <form onSubmit={handleSubmit} className="flex w-full items-end gap-2">
-            <Input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Ask about public data..."
-              className="min-h-10 bg-white/20 border-white/30 text-white placeholder:text-white/70 focus:border-green-400/70"
-            />
-            <Button 
-              type="submit"
-              className="bg-green-500/80 hover:bg-green-500/90 text-white h-10"
-              disabled={!query.trim()}
-            >
-              Search
-            </Button>
-          </form>
+        {/* New "Let's Go" button replacing search bar and examples */}
+        <div className="z-20 relative w-full max-w-md mx-auto px-4 mt-10">
+          <Button 
+            onClick={handleGoButtonClick}
+            className="w-full py-7 text-lg bg-green-500 hover:bg-green-600 text-white font-medium flex items-center justify-center gap-2 shadow-lg shadow-green-500/30 transition-all hover:shadow-green-500/40 hover:scale-105"
+            size="lg"
+          >
+            Let's Go
+            <ArrowRight className="h-5 w-5" />
+          </Button>
         </div>
         
         {/* Add footer with X logo */}
