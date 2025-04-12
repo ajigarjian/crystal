@@ -432,7 +432,7 @@ export default function SearchPage() {
                   <TableBody>
                     {searchProgress > 0 && searchProgress < 100 && datasets.length === 0 ? (
                       // Skeleton rows when searching and no results yet
-                      Array(3).fill(0).map((_, index) => (
+                      Array(6).fill(0).map((_, index) => (
                         <TableRow 
                           key={`skeleton-${index}`}
                           className="border-b border-gray-200 hover:!bg-transparent"
