@@ -460,49 +460,6 @@ export default function SearchPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {/* Show skeleton rows as long as the search is not complete */}
-                    {!searchComplete && (
-                      // Skeleton rows when searching
-                      Array(6).fill(0).map((_, index) => (
-                        <TableRow 
-                          key={`skeleton-${index}`}
-                          className="border-b border-gray-200 hover:!bg-transparent"
-                        >
-                          <TableCell className="py-4 px-4">
-                            <div className="flex items-center justify-center w-5 h-5">
-                              <Skeleton className="h-4 w-4 bg-gray-200 rounded-sm" />
-                            </div>
-                          </TableCell>
-                          <TableCell className="py-4">
-                            <div className="flex items-center gap-2">
-                              <Skeleton className="h-6 w-6 rounded-full bg-gray-200 shrink-0" />
-                              <div className="relative overflow-hidden flex-1">
-                                <Skeleton className="h-4 w-full bg-gray-200" />
-                              </div>
-                            </div>
-                          </TableCell>
-                          <TableCell className="py-4">
-                            {/* Single skeleton for dataset title that matches width */}
-                            <div className="relative overflow-hidden">
-                              <Skeleton className="h-5 w-[90%] bg-gray-200" />
-                            </div>
-                          </TableCell>
-                          <TableCell className="py-4 text-center">
-                            <div className="flex justify-center">
-                              {/* Match the badge shape/size in the Relevance column */}
-                              <Skeleton className="h-6 w-16 bg-gray-200 rounded-full" />
-                            </div>
-                          </TableCell>
-                          <TableCell className="py-4 text-center">
-                            <div className="flex justify-center">
-                              {/* Match the badge shape/size in the Resources column */}
-                              <Skeleton className="h-7 w-20 bg-gray-200 rounded-full" />
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                    
                     {/* Always show real dataset rows if we have any */}
                     {datasets.map((dataset, index) => (
                       <React.Fragment key={dataset.id}>
@@ -722,6 +679,49 @@ export default function SearchPage() {
                         </AnimatePresence>
                       </React.Fragment>
                     ))}
+                    
+                    {/* Show skeleton rows as long as the search is not complete */}
+                    {!searchComplete && (
+                      // Skeleton rows when searching
+                      Array(6).fill(0).map((_, index) => (
+                        <TableRow 
+                          key={`skeleton-${index}`}
+                          className="border-b border-gray-200 hover:!bg-transparent"
+                        >
+                          <TableCell className="py-4 px-4">
+                            <div className="flex items-center justify-center w-5 h-5">
+                              <Skeleton className="h-4 w-4 bg-gray-200 rounded-sm" />
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-4">
+                            <div className="flex items-center gap-2">
+                              <Skeleton className="h-6 w-6 rounded-full bg-gray-200 shrink-0" />
+                              <div className="relative overflow-hidden flex-1">
+                                <Skeleton className="h-4 w-full bg-gray-200" />
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-4">
+                            {/* Single skeleton for dataset title that matches width */}
+                            <div className="relative overflow-hidden">
+                              <Skeleton className="h-5 w-[90%] bg-gray-200" />
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-4 text-center">
+                            <div className="flex justify-center">
+                              {/* Match the badge shape/size in the Relevance column */}
+                              <Skeleton className="h-6 w-16 bg-gray-200 rounded-full" />
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-4 text-center">
+                            <div className="flex justify-center">
+                              {/* Match the badge shape/size in the Resources column */}
+                              <Skeleton className="h-7 w-20 bg-gray-200 rounded-full" />
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
                   </TableBody>
                 </Table>
               </div>
