@@ -36,7 +36,7 @@ export default function AboutPage() {
       <div className="container mx-auto px-4 py-6 max-w-4xl">
         <Card className="bg-neutral-100/50 dark:bg-neutral-800/30 border-neutral-200 dark:border-neutral-700">
           <CardHeader>
-            <CardTitle className="text-2xl">The Crystal Manifesto</CardTitle>
+            <CardTitle className="text-2xl">The Crystal Mission</CardTitle>
             <CardDescription className="text-base">
               By Ari and Cedric, Co-Founders
             </CardDescription>
@@ -109,7 +109,7 @@ export default function AboutPage() {
                 Crystal begins with search, but our ambitions stretch further. We're building a complete ecosystem for public data discovery, accessibility, and analysis. Our roadmap includes:
               </p>
               <ul className="list-disc pl-5 space-y-1">
-                <li>Advanced data visualization tools that anyone can use</li>
+                <li>Easy natural language analysis tools that anyone can use</li>
                 <li>APIs that enable developers to build applications using public data</li>
                 <li>Educational resources to improve data literacy</li>
                 <li>Collaborative features for researchers and journalists</li>
@@ -155,13 +155,13 @@ export default function AboutPage() {
                 <div className="space-y-2">
                   <h3 className="text-lg font-medium text-neutral-900 dark:text-white">Ari</h3>
                   <p className="text-sm">
-                    [Short bio placeholder - This is where Ari can add a personal bio, background, and motivation for starting Crystal.]
+                    Bio coming soon!
                   </p>
                 </div>
                 <div className="space-y-2">
                   <h3 className="text-lg font-medium text-neutral-900 dark:text-white">Cedric</h3>
                   <p className="text-sm">
-                    [Short bio placeholder - This is where Cedric can add a personal bio, background, and motivation for starting Crystal.]
+                    Bio coming soon!
                   </p>
                 </div>
               </div>
