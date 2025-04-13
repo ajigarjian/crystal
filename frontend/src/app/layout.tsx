@@ -13,8 +13,14 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Crystal Project",
-  description: "Fact-checking with Data.gov datasets and OpenAI",
+  title: "Crystal",
+  description: "The most accurate government data search tool",
+  icons: {
+    icon: [
+      { url: "/images/crystal-icon.png", type: "image/png" },
+    ],
+    apple: "/images/crystal-icon.png",
+  },
 };
 
 export default function RootLayout({
