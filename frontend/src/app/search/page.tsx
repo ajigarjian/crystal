@@ -1,12 +1,14 @@
 "use client";
 
+import Link from 'next/link';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Input } from "@/components/ui/input";
-import { Search, Loader2, ChevronRight, ExternalLink, Lock, AlertCircle, Lightbulb, ThumbsUp, Bug, ArrowRight, Download } from "lucide-react";
+import { Search, Loader2, ChevronDown, ChevronUp, FileText, ExternalLink, Info, ChevronRight, Download, X, Lock, AlertCircle, Lightbulb, MessageSquare, ThumbsUp, Bug, ArrowRight } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { streamSearchDatasets } from "@/lib/firebase";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Table,
   TableBody,
@@ -14,7 +16,14 @@ import {
   TableHead,
   TableHeader,
   TableRow,
+  TableCaption,
+  TableFooter,
 } from "@/components/ui/table";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Dialog,
@@ -33,10 +42,12 @@ import {
   DrawerTitle,
   DrawerTrigger,
   DrawerFooter,
+  DrawerClose,
 } from "@/components/ui/drawer";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Tabs,
+  TabsContent,
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
@@ -45,8 +56,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
 import { submitFeedback } from "@/lib/firebase";
-import { MessageSquareIcon, ThumbsUpIcon } from "lucide-react";
-import Link from 'next/link';
+import { MessageSquareIcon, ThumbsUpIcon, BugIcon } from "lucide-react";
 
 // Add the FeedbackWidget component
 const FeedbackWidget = () => {
@@ -223,7 +233,7 @@ const FeedbackWidget = () => {
                 onChange={(e) => setEmail(e.target.value)}
               />
               <p className="text-xs text-gray-500">
-                We&apos;ll only use this to follow up on your feedback if needed.
+                We'll only use this to follow up on your feedback if needed.
               </p>
             </div>
             
@@ -326,9 +336,11 @@ export default function SearchPage() {
   // Restore scroll position after datasets update
   useEffect(() => {
     if (isMobile && searchStatus === SearchStatus.SEARCHING && scrollPositionRef.current > 0) {
-      window.scrollTo(0, scrollPositionRef.current);
+      requestAnimationFrame(() => {
+        window.scrollTo(0, scrollPositionRef.current);
+      });
     }
-  }, [datasets, isMobile, searchStatus]);
+  }, [searchStatus, isMobile]);
 
   // Focus the input field when the page loads
   useEffect(() => {
@@ -424,11 +436,11 @@ export default function SearchPage() {
               // Use immutable update but more efficiently
               allDatasetsRef.current.push(chunk.data);
               
-              // Batch multiple dataset additions to reduce layout shifts
-              if (datasets.length < 3 || !isMobile) {
-                // Immediately display the dataset as it arrives
-                setDatasets(prev => [...prev, chunk.data]);
-              }
+              // Show datasets immediately as they come in
+              setDatasets(prev => {
+                // Create a new array with the new dataset added
+                return [...prev, chunk.data];
+              });
             }
             
             // Small progress boost for each dataset found
@@ -437,7 +449,6 @@ export default function SearchPage() {
           else if (chunk.type === 'dataset_update') {
             // Update dataset in our ref - more efficiently
             const allDatasets = allDatasetsRef.current;
-            
             for (let i = 0; i < allDatasets.length; i++) {
               if (allDatasets[i].id === chunk.data.id) {
                 allDatasetsRef.current[i] = { ...allDatasets[i], ...chunk.data };
@@ -445,32 +456,21 @@ export default function SearchPage() {
               }
             }
             
-            // Update datasets in the visible state immediately
+            // More selective update of the datasets array to minimize rerenders
             setDatasets(prev => {
-              // Find if this dataset is already in our displayed datasets
-              const datasetIndex = prev.findIndex(d => d.id === chunk.data.id);
+              // Create a new array to maintain immutability
+              const updatedDatasets = prev.map(dataset => {
+                // Only update the specific dataset that changed
+                if (dataset.id === chunk.data.id) {
+                  return { ...dataset, ...chunk.data };
+                }
+                return dataset;
+              });
               
-              // If the dataset doesn't exist yet but should be displayed, add it
-              if (datasetIndex === -1 && chunk.data.relevance?.is_relevant !== false) {
-                return [...prev, chunk.data];
-              }
-              
-              // If the dataset exists and is now marked irrelevant, remove it
-              if (datasetIndex >= 0 && chunk.data.relevance?.is_relevant === false) {
-                const newDatasets = [...prev];
-                newDatasets.splice(datasetIndex, 1);
-                return newDatasets;
-              }
-              
-              // If the dataset exists, update it with new data
-              if (datasetIndex >= 0) {
-                const newDatasets = [...prev];
-                newDatasets[datasetIndex] = { ...newDatasets[datasetIndex], ...chunk.data };
-                return newDatasets;
-              }
-              
-              // Default: don't change anything
-              return prev;
+              // Filter out irrelevant datasets
+              return updatedDatasets.filter(dataset => 
+                !dataset.relevance || dataset.relevance.is_relevant !== false
+              );
             });
           }
           else if (chunk.type === 'complete') {
@@ -518,7 +518,11 @@ export default function SearchPage() {
 
   // Toggle expansion function
   const toggleExpand = (datasetId: string) => {
-    setExpandedDataset(expandedDataset === datasetId ? null : datasetId);
+    if (expandedDataset === datasetId) {
+      setExpandedDataset(null);
+    } else {
+      setExpandedDataset(datasetId);
+    }
   };
   
   // Get organization image
@@ -630,9 +634,14 @@ export default function SearchPage() {
 
   // Mobile dataset card component
   const DatasetCard = React.memo(({ dataset }: { dataset: any }) => {
+    // Move expansion state to component state, not global state
+    const [isExpanded, setIsExpanded] = useState(false);
     const orgImage = getOrganizationImage(dataset);
     const isImageUrl = typeof orgImage === 'string' && orgImage.length > 1;
     const imageLoadedStatus = isImageUrl ? isImageLoaded(orgImage as string) : false;
+    
+    // Check if the data is fully loaded and expandable
+    const isExpandable = dataset.relevance?.relevance_score !== undefined && searchStatus !== SearchStatus.SEARCHING;
     
     // Preload the image
     useEffect(() => {
@@ -642,17 +651,26 @@ export default function SearchPage() {
         img.src = orgImage as string;
       }
     }, [orgImage, isImageUrl, imageLoadedStatus]);
+
+    // Handle click to toggle expanded state locally, but only if expandable
+    const handleClick = useCallback(() => {
+      if (isExpandable) {
+        setIsExpanded(prev => !prev);
+      }
+    }, [isExpandable]);
     
     return (
       <motion.div 
         className={`p-4 border border-gray-200 rounded-md mb-3 bg-white shadow-sm ${
-          expandedDataset === dataset.id ? 'bg-gray-50 border-gray-300' : ''
-        }`}
-        onClick={() => toggleExpand(dataset.id)}
+          isExpanded ? 'bg-gray-50 border-gray-300' : ''
+        } ${!isExpandable ? 'opacity-85' : ''}`}
+        onClick={handleClick}
         initial={{ opacity: 1 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0 }}
-        layoutId={`card-${dataset.id}`}
+        layout
+        key={dataset.id}
+        style={{ cursor: isExpandable ? 'pointer' : 'default' }}
       >
         <div className="flex items-start">
           <div className="h-8 w-8 rounded shrink-0 mr-3 relative bg-green-100 flex items-center justify-center overflow-hidden">
@@ -702,56 +720,59 @@ export default function SearchPage() {
               
               <Drawer>
                 <DrawerTrigger asChild>
-                  <Button 
-                    size="sm" 
+                  <Badge 
                     variant="outline" 
-                    className="text-xs flex items-center gap-1"
-                    onClick={(e) => {
-                      e.stopPropagation(); // Prevent toggling expansion
-                    }}
+                    className="font-medium text-white border border-gray-800 bg-black hover:bg-gray-800 cursor-pointer inline-flex items-center gap-1.5 transition-colors px-3 py-1"
                   >
                     <Download className="h-3 w-3" />
-                    {(dataset.resources || []).length} resources
-                  </Button>
+                    {(dataset.resources || []).length}
+                  </Badge>
                 </DrawerTrigger>
                 <DrawerContent className="bg-white text-gray-900">
                   <DrawerHeader className="border-b border-gray-100">
                     <DrawerTitle className="text-xl font-semibold text-gray-900">Resources</DrawerTitle>
                     <DrawerDescription className="text-gray-600">
-                      Available resources for &ldquo;{dataset.title}&rdquo;
+                      Available resources for &quot;{dataset.title}&quot;
                     </DrawerDescription>
                   </DrawerHeader>
                   <div className="p-4">
                     {dataset.resources && dataset.resources.length > 0 ? (
-                      <div className="space-y-3">
-                        {dataset.resources.map((resource: any, resourceIndex: number) => (
-                          <div 
-                            key={resource.id || resourceIndex} 
-                            className="border-b border-gray-100 pb-3 last:border-b-0"
-                          >
-                            <div className="flex justify-between items-center">
-                              <div>
-                                <div className="font-medium text-gray-900">
-                                  {getFileType(resource)}
-                                </div>
-                                <div className="text-sm text-gray-700">
-                                  {resource.name || 'Unnamed resource'}
-                                </div>
-                              </div>
-                              <Button 
-                                size="sm" 
-                                variant="ghost"
-                                className="h-8 w-8 p-0 text-gray-700 hover:bg-gray-100"
-                                asChild
-                              >
-                                <a href={resource.url} target="_blank" rel="noopener noreferrer">
-                                  <ExternalLink className="h-4 w-4" />
-                                </a>
-                              </Button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="border-b border-gray-200 hover:!bg-gray-50">
+                            <TableHead className="w-[100px] text-gray-700">Type</TableHead>
+                            <TableHead className="text-gray-700">Name</TableHead>
+                            <TableHead className="text-right text-gray-700">Access</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {dataset.resources.map((resource: any, resourceIndex: number) => (
+                            <TableRow 
+                              key={resource.id || resourceIndex}
+                              className="border-b border-gray-100 hover:!bg-gray-50 hover:!text-gray-900"
+                            >
+                              <TableCell className="font-medium text-gray-900">
+                                {getFileType(resource)}
+                              </TableCell>
+                              <TableCell className="text-gray-800">
+                                {resource.name || 'Unnamed resource'}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <Button 
+                                  size="sm" 
+                                  variant="ghost"
+                                  className="h-8 w-8 p-0 text-gray-700 hover:!bg-gray-100 hover:!text-gray-900"
+                                  asChild
+                                >
+                                  <a href={resource.url} target="_blank" rel="noopener noreferrer">
+                                    <ExternalLink className="h-4 w-4" />
+                                  </a>
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
                     ) : (
                       <p className="text-sm text-gray-500 italic">No resources available</p>
                     )}
@@ -760,8 +781,9 @@ export default function SearchPage() {
                     <div className="flex justify-end w-full">
                       <Button 
                         variant="default" 
-                        className="gap-1 bg-green-500 text-white hover:bg-green-600"
+                        className="gap-1 bg-green-500 text-white hover:!bg-green-600"
                         onClick={() => {
+                          // Logic to download all resources
                           if (dataset.resources && dataset.resources.length > 0) {
                             window.open(dataset.resources[0].url, '_blank');
                           }
@@ -778,19 +800,23 @@ export default function SearchPage() {
           </div>
           
           <div className="ml-2">
-            <div className={`flex items-center justify-center w-5 h-5 transform transition-transform duration-200 ${expandedDataset === dataset.id ? 'rotate-90' : 'rotate-0'}`}>
-              <ChevronRight className="h-4 w-4 text-gray-500" />
+            <div className={`flex items-center justify-center w-5 h-5 transform transition-transform duration-200 ${isExpanded ? 'rotate-90' : 'rotate-0'}`}>
+              {isExpandable ? (
+                <ChevronRight className="h-4 w-4 text-gray-500" />
+              ) : (
+                <Loader2 className="h-4 w-4 text-gray-400 animate-spin" />
+              )}
             </div>
           </div>
         </div>
         
         <AnimatePresence>
-          {expandedDataset === dataset.id && (
+          {isExpanded && (
             <motion.div
-              initial={!isMobile ? { opacity: 0, height: 0 } : undefined}
-              animate={!isMobile ? { opacity: 1, height: 'auto' } : undefined}
-              exit={!isMobile ? { opacity: 0, height: 0 } : undefined}
-              transition={!isMobile ? { duration: 0.2 } : undefined}
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.2 }}
               className="mt-4 pt-4 border-t border-gray-100"
             >
               {/* Full description */}
@@ -840,6 +866,9 @@ export default function SearchPage() {
       </motion.div>
     );
   });
+
+  // Add display name to the component
+  DatasetCard.displayName = 'DatasetCard';
 
   // Mobile skeleton card component
   const SkeletonCard = () => (
@@ -956,28 +985,29 @@ export default function SearchPage() {
         </div>
       </div>
       
-      <div className="flex-1 max-w-7xl mx-auto w-full px-4 pb-12">
       {/* Dataset results section */}
+      <div className="flex-1 max-w-7xl mx-auto w-full px-4 pb-12">
         <AnimatePresence>
           {(searchStatus === SearchStatus.SEARCHING || 
             (searchStatus === SearchStatus.COMPLETE && datasets.length > 0)) && (
             <motion.div
-              initial={!isMobile ? { opacity: 0 } : undefined}
-              animate={!isMobile ? { opacity: 1 } : undefined}
-              exit={!isMobile ? { opacity: 0 } : undefined}
-              transition={!isMobile ? { duration: 0.5 } : undefined}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.5 }}
               className="mt-6 w-full overflow-hidden"
             >
               <motion.div 
-                initial={!isMobile ? { opacity: 0 } : undefined}
-                animate={!isMobile ? { opacity: 1 } : undefined}
-                transition={!isMobile ? { duration: 0.5 } : undefined}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.5 }}
                 className="flex items-center justify-between mb-2"
               >
                 <h2 className="text-sm text-gray-900 truncate max-w-full">
                   {searchStatus === SearchStatus.SEARCHING ? (
                     <span className="flex items-center">
                       <span className="text-gray-700 truncate">
+                        {/* Remove any trailing ellipsis from the status message */}
                         {statusMessage.replace(/\.{3,}$/, '')}
                         <span className="inline-block w-8">{ellipsis}</span>
                       </span>
@@ -996,11 +1026,8 @@ export default function SearchPage() {
                 onValueChange={setActiveTab}
                 className="mb-0 w-full"
               >
-                <TabsList className={`bg-white border border-gray-200 rounded-t-md rounded-b-none border-b-0 w-auto justify-start ${isMobile ? 'overflow-auto' : ''}`}>
-                  <TabsTrigger 
-                    value="data.gov" 
-                    className="data-[state=active]:bg-green-50 data-[state=active]:text-green-700 border-r border-gray-200"
-                  >
+                <TabsList className={`bg-white border border-gray-200 rounded-md border-b-0 rounded-b-none w-auto justify-start ${isMobile ? 'overflow-auto' : ''}`}>
+                  <TabsTrigger value="data.gov" className="data-[state=active]:bg-green-50 data-[state=active]:text-green-700">
                     data.gov
                   </TabsTrigger>
                   
@@ -1012,7 +1039,7 @@ export default function SearchPage() {
                           <TabsTrigger 
                             value="census" 
                             disabled 
-                            className="opacity-60 text-gray-400 hover:!bg-transparent hover:!text-gray-400 data-[state=active]:bg-transparent border-r border-gray-200" 
+                            className="opacity-60 text-gray-400 hover:!bg-transparent hover:!text-gray-400 data-[state=active]:bg-transparent" 
                           >
                             <div className="flex items-center gap-1.5">
                               U.S. Census Bureau
@@ -1034,7 +1061,7 @@ export default function SearchPage() {
                       </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
-                
+
                   {/* Repeat for other locked tabs */}
                   <TooltipProvider delayDuration={0}>
                     <Tooltip>
@@ -1043,7 +1070,7 @@ export default function SearchPage() {
                           <TabsTrigger 
                             value="bls" 
                             disabled 
-                            className="opacity-60 text-gray-400 hover:!bg-transparent hover:!text-gray-400 data-[state=active]:bg-transparent border-r border-gray-200" 
+                            className="opacity-60 text-gray-400 hover:!bg-transparent hover:!text-gray-400 data-[state=active]:bg-transparent" 
                           >
                             <div className="flex items-center gap-1.5">
                               U.S. BLS
@@ -1065,7 +1092,7 @@ export default function SearchPage() {
                       </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
-                
+
                   <TooltipProvider delayDuration={0}>
                     <Tooltip>
                       <TooltipTrigger asChild>
@@ -1073,7 +1100,7 @@ export default function SearchPage() {
                           <TabsTrigger 
                             value="eia" 
                             disabled 
-                            className="opacity-60 text-gray-400 hover:!bg-transparent hover:!text-gray-400 data-[state=active]:bg-transparent border-r border-gray-200" 
+                            className="opacity-60 text-gray-400 hover:!bg-transparent hover:!text-gray-400 data-[state=active]:bg-transparent" 
                           >
                             <div className="flex items-center gap-1.5">
                               U.S. EIA
@@ -1103,7 +1130,7 @@ export default function SearchPage() {
                           <TabsTrigger 
                             value="noaa" 
                             disabled 
-                            className="opacity-60 text-gray-400 hover:!bg-transparent hover:!text-gray-400 data-[state=active]:bg-transparent border-r border-gray-200" 
+                            className="opacity-60 text-gray-400 hover:!bg-transparent hover:!text-gray-400 data-[state=active]:bg-transparent" 
                           >
                             <div className="flex items-center gap-1.5">
                               NOAA
@@ -1133,7 +1160,7 @@ export default function SearchPage() {
                           <TabsTrigger 
                             value="cdc" 
                             disabled 
-                            className="opacity-60 text-gray-400 hover:!bg-transparent hover:!text-gray-400 data-[state=active]:bg-transparent border-r border-gray-200" 
+                            className="opacity-60 text-gray-400 hover:!bg-transparent hover:!text-gray-400 data-[state=active]:bg-transparent" 
                           >
                             <div className="flex items-center gap-1.5">
                               CDC
@@ -1163,7 +1190,7 @@ export default function SearchPage() {
                           <TabsTrigger 
                             value="usgs" 
                             disabled 
-                            className="opacity-60 text-gray-400 hover:!bg-transparent hover:!text-gray-400 data-[state=active]:bg-transparent border-r border-gray-200" 
+                            className="opacity-60 text-gray-400 hover:!bg-transparent hover:!text-gray-400 data-[state=active]:bg-transparent" 
                           >
                             <div className="flex items-center gap-1.5">
                               USGS
@@ -1222,7 +1249,7 @@ export default function SearchPage() {
                 /* Mobile card view */
                 <div className="mt-4 w-full">
                   {/* Show dataset cards as they come in */}
-                  <AnimatePresence mode="popLayout">
+                  <AnimatePresence>
                     {datasets.map((dataset) => (
                       <DatasetCard key={dataset.id} dataset={dataset} />
                     ))}
@@ -1236,22 +1263,21 @@ export default function SearchPage() {
                   }
                 </div>
               ) : (
-                /* Desktop table view - reverted to original */
-                <div className="rounded-md rounded-tl-none border border-gray-200 bg-white overflow-hidden">
-                  <div className="overflow-x-auto min-w-full">
-                    <Table className="min-w-full table-fixed">
-                      <TableHeader>
-                        <TableRow className="hover:!bg-transparent border-b border-gray-200">
-                          <TableHead className="w-10 h-10 text-gray-700"></TableHead>
-                          <TableHead className="w-[20%] font-medium text-gray-700">Source</TableHead>
-                          <TableHead className="w-[50%] font-medium text-gray-700">Dataset</TableHead>
-                          <TableHead className="w-[15%] text-center font-medium text-gray-700">Relevance</TableHead>
-                          <TableHead className="w-[15%] text-center font-medium text-gray-700">Resources</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {/* Show real dataset rows as they arrive */}
-                        {datasets.map((dataset) => (
+                /* Desktop table view */
+                <div className="rounded-md rounded-tl-none border border-gray-200 bg-white">
+                  <Table className="table-fixed">
+                    <TableHeader>
+                      <TableRow className="hover:!bg-transparent border-b border-gray-200">
+                        <TableHead className="w-[5%] h-10 text-gray-700"></TableHead>
+                        <TableHead className="w-[25%] font-medium text-gray-700">Source</TableHead>
+                        <TableHead className="w-[50%] font-medium text-gray-700">Dataset</TableHead>
+                        <TableHead className="w-[10%] text-center font-medium text-gray-700">Relevance</TableHead>
+                        <TableHead className="w-[10%] text-center font-medium text-gray-700">Resources</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {/* Always show real dataset rows if we have any */}
+                      {datasets.map((dataset, index) => (
                           <React.Fragment key={dataset.id}>
                             <TableRow 
                               className={`border-b border-gray-200 hover:bg-gray-50 transition-colors cursor-pointer ${
@@ -1260,56 +1286,43 @@ export default function SearchPage() {
                               onClick={() => toggleExpand(dataset.id)}
                             >
                               <TableCell className="py-4 px-4">
-                                <div className={`flex items-center justify-center w-5 h-5 transform transition-transform duration-200 ${expandedDataset === dataset.id ? 'rotate-90' : 'rotate-0'}`}>
+                                <motion.div
+                                  initial={{ rotate: 0 }}
+                                  animate={{ rotate: expandedDataset === dataset.id ? 90 : 0 }}
+                                  transition={{ duration: 0.2 }}
+                                  className="flex items-center justify-center w-5 h-5"
+                                >
                                   <ChevronRight className="h-4 w-4 text-gray-500" />
-                                </div>
+                                </motion.div>
                               </TableCell>
-                              <TableCell className="py-4 max-w-[200px]">
+                            <TableCell className="py-4 max-w-[200px]">
                                 <div className="flex items-center gap-2">
-                                  <div className="h-6 w-6 rounded shrink-0 relative bg-green-100 flex items-center justify-center overflow-hidden">
-                                    {(() => {
-                                      const orgImage = getOrganizationImage(dataset);
-                                      const isImageUrl = typeof orgImage === 'string' && orgImage.length > 1;
-                                      const imageLoadedStatus = isImageUrl ? isImageLoaded(orgImage as string) : false;
-                                      
-                                      return (
-                                        <>
-                                          {isImageUrl && (
-                                            <img 
-                                              src={orgImage as string}
-                                              alt={getOrganizationName(dataset)}
-                                              className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-150 ${imageLoadedStatus ? 'opacity-100' : 'opacity-0'}`}
-                                              onLoad={() => markImageLoaded(orgImage as string)}
-                                            />
-                                          )}
-                                          {(!isImageUrl || !imageLoadedStatus) && (
-                                            <span className="text-xs text-green-600 font-medium z-10">
-                                              {!imageLoadedStatus && isImageUrl ? 
-                                                <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 
-                                                orgImage
-                                              }
-                                            </span>
-                                          )}
-                                        </>
-                                      );
-                                    })()}
-                                  </div>
-                                  <div className="min-w-0 flex-1">
-                                    <span 
-                                      className="text-sm block text-gray-800 leading-tight truncate"
-                                      title={getOrganizationName(dataset)}
-                                    >
-                                      {getOrganizationName(dataset)}
-                                    </span>
-                                  </div>
+                                  <Avatar className="h-6 w-6 rounded shrink-0">
+                                    {typeof getOrganizationImage(dataset) === 'string' && 
+                                     getOrganizationImage(dataset).length > 1 ? (
+                                      <AvatarImage src={getOrganizationImage(dataset) as string} />
+                                    ) : (
+                                      <AvatarFallback className="rounded bg-green-100 text-green-600 text-xs">
+                                        {getOrganizationImage(dataset)}
+                                      </AvatarFallback>
+                                    )}
+                                  </Avatar>
+                                <div className="min-w-0 flex-1">
+                                  <span 
+                                    className="text-sm block text-gray-800 leading-tight truncate"
+                                    title={getOrganizationName(dataset)}
+                                  >
+                                    {getOrganizationName(dataset)}
+                                  </span>
+                                </div>
                                 </div>
                               </TableCell>
-                              <TableCell className="py-4">
-                                <div>
-                                  <h3 
-                                    className="font-medium text-gray-900 truncate" 
-                                    title={dataset.title}
-                                  >
+                            <TableCell className="py-4">
+                              <div>
+                                <h3 
+                                  className="font-medium text-gray-900 truncate" 
+                                  title={dataset.title}
+                                >
                                     {dataset.title}
                                   </h3>
                                 </div>
@@ -1337,17 +1350,17 @@ export default function SearchPage() {
                                   <DrawerTrigger asChild>
                                     <Badge 
                                       variant="outline" 
-                                      className="font-medium text-gray-700 border border-gray-200 bg-transparent hover:bg-gray-100 cursor-pointer inline-flex items-center gap-1.5 transition-colors px-3 py-1"
+                                      className="font-medium text-white border border-gray-800 bg-black hover:bg-gray-800 cursor-pointer inline-flex items-center gap-1.5 transition-colors px-3 py-1"
                                     >
                                       <Download className="h-3 w-3" />
-                                      {(dataset.resources || []).length}
+                                      Download
                                     </Badge>
                                   </DrawerTrigger>
                                   <DrawerContent className="bg-white text-gray-900">
                                     <DrawerHeader className="border-b border-gray-100">
                                       <DrawerTitle className="text-xl font-semibold text-gray-900">Resources</DrawerTitle>
                                       <DrawerDescription className="text-gray-600">
-                                        Available resources for &ldquo;{dataset.title}&rdquo;
+                                        Available resources for &quot;{dataset.title}&quot;
                                       </DrawerDescription>
                                     </DrawerHeader>
                                     <div className="p-4">
@@ -1415,21 +1428,21 @@ export default function SearchPage() {
                             </TableRow>
                             
                             {/* Expandable row for resources */}
-                            <AnimatePresence mode={isMobile ? "sync" : "wait"}>
+                            <AnimatePresence>
                               {expandedDataset === dataset.id && (
                                 <motion.tr
-                                  initial={!isMobile ? { opacity: 0, height: 0 } : undefined}
-                                  animate={!isMobile ? { opacity: 1, height: 'auto' } : undefined}
-                                  exit={!isMobile ? { opacity: 0, height: 0 } : undefined}
-                                  transition={!isMobile ? { duration: 0.2 } : undefined}
+                                  initial={{ opacity: 0, height: 0 }}
+                                  animate={{ opacity: 1, height: 'auto' }}
+                                  exit={{ opacity: 0, height: 0 }}
+                                  transition={{ duration: 0.2 }}
                                   className="bg-gray-50"
                                 >
                                 <td colSpan={5} className="p-0 border-b border-gray-200">
                                     <motion.div
-                                      initial={!isMobile ? { opacity: 0 } : undefined}
-                                      animate={!isMobile ? { opacity: 1 } : undefined}
-                                      exit={!isMobile ? { opacity: 0 } : undefined}
-                                      transition={!isMobile ? { duration: 0.2, delay: 0.1 } : undefined}
+                                      initial={{ opacity: 0 }}
+                                      animate={{ opacity: 1 }}
+                                      exit={{ opacity: 0 }}
+                                      transition={{ duration: 0.2, delay: 0.1 }}
                                       className="px-4 py-4"
                                     >
                                       {/* Full description */}
@@ -1449,82 +1462,82 @@ export default function SearchPage() {
                                           </p>
                                         </div>
                                       )}
-                                      
-                                      {/* Tags section */}
-                                      {dataset.tags && dataset.tags.length > 0 && (
-                                        <div>
-                                          <h4 className="text-sm font-medium mb-2 text-gray-800">Tags</h4>
-                                          <div className="flex flex-wrap gap-1.5">
-                                            {dataset.tags.map((tag: any, tagIndex: number) => {
-                                              const tagText = typeof tag === 'string' 
-                                                ? tag 
-                                                : (tag.display_name || tag.name || '');
+                                    {/* Tags section */}
+                                    {dataset.tags && dataset.tags.length > 0 && (
+                                      <div>
+                                        <h4 className="text-sm font-medium mb-2 text-gray-800">Tags</h4>
+                                        <div className="flex flex-wrap gap-1.5">
+                                          {dataset.tags.map((tag: any, tagIndex: number) => {
+                                            const tagText = typeof tag === 'string' 
+                                              ? tag 
+                                              : (tag.display_name || tag.name || '');
                                               
-                                              return (
-                                                <Badge 
-                                                  key={tagIndex} 
-                                                  variant="secondary"
-                                                  className="text-xs text-gray-700 bg-gray-100 hover:bg-gray-200"
-                                                >
-                                                  {tagText}
-                                                </Badge>
-                                              );
-                                            })}
-                                          </div>
+                                            return (
+                                              <Badge 
+                                                key={tagIndex} 
+                                                variant="secondary"
+                                                className="text-xs text-gray-700 bg-gray-100 hover:bg-gray-200"
+                                              >
+                                                {tagText}
+                                              </Badge>
+                                            );
+                                          })}
                                         </div>
-                                      )}
-                                    </motion.div>
-                                  </td>
-                                </motion.tr>
-                              )}
-                            </AnimatePresence>
-                          </React.Fragment>
-                        ))}
-                        
-                        {/* Show skeleton rows when searching AND we need placeholders */}
-                        {searchStatus === SearchStatus.SEARCHING && 
-                          Array(Math.max(0, 6 - datasets.length)).fill(0).map((_, index) => (
-                            <TableRow 
-                              key={`skeleton-${index}`}
-                              className="border-b border-gray-200 hover:!bg-transparent"
-                            >
-                              <TableCell className="py-4 px-4">
-                                <div className="flex items-center justify-center w-5 h-5">
-                                  <Skeleton className="h-4 w-4 bg-gray-200 rounded-sm" />
-                                </div>
-                              </TableCell>
-                              <TableCell className="py-4 max-w-[200px]">
-                                <div className="flex items-center gap-2">
-                                  <Skeleton className="h-6 w-6 rounded-full bg-gray-200 shrink-0" />
-                                  <div className="min-w-0 flex-1">
-                                    <Skeleton className="h-4 w-full bg-gray-200" />
-                                  </div>
-                                </div>
-                              </TableCell>
-                              <TableCell className="py-4">
-                                <div>
-                                  <Skeleton className="h-5 w-full bg-gray-200" />
-                                </div>
-                              </TableCell>
-                              <TableCell className="py-4 text-center">
-                                <div className="flex justify-center">
-                                  <Skeleton className="h-6 w-16 bg-gray-200 rounded-full" />
-                                </div>
-                              </TableCell>
-                              <TableCell className="py-4 text-center">
-                                <div className="flex justify-center">
-                                  <Skeleton className="h-7 w-20 bg-gray-200 rounded-full" />
-                                </div>
-                              </TableCell>
-                            </TableRow>
-                          ))
-                        }
-                      </TableBody>
-                    </Table>
-                  </div>
-                </div>
+                                      </div>
+                                    )}
+                                  </motion.div>
+                                </td>
+                              </motion.tr>
+                            )}
+                          </AnimatePresence>
+                        </React.Fragment>
+                    ))}
+                    
+                    {/* Show skeleton rows only when searching */}
+                    {searchStatus === SearchStatus.SEARCHING && (
+                      // Skeleton rows when searching
+                      Array(6).fill(0).map((_, index) => (
+                        <TableRow 
+                          key={`skeleton-${index}`}
+                          className="border-b border-gray-200 hover:!bg-transparent"
+                        >
+                          <TableCell className="py-4 px-4">
+                            <div className="flex items-center justify-center w-5 h-5">
+                              <Skeleton className="h-4 w-4 bg-gray-200 rounded-sm" />
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-4 max-w-[200px]">
+                            <div className="flex items-center gap-2">
+                              <Skeleton className="h-6 w-6 rounded-full bg-gray-200 shrink-0" />
+                              <div className="min-w-0 flex-1">
+                                <Skeleton className="h-4 w-full bg-gray-200" />
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-4">
+                            <div>
+                              <Skeleton className="h-5 w-full bg-gray-200" />
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-4 text-center">
+                            <div className="flex justify-center">
+                              <Skeleton className="h-6 w-16 bg-gray-200 rounded-full" />
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-4 text-center">
+                            <div className="flex justify-center">
+                              <Skeleton className="h-7 w-20 bg-gray-200 rounded-full" />
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
               )}
             </motion.div>
+            
           )}
         </AnimatePresence>
       </div>
