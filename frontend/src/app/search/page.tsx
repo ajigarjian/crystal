@@ -735,10 +735,14 @@ export default function SearchPage() {
                       Available resources for &quot;{dataset.title}&quot;
                     </DrawerDescription>
                   </DrawerHeader>
-                  <div className="p-4">
+                  
+                  {/* Add max-height, custom scrollbar styling and overflow-y-auto for scrolling */}
+                  <div className="p-4 max-h-[calc(80vh-120px)] overflow-y-auto 
+                    scrollbar-thin scrollbar-thumb-rounded scrollbar-track-transparent 
+                    hover:scrollbar-thumb-gray-300 scrollbar-thumb-gray-200">
                     {dataset.resources && dataset.resources.length > 0 ? (
                       <Table>
-                        <TableHeader>
+                        <TableHeader className="sticky top-0 bg-white z-10">
                           <TableRow className="border-b border-gray-200 hover:!bg-gray-50">
                             <TableHead className="w-[100px] text-gray-700">Type</TableHead>
                             <TableHead className="text-gray-700">Name</TableHead>
@@ -777,23 +781,18 @@ export default function SearchPage() {
                       <p className="text-sm text-gray-500 italic">No resources available</p>
                     )}
                   </div>
-                  <DrawerFooter className="border-t border-gray-100 bg-white">
-                    <div className="flex justify-end w-full">
-                      <Button 
-                        variant="default" 
-                        className="gap-1 bg-green-500 text-white hover:!bg-green-600"
-                        onClick={() => {
-                          // Logic to download all resources
-                          if (dataset.resources && dataset.resources.length > 0) {
-                            window.open(dataset.resources[0].url, '_blank');
-                          }
-                        }}
-                      >
-                        <Download className="h-4 w-4" />
-                        Download All
-                      </Button>
+                  
+                  {/* Add a hint about scrolling if there are many resources */}
+                  {dataset.resources && dataset.resources.length > 5 && (
+                    <div className="text-center py-2 text-sm text-gray-500 border-t border-gray-100">
+                      <span className="inline-flex items-center">
+                        Scroll to see all {dataset.resources.length} resources
+                        <svg className="ml-1 h-4 w-4 animate-bounce" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                        </svg>
+                      </span>
                     </div>
-                  </DrawerFooter>
+                  )}
                 </DrawerContent>
               </Drawer>
             </div>
@@ -1363,10 +1362,14 @@ export default function SearchPage() {
                                         Available resources for &quot;{dataset.title}&quot;
                                       </DrawerDescription>
                                     </DrawerHeader>
-                                    <div className="p-4">
+                                    
+                                    {/* Add max-height, custom scrollbar styling and overflow-y-auto for scrolling */}
+                                    <div className="p-4 max-h-[calc(80vh-120px)] overflow-y-auto 
+                                      scrollbar-thin scrollbar-thumb-rounded scrollbar-track-transparent 
+                                      hover:scrollbar-thumb-gray-300 scrollbar-thumb-gray-200">
                                       {dataset.resources && dataset.resources.length > 0 ? (
                                         <Table>
-                                          <TableHeader>
+                                          <TableHeader className="sticky top-0 bg-white z-10">
                                             <TableRow className="border-b border-gray-200 hover:!bg-gray-50">
                                               <TableHead className="w-[100px] text-gray-700">Type</TableHead>
                                               <TableHead className="text-gray-700">Name</TableHead>
@@ -1405,23 +1408,18 @@ export default function SearchPage() {
                                         <p className="text-sm text-gray-500 italic">No resources available</p>
                                       )}
                                     </div>
-                                    <DrawerFooter className="border-t border-gray-100 bg-white">
-                                      <div className="flex justify-end w-full">
-                                        <Button 
-                                          variant="default" 
-                                          className="gap-1 bg-green-500 text-white hover:!bg-green-600"
-                                          onClick={() => {
-                                            // Logic to download all resources
-                                            if (dataset.resources && dataset.resources.length > 0) {
-                                              window.open(dataset.resources[0].url, '_blank');
-                                            }
-                                          }}
-                                        >
-                                          <Download className="h-4 w-4" />
-                                          Download All
-                                        </Button>
+                                    
+                                    {/* Add a hint about scrolling if there are many resources */}
+                                    {dataset.resources && dataset.resources.length > 5 && (
+                                      <div className="text-center py-2 text-sm text-gray-500 border-t border-gray-100">
+                                        <span className="inline-flex items-center">
+                                          Scroll to see all {dataset.resources.length} resources
+                                          <svg className="ml-1 h-4 w-4 animate-bounce" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                                          </svg>
+                                        </span>
                                       </div>
-                                    </DrawerFooter>
+                                    )}
                                   </DrawerContent>
                                 </Drawer>
                               </TableCell>
