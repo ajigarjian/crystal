@@ -382,8 +382,8 @@ export default function Home() {
           </Button>
         </div>
         
-        {/* Add footer with X logo */}
-        <div className="absolute bottom-4 w-full flex justify-center z-20">
+        {/* Add footer with X logo and Discord logo */}
+        <div className="absolute bottom-4 w-full flex justify-center z-20 gap-3">
           <a 
             href="https://x.com/askwithcrystal" 
             target="_blank" 
@@ -394,6 +394,20 @@ export default function Home() {
             <img 
               src="/images/xlogo.png" 
               alt="X logo" 
+              className="h-5 w-5" 
+              style={{ filter: "brightness(0) invert(1)" }}
+            />
+          </a>
+          <a 
+            href="https://discord.com/invite/ngKpsdKEyD" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors"
+            aria-label="Join our Discord"
+          >
+            <img 
+              src="/images/discordlogo.svg" 
+              alt="Discord logo" 
               className="h-5 w-5" 
               style={{ filter: "brightness(0) invert(1)" }}
             />
