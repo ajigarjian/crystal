@@ -283,6 +283,15 @@ export default function Home() {
       >
         {/* Navigation links */}
         <div className="absolute top-6 right-6 z-30 flex gap-4">
+          <Link href="/about">
+            <Button 
+              variant="link" 
+              className="text-white flex items-center gap-1 hover:text-white/80 transition-colors"
+              style={{ fontFamily: 'var(--font-geist-sans)' }}
+            >
+              About <ArrowRight className="h-4 w-4" />
+            </Button>
+          </Link>
           <Link href="/privacy">
             <Button 
               variant="link" 
@@ -343,7 +352,7 @@ export default function Home() {
           />
           <div className="relative">
             <h1
-              className="text-6xl font-bold text-white"
+              className="text-4xl sm:text-6xl font-bold text-white"
               style={{ fontFamily: 'Satoshi, sans-serif' }}
             >
               Crystal
