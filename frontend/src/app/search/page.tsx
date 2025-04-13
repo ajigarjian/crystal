@@ -1353,7 +1353,7 @@ export default function SearchPage() {
                                       className="font-medium text-white border border-gray-800 bg-black hover:bg-gray-800 cursor-pointer inline-flex items-center gap-1.5 transition-colors px-3 py-1"
                                     >
                                       <Download className="h-3 w-3" />
-                                      Download
+                                      {(dataset.resources || []).length}
                                     </Badge>
                                   </DrawerTrigger>
                                   <DrawerContent className="bg-white text-gray-900">
