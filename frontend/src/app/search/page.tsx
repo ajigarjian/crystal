@@ -5,7 +5,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Input } from "@/components/ui/input";
 import { Search, Loader2, ChevronDown, ChevronUp, FileText, ExternalLink, Info, ChevronRight, Download, X, Lock, AlertCircle, Lightbulb, MessageSquare, ThumbsUp, Bug, ArrowRight } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { streamSearchDatasets } from "@/lib/firebase";
+import { trackDwellTimeEnd, trackDwellTimeStart, warmFunctions, streamSearchDatasets } from "@/lib/firebase";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -886,6 +886,16 @@ export default function SearchPage() {
       </div>
     </div>
   );
+
+  // Add this useEffect hook for tracking visits to the search page
+  useEffect(() => {
+    const startTime = new Date();
+    trackDwellTimeStart('search_page');
+    
+    return () => {
+      trackDwellTimeEnd('search_page', startTime);
+    };
+  }, []);
 
   return (
     <div className="flex flex-col min-h-screen bg-gray-50 text-gray-900">
