@@ -156,6 +156,16 @@ class DatasetResource(models.Model):
     resource_download_error = models.BooleanField(default=False)
     last_cached = models.DateTimeField(blank=True, null=True)
     
+    # Fields for linkrot tracking - added in migration 0015
+    last_availability_check = models.DateTimeField(blank=True, null=True)
+    is_available = models.BooleanField(default=True)
+    availability_history = models.JSONField(blank=True, null=True)
+    in_harvard_archive = models.BooleanField(default=False)
+    harvard_archive_path = models.CharField(blank=True, max_length=500, null=True)
+    harvard_archive_version = models.CharField(blank=True, max_length=10, null=True)
+    content_hash = models.CharField(blank=True, max_length=64, null=True)
+    content_size_bytes = models.BigIntegerField(blank=True, null=True)
+    
     class Meta:
         app_label = 'factchecker'
         db_table = 'factchecker_datasetresource'
@@ -167,6 +177,7 @@ class DatasetResource(models.Model):
         return self.name
 
 class WaitlistEntry(models.Model):
+    id = models.BigAutoField(primary_key=True)
     first_name = models.CharField(max_length=100)
     email = models.EmailField(unique=True)
     created_at = models.DateTimeField(default=timezone.now)
@@ -421,6 +432,7 @@ class Feedback(models.Model):
     ]
     
     # Core fields
+    id = models.BigAutoField(primary_key=True)
     feedback_type = models.CharField(max_length=50, choices=FEEDBACK_TYPES)
     title = models.CharField(max_length=255)
     description = models.TextField()
@@ -450,3 +462,63 @@ class Feedback(models.Model):
     
     def __str__(self):
         return f"{self.feedback_type}: {self.title}"
+
+class DataGovArchiveCheck(models.Model):
+    """Model to track Data.gov archive checks"""
+    dataset_name = models.CharField(max_length=255, primary_key=True)
+    latest_version_checked = models.CharField(blank=True, max_length=10, null=True)
+    last_checked_at = models.DateTimeField(blank=True, null=True)
+    is_processed = models.BooleanField(default=False)
+    in_our_database = models.BooleanField(default=False)
+    resources_checked = models.IntegerField(default=0)
+    resources_available = models.IntegerField(default=0)
+    archive_path = models.CharField(blank=True, max_length=500, null=True)
+    downloaded = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    error = models.TextField(blank=True, null=True)
+    
+    # New fields from migration 0016
+    last_available_in_datagov = models.DateTimeField(null=True, blank=True)
+    is_still_in_datagov = models.BooleanField(default=True)
+    had_resources = models.BooleanField(default=False)
+    has_usable_resources = models.BooleanField(default=False)
+    resources_gone_bad = models.BooleanField(default=False)
+    last_check_with_usable_resources = models.DateTimeField(null=True, blank=True)
+    availability_history = models.JSONField(default=list, blank=True, null=True)
+
+    class Meta:
+        app_label = 'factchecker'
+        db_table = 'factchecker_datagovarchivecheck'
+        indexes = [
+            models.Index(fields=['is_processed'], name='idx_dgac_processed'),
+            models.Index(fields=['in_our_database'], name='idx_dgac_in_db'),
+            models.Index(fields=['last_checked_at'], name='idx_dgac_last_checked')
+        ]
+
+    def __str__(self):
+        return self.dataset_name
+
+class ResourceAvailabilityCheck(models.Model):
+    """Model to track resource availability checks"""
+    id = models.BigAutoField(primary_key=True)
+    check_datetime = models.DateTimeField(auto_now_add=True)
+    is_available = models.BooleanField(default=False)
+    http_status = models.IntegerField(blank=True, null=True)
+    response_time_ms = models.IntegerField(blank=True, null=True)
+    found_in_archive = models.BooleanField(default=False)
+    archive_path = models.CharField(blank=True, max_length=500, null=True)
+    error_message = models.TextField(blank=True, null=True)
+    resource = models.ForeignKey(DatasetResource, on_delete=models.CASCADE, related_name='availability_checks', to_field='resource_id')
+
+    class Meta:
+        app_label = 'factchecker'
+        db_table = 'factchecker_resourceavailabilitycheck'
+        indexes = [
+            models.Index(fields=['check_datetime'], name='idx_rac_datetime'),
+            models.Index(fields=['is_available'], name='idx_rac_available'),
+            models.Index(fields=['found_in_archive'], name='idx_rac_archive')
+        ]
+
+    def __str__(self):
+        return f"Check for {self.resource.name} at {self.check_datetime}"
