@@ -301,6 +301,24 @@ export default function Home() {
               Privacy <ArrowRight className="h-4 w-4" />
             </Button>
           </Link>
+          <Link href="/log">
+            <Button 
+              variant="link" 
+              className="text-white flex items-center gap-1 hover:text-white/80 transition-colors"
+              style={{ fontFamily: 'var(--font-geist-sans)' }}
+            >
+              Change Log <ArrowRight className="h-4 w-4" />
+            </Button>
+          </Link>
+          {/* <Link href="/blog">
+            <Button 
+              variant="link" 
+              className="text-white flex items-center gap-1 hover:text-white/80 transition-colors"
+              style={{ fontFamily: 'var(--font-geist-sans)' }}
+            >
+              Blog <ArrowRight className="h-4 w-4" />
+            </Button>
+          </Link> */}
           <Link href="/waitlist">
             <Button 
               variant="link" 
