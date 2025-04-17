@@ -572,7 +572,7 @@ def stream_analyze_helper(dataset_ids, query, file_path=None, parallel=True):
                     extracted_data = execute_relevant_data(relevant_data)
                     
                     # Debug print extracted_data
-                    print("extracted_data", extracted_data)
+                    # print("extracted_data", extracted_data)
                     
                     # Get dataset object with DB metadata
                     dataset_obj = datasets.get(dataset_id, {})
@@ -748,6 +748,7 @@ def stream_analyze_helper(dataset_ids, query, file_path=None, parallel=True):
 
         # Process datasets either in parallel or sequentially based on the parallel flag
         if parallel:
+            print("Processing datasets in Parallel...")
             # Process datasets in parallel
             with concurrent.futures.ThreadPoolExecutor(max_workers=len(datasets)) as executor:
                 # Submit all tasks

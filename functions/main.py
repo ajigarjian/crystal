@@ -83,6 +83,7 @@ firebase_admin.initialize_app()
         cors_methods=["get", "post"]
     ),
     memory=options.MemoryOption.GB_2,
+    timeout_sec=180, # Let's increase timeout here to 3 mins.
     min_instances=1
 )
 def stream_search_datasets(request):

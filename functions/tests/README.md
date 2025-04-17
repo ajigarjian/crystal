@@ -4,8 +4,8 @@ Use this directory to test backend code that you want to move into main.py and d
 
 1. Run `firebase emulators:start` in case you need Firestore.
 1. (One time) Run `gcloud auth application-default set-quota-project crystal-2f87e` to set the GCP project ID
-1. Need Postgres? Head over to `scripts/sql` and run this command to make a connection to our Postgres SQL server:
-`./cloud-sql-proxy --address 0.0.0.0 --port 1234 crystal-2f87e:us-east4:crystal-sql`
+1. Need Postgres? Head over to the root directory and run this command to make a connection to our Postgres SQL server:
+`./start-sql-proxy.sh`
 1. You can now use and interact with the frontend. (Run npm run dev to start the frontend)
 
 

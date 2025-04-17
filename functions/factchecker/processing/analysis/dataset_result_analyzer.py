@@ -507,8 +507,20 @@ def format_extracted_data(
     
     # Get the results dictionary which contains the actual data
     results_dict = extracted_data.get('results_dict', {})
-    data = results_dict.get('data', {})
+    # data = results_dict.get('data', {}) # <--- Original line causing the error
     
+    # Handle both list and dict types for results_dict
+    data_to_format = {}
+    if isinstance(results_dict, list):
+        # If it's a list (likely from DataFrame), use the list directly
+        data_to_format = results_dict 
+    elif isinstance(results_dict, dict):
+        # If it's a dict, get the 'data' key if it exists
+        data_to_format = results_dict.get('data', {})
+    else:
+        # Handle unexpected types gracefully
+        data_to_format = results_dict 
+
     # Get the code and printed output
     code = extracted_data.get('code', '')
     printed_output = extracted_data.get('printed_output', '')
@@ -523,7 +535,7 @@ Title: {dataset_title}
 Source: {dataset_source}
 
 EXTRACTED DATA:
-{data}
+{data_to_format}
 
 CODE USED:
 {code}

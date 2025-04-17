@@ -27,7 +27,7 @@ def get_openai_client():
         # Configure for Azure OpenAI
         client = openai.AzureOpenAI(
             api_key=AZURE_OPENAI_KEY,
-            api_version="2025-02-01-preview",  # Update this to the version you're using
+            api_version="2025-03-01-preview",  # https://learn.microsoft.com/en-us/azure/ai-services/openai/api-version-deprecation
             azure_endpoint=AZURE_OPENAI_ENDPOINT
         )
         return client
@@ -112,7 +112,7 @@ def chat_completion(
     temperature: float = 0.2,
     max_tokens: int = 800,
     response_format: Optional[Dict[str, str]] = None,
-    model_name: Optional[str] = "gpt-4o-mini"
+    model_name: Optional[str] = "gpt-4.1-nano"
 ) -> str:
     """
     Get a chat completion from OpenAI or Azure OpenAI.
@@ -142,17 +142,18 @@ def chat_completion(
         
         # Add temperature for models that support it
         # o3-mini doesn't support temperature parameter
-        if not model_name.endswith("o3-mini"):
-            params["temperature"] = temperature
+        #if not model_name.endswith("o3-mini"):
+        #    params["temperature"] = temperature
         
         # Add response_format if provided
         if response_format is not None:
             params["response_format"] = response_format
             
         # Handle token limit parameter based on model
-        if "o3" in model_name or "-o" in model_name:
+        if model_name[0] == "o":
             # For newer models like GPT-4o and o3 models that use max_completion_tokens
             params["max_completion_tokens"] = max_tokens
+            params["temperature"] = 1.0
         else:
             # For older models that use max_tokens
             params["max_tokens"] = max_tokens

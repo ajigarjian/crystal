@@ -18,6 +18,8 @@ Options:
 import os
 import sys
 import logging
+import shutil
+import gc
 
 # Setup path for imports
 this_dir = os.path.dirname(__file__)
@@ -115,19 +117,24 @@ S3_BUCKET = "harvard-lil"
 S3_COLLECTIONS_PREFIX = "collections/data_gov"
 S3_METADATA_PREFIX = "metadata/data_gov"
 TEMP_DIR = Path(tempfile.gettempdir()) / "data_gov_archive"
-HTTP_TIMEOUT = 5  # seconds - shorter timeout as requested
-MAX_WORKERS = 25
+HTTP_TIMEOUT = 5  # seconds - set to exactly 5 seconds
+MAX_WORKERS = 10
 USER_AGENT = "DataGovLinkRotUpdater/1.0"
+# Maximum temp storage in MB before forcing cleanup
+MAX_TEMP_STORAGE_MB = 1000  # 1GB
+# Maximum age for temp files in seconds before cleanup
+MAX_TEMP_FILE_AGE = 1800  # 30 minutes
 
 
 class DataGovArchiveProcessor:
     """Process the Harvard-LIL Data.gov archive to track link rot and update our database"""
     
-    def __init__(self, limit=None, process_new_only=False, cleanup=True, single_path=None):
+    def __init__(self, limit=None, process_new_only=False, cleanup=True, single_path=None, start_index=0):
         self.limit = limit
         self.process_new_only = process_new_only
         self.cleanup = cleanup
         self.single_path = single_path
+        self.start_index = start_index
         self.stats = {
             "datasets_processed": 0,
             "resources_checked": 0,
@@ -197,63 +204,86 @@ class DataGovArchiveProcessor:
     
     def download_metadata_file(self, metadata_path):
         """Download a metadata file from S3"""
-        local_path = TEMP_DIR / metadata_path
+        # Always use a flattened directory structure to avoid path length issues
+        path_hash = hashlib.md5(str(metadata_path).encode()).hexdigest()[:10]
+        flat_dir = TEMP_DIR / "metadata_flat"
+        filename = os.path.basename(metadata_path)
+        local_path = flat_dir / f"{path_hash}_{filename}"
         
-        # Ensure directory exists
-        os.makedirs(local_path.parent, exist_ok=True)
-        
-        if local_path.exists():
+        # Create the flat directory
+        try:
+            os.makedirs(flat_dir, exist_ok=True)
+        except OSError as e:
+            logger.error(f"Error creating flat directory for metadata: {e}")
+            self.stats["errors"] += 1
+            return None
+            
+        # Check if we already have this file
+        if local_path.exists() and os.path.getsize(local_path) > 0:
             return local_path
             
         try:
-            # Use AWS S3 CLI to download the file from the correct path
-            # We need to use gov-data/metadata/data_gov/ + the actual file path
-            s3_path = f"gov-data/{S3_METADATA_PREFIX}/{metadata_path}"
+            # Build the direct URL to the file
+            s3_url = f"{S3_ENDPOINT}/{S3_BUCKET}/gov-data/{S3_METADATA_PREFIX}/{metadata_path}"
+            logger.debug(f"Downloading metadata from URL: {s3_url}")
             
-            cmd = [
-                "aws", "s3", "cp",
-                f"s3://{S3_BUCKET}/{s3_path}",
-                str(local_path),
-                "--endpoint-url", S3_ENDPOINT
-            ]
+            # Download the file directly via HTTP
+            response = self.session.get(s3_url, timeout=HTTP_TIMEOUT * 2, stream=True)
+            response.raise_for_status()
             
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            
-            if result.returncode == 0:
-                return local_path
-            else:
-                logger.error(f"Error downloading {metadata_path}: {result.stderr}")
+            # Write the file
+            with open(local_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+                    
+            if os.path.getsize(local_path) == 0:
+                logger.error(f"Downloaded file is empty: {local_path}")
+                os.remove(local_path)
                 self.stats["errors"] += 1
                 return None
+                
+            return local_path
             
-        except subprocess.CalledProcessError as e:
+        except (requests.RequestException, OSError) as e:
             logger.error(f"Error downloading {metadata_path}: {e}")
-            logger.error(f"STDOUT: {e.stdout}")
-            logger.error(f"STDERR: {e.stderr}")
             self.stats["errors"] += 1
+            
+            # Clean up incomplete download if it exists
+            if os.path.exists(local_path):
+                try:
+                    os.remove(local_path)
+                except OSError:
+                    pass
+                    
             return None
     
     def download_collection_file(self, collection_path):
         """Download a collection (zip) file from S3"""
-        s3_url = f"{S3_ENDPOINT}/{S3_BUCKET}/gov-data/{collection_path}"
-        local_path = TEMP_DIR / collection_path
+        # Always use a flattened directory structure
+        path_hash = hashlib.md5(str(collection_path).encode()).hexdigest()[:10]
+        flat_dir = TEMP_DIR / "collections_flat"
+        filename = os.path.basename(collection_path)
+        local_path = flat_dir / f"{path_hash}_{filename}"
         
-        logger.debug(f"Attempting to download collection file: {s3_url}")
+        # Create the flat directory
+        try:
+            os.makedirs(flat_dir, exist_ok=True)
+        except OSError as e:
+            logger.error(f"Error creating flat directory for collections: {e}")
+            return None
         
-        # Ensure directory exists
-        os.makedirs(local_path.parent, exist_ok=True)
-        
-        if local_path.exists():
+        # Check if we already have this file
+        if local_path.exists() and os.path.getsize(local_path) > 0:
             logger.debug(f"Collection file already exists locally at {local_path}")
-            if os.path.getsize(local_path) > 0:
-                return local_path
-            else:
-                logger.debug("But file is empty, will re-download")
-                os.remove(local_path)  # Remove empty file
+            return local_path
             
         try:
+            # Build the direct URL to the file
+            s3_url = f"{S3_ENDPOINT}/{S3_BUCKET}/gov-data/{collection_path}"
             logger.debug(f"Downloading collection file from {s3_url}")
-            response = self.session.get(s3_url, timeout=HTTP_TIMEOUT * 3)  # Longer timeout for ZIP files
+            
+            # Download the file
+            response = self.session.get(s3_url, timeout=HTTP_TIMEOUT * 3, stream=True)
             
             if response.status_code != 200:
                 logger.error(f"Failed to download collection file: HTTP {response.status_code}")
@@ -261,14 +291,17 @@ class DataGovArchiveProcessor:
                 
             response.raise_for_status()
             
+            # Save the file as a stream to handle large files better
             with open(local_path, 'wb') as f:
-                f.write(response.content)
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
             
             file_size = os.path.getsize(local_path)
             logger.debug(f"Successfully downloaded collection file: {file_size} bytes")
             
             if file_size == 0:
                 logger.error("Downloaded file is empty")
+                os.remove(local_path)
                 return None
                 
             return local_path
@@ -276,6 +309,14 @@ class DataGovArchiveProcessor:
         except requests.RequestException as e:
             logger.error(f"Error downloading {s3_url}: {e}")
             self.stats["errors"] += 1
+            
+            # Clean up incomplete download if it exists
+            if os.path.exists(local_path):
+                try:
+                    os.remove(local_path)
+                except OSError:
+                    pass
+                    
             return None
     
     def extract_dataset_info(self, metadata_path):
@@ -299,16 +340,28 @@ class DataGovArchiveProcessor:
             # Get the version from the path (e.g., "v1")
             path_parts = str(metadata_path).split('/')
             if len(path_parts) >= 2:
-                version = path_parts[-1].split('.')[0]  # Extract "v1" from "v1.json"
+                # Try to extract the version from filename (e.g., "v1.json")
+                filename = path_parts[-1]
+                if '_' in filename:
+                    # If we're using flattened paths, extract from original path
+                    # Format is hash_filename, e.g. "abc123_v1.json"
+                    filename = filename.split('_', 1)[1]
+                version = filename.split('.')[0]  # Extract "v1" from "v1.json"
             else:
                 version = "unknown"
                 
             # Extract actual dataset path from metadata_path
-            # If metadata_path is a local file path, we need to extract just the dataset part
+            # If metadata_path is a local file path with our flat structure, extract from filename
             if isinstance(metadata_path, Path) or str(metadata_path).startswith('/'):
                 local_path = str(metadata_path)
-                # Find the dataset name and version in the path
-                dataset_path = f"{dataset_name}/{version}"
+                # Check if this is our flattened path with hash prefix
+                if "metadata_flat" in local_path and '_' in os.path.basename(local_path):
+                    # Example: /tmp/data_gov_archive/metadata_flat/1234abcd_v1.json
+                    # We need to reconstruct the dataset_path as "dataset_name/v1"
+                    dataset_path = f"{dataset_name}/{version}"
+                else:
+                    # Regular path - extract dataset name and version
+                    dataset_path = f"{dataset_name}/{version}"
                 logger.debug(f"Dataset path derived from metadata: {dataset_path}")
             else:
                 # If it's already the S3 path, we can use it more directly
@@ -384,6 +437,9 @@ class DataGovArchiveProcessor:
         try:
             logger.debug(f"Attempting to extract resource {resource_info.get('id')} from archive {zip_path}")
             
+            # Check disk usage and clean up if needed
+            self.check_and_cleanup_disk_space()
+            
             with zipfile.ZipFile(zip_path, 'r') as zf:
                 # Log file contents for debugging
                 file_list = zf.namelist()
@@ -429,27 +485,38 @@ class DataGovArchiveProcessor:
                     return None
                     
                 # Extract the file to a temporary location
-                # Use resource_info["id"] instead of non-existent "resource_id" key
-                extract_path = TEMP_DIR / "extracted" / resource_info["id"]
-                os.makedirs(extract_path.parent, exist_ok=True)
+                # Use resource ID to create a unique, flat directory structure
+                extract_dir = TEMP_DIR / "extracted"
+                resource_id = resource_info["id"]
+                # Create a flattened path to avoid deep directory structures
+                extract_path = extract_dir / resource_id
+                os.makedirs(extract_dir, exist_ok=True)
                 
-                zf.extract(file_path, extract_path.parent)
-                extracted_file = extract_path.parent / file_path
+                # Extract to a temporary file with resource ID and simple filename
+                simple_filename = os.path.basename(file_path)
+                temp_extract_path = extract_dir / f"{resource_id}_{simple_filename}"
+                
+                # Extract the file data directly
+                with zf.open(file_path) as source_file:
+                    with open(temp_extract_path, 'wb') as target_file:
+                        target_file.write(source_file.read())
                 
                 # Calculate SHA-256 hash of the content
                 sha256 = hashlib.sha256()
-                with open(extracted_file, 'rb') as f:
+                with open(temp_extract_path, 'rb') as f:
                     for chunk in iter(lambda: f.read(4096), b''):
                         sha256.update(chunk)
                 
                 return {
-                    "path": str(extracted_file),
-                    "size": os.path.getsize(extracted_file),
+                    "path": str(temp_extract_path),
+                    "size": os.path.getsize(temp_extract_path),
                     "hash": sha256.hexdigest()
                 }
                 
-        except (zipfile.BadZipFile, KeyError, FileNotFoundError) as e:
+        except (zipfile.BadZipFile, KeyError, FileNotFoundError, OSError) as e:
             logger.error(f"Error extracting resource from archive: {e}")
+            # Try to clean up disk space on extraction errors
+            self.check_and_cleanup_disk_space(force=True)
             return None
     
     @transaction.atomic
@@ -755,6 +822,29 @@ class DataGovArchiveProcessor:
                 continue
                 
             try:
+                # Handle datetime fields with timezone awareness
+                created_date = resource_info.get("created")
+                if created_date and isinstance(created_date, str):
+                    try:
+                        # Parse datetime and ensure it's timezone-aware
+                        created_date = django.utils.timezone.make_aware(
+                            datetime.datetime.fromisoformat(created_date.replace('Z', '+00:00')),
+                            timezone=django.utils.timezone.get_current_timezone()
+                        )
+                    except (ValueError, TypeError):
+                        created_date = None
+                
+                last_modified = resource_info.get("last_modified")
+                if last_modified and isinstance(last_modified, str):
+                    try:
+                        # Parse datetime and ensure it's timezone-aware
+                        last_modified = django.utils.timezone.make_aware(
+                            datetime.datetime.fromisoformat(last_modified.replace('Z', '+00:00')),
+                            timezone=django.utils.timezone.get_current_timezone()
+                        )
+                    except (ValueError, TypeError):
+                        last_modified = None
+                
                 # Try to find existing resource
                 resource, created = DatasetResource.objects.get_or_create(
                     resource_id=resource_id,
@@ -765,8 +855,8 @@ class DataGovArchiveProcessor:
                         "format": resource_info.get("format"),
                         "url": resource_info.get("url"),
                         "size": resource_info.get("size"),
-                        "created": resource_info.get("created"),
-                        "last_modified": resource_info.get("last_modified"),
+                        "created": created_date,
+                        "last_modified": last_modified,
                         "mimetype": resource_info.get("mimetype"),
                         "mimetype_inner": resource_info.get("mimetype_inner"),
                         "position": resource_info.get("position"),
@@ -782,8 +872,8 @@ class DataGovArchiveProcessor:
                     resource.format = resource_info.get("format")
                     resource.url = resource_info.get("url")
                     resource.size = resource_info.get("size")
-                    resource.created = resource_info.get("created")
-                    resource.last_modified = resource_info.get("last_modified")
+                    resource.created = created_date
+                    resource.last_modified = last_modified
                     resource.mimetype = resource_info.get("mimetype")
                     resource.mimetype_inner = resource_info.get("mimetype_inner")
                     resource.position = resource_info.get("position")
@@ -957,7 +1047,7 @@ class DataGovArchiveProcessor:
             # Clean up temporary files for this dataset
             if self.cleanup:
                 logger.info(f"Cleaning up temporary files for dataset {dataset_info['dataset_name']}...")
-                self.cleanup_temp_files(dataset_info['dataset_name'], dataset_info['version'])
+                self.cleanup_temp_files(dataset_name=dataset_info["dataset_name"], version=dataset_info["version"])
             
             logger.info(f"Processed dataset {dataset_info['dataset_name']} ({dataset_info['version']}): "
                         f"{len(resources)} resources, {sum(1 for r in resources if r.is_available)} available")
@@ -1023,20 +1113,47 @@ class DataGovArchiveProcessor:
                 # Get the list of metadata files
                 metadata_files = self.list_s3_metadata()
                 
+                # Store original length before slicing
+                original_count = len(metadata_files)
+                
+                # Apply start index if specified
+                if self.start_index > 0:
+                    if self.start_index < len(metadata_files):
+                        logger.info(f"Starting from file index {self.start_index}")
+                        metadata_files = metadata_files[self.start_index:]
+                    else:
+                        logger.warning(f"Start index {self.start_index} exceeds the number of files {len(metadata_files)}")
+                
                 # Apply limit if specified
                 if self.limit:
                     metadata_files = metadata_files[:self.limit]
                     
-                # Process each metadata file
-                for i, metadata_file in enumerate(metadata_files):
-                    logger.info(f"Processing file {i+1}/{len(metadata_files)}: {metadata_file}")
-                    local_path = self.download_metadata_file(metadata_file)
+                # Process metadata files in parallel
+                with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+                    # Submit all tasks to the executor
+                    future_to_file = {
+                        executor.submit(self.process_metadata_file, i + self.start_index, metadata_file, original_count): metadata_file
+                        for i, metadata_file in enumerate(metadata_files)
+                    }
                     
-                    if local_path:
-                        dataset_info = self.extract_dataset_info(local_path)
-                        if dataset_info:
-                            processed_dataset_names.add(dataset_info["dataset_name"])
-                        self.process_dataset(local_path)
+                    # Process completed tasks as they finish
+                    completed_count = 0
+                    for future in as_completed(future_to_file):
+                        metadata_file = future_to_file[future]
+                        try:
+                            dataset_name, processed = future.result()
+                            if dataset_name:
+                                processed_dataset_names.add(dataset_name)
+                            
+                            # Periodically clean up memory
+                            completed_count += 1
+                            if completed_count % 100 == 0:
+                                logger.info(f"Completed {completed_count} files, cleaning up memory...")
+                                self.cleanup_memory()
+                                self.check_and_cleanup_disk_space(force=True)
+                        except Exception as e:
+                            logger.error(f"Error processing {metadata_file}: {e}")
+                            self.stats["errors"] += 1
             
             # If not processing a single path, check for missing datasets
             # Skip this check if using a limit to avoid false positives
@@ -1058,11 +1175,44 @@ class DataGovArchiveProcessor:
                 logger.info("Cleaning up temporary files...")
                 self.cleanup_temp_files()
     
-    def cleanup_temp_files(self, dataset_name=None, version=None):
+    def check_and_cleanup_disk_space(self, force=False):
+        """Check disk space usage and clean up if necessary"""
+        try:
+            # Get temp directory size
+            total_size = 0
+            for dirpath, dirnames, filenames in os.walk(TEMP_DIR):
+                for filename in filenames:
+                    file_path = os.path.join(dirpath, filename)
+                    if os.path.exists(file_path):  # Check if file still exists
+                        try:
+                            total_size += os.path.getsize(file_path)
+                        except (FileNotFoundError, OSError):
+                            # File might have been deleted by another process
+                            pass
+            
+            # Convert to MB
+            total_size_mb = total_size / (1024 * 1024)
+            
+            # Clean up if over threshold or forced
+            if force or total_size_mb > MAX_TEMP_STORAGE_MB:
+                logger.info(f"Temp directory size: {total_size_mb:.2f}MB, cleaning up...")
+                self.cleanup_temp_files(age_threshold=300 if force else MAX_TEMP_FILE_AGE)  # 5 minutes if forced
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Error checking disk space: {e}")
+            return False
+
+    def cleanup_temp_files(self, dataset_name=None, version=None, age_threshold=MAX_TEMP_FILE_AGE):
         """Remove temporary files
         
         If dataset_name and version are provided, only clean up files for that dataset.
-        Otherwise, clean up all files that are older than the cutoff time.
+        Otherwise, clean up all files that are older than the age threshold.
+        
+        Args:
+            dataset_name: Name of dataset to clean up
+            version: Version of dataset to clean up
+            age_threshold: Age threshold in seconds (default: MAX_TEMP_FILE_AGE)
         """
         try:
             if dataset_name and version:
@@ -1082,50 +1232,86 @@ class DataGovArchiveProcessor:
                     os.remove(collection_path)
                 
                 # Clean up extracted files for this dataset
-                extract_dir = TEMP_DIR / "extracted"
-                if os.path.exists(extract_dir):
-                    for root, dirs, files in os.walk(extract_dir, topdown=False):
-                        for file in files:
-                            # If file path contains dataset name, remove it
-                            file_path = os.path.join(root, file)
-                            if dataset_name in file_path:
-                                logger.debug(f"Removing extracted file: {file_path}")
-                                os.remove(file_path)
-                    
-                    # Try to remove empty directories
-                    for root, dirs, files in os.walk(extract_dir, topdown=False):
-                        for dir_name in dirs:
-                            dir_path = os.path.join(root, dir_name)
+                extracted_dir = TEMP_DIR / "extracted"
+                if os.path.exists(extracted_dir):
+                    for item in os.listdir(extracted_dir):
+                        item_path = os.path.join(extracted_dir, item)
+                        # If item contains dataset name, remove it
+                        if dataset_name in item:
                             try:
-                                if not os.listdir(dir_path):
-                                    logger.debug(f"Removing empty directory: {dir_path}")
-                                    os.rmdir(dir_path)
-                            except Exception as dir_e:
-                                logger.debug(f"Error removing directory {dir_path}: {dir_e}")
+                                if os.path.isfile(item_path):
+                                    logger.debug(f"Removing extracted file: {item_path}")
+                                    os.remove(item_path)
+                                elif os.path.isdir(item_path):
+                                    logger.debug(f"Removing extracted directory: {item_path}")
+                                    shutil.rmtree(item_path, ignore_errors=True)
+                            except Exception as e:
+                                logger.debug(f"Error removing {item_path}: {e}")
             else:
                 # Clean up all old files
-                # Only delete files older than 1 hour
-                logger.debug("Cleaning up all files older than 1 hour")
-                cutoff_time = time.time() - 3600
+                cutoff_time = time.time() - age_threshold
+                logger.debug(f"Cleaning up all files older than {age_threshold} seconds")
                 
+                # Use a safer approach by processing directories one by one
                 for root, dirs, files in os.walk(TEMP_DIR, topdown=False):
+                    # Remove old files
                     for file in files:
-                        file_path = os.path.join(root, file)
-                        if os.path.getmtime(file_path) < cutoff_time:
-                            logger.debug(f"Removing old file: {file_path}")
-                            os.remove(file_path)
+                        try:
+                            file_path = os.path.join(root, file)
+                            if os.path.exists(file_path) and os.path.getmtime(file_path) < cutoff_time:
+                                logger.debug(f"Removing old file: {file_path}")
+                                os.remove(file_path)
+                        except (FileNotFoundError, PermissionError, OSError) as e:
+                            logger.debug(f"Error removing file {file_path}: {e}")
                     
                     # Try to remove empty directories
                     for dir_name in dirs:
-                        dir_path = os.path.join(root, dir_name)
                         try:
-                            if not os.listdir(dir_path):
+                            dir_path = os.path.join(root, dir_name)
+                            if os.path.exists(dir_path) and not os.listdir(dir_path):
                                 logger.debug(f"Removing empty directory: {dir_path}")
                                 os.rmdir(dir_path)
-                        except Exception as dir_e:
-                            logger.debug(f"Error removing directory {dir_path}: {dir_e}")
+                        except (FileNotFoundError, PermissionError, OSError) as e:
+                            logger.debug(f"Error removing directory {dir_path}: {e}")
+                
+                # Special handling for the extracted directory - be more aggressive
+                extracted_dir = TEMP_DIR / "extracted"
+                if os.path.exists(extracted_dir):
+                    for item in os.listdir(extracted_dir):
+                        try:
+                            item_path = os.path.join(extracted_dir, item)
+                            if os.path.isfile(item_path) and os.path.getmtime(item_path) < cutoff_time:
+                                logger.debug(f"Removing old extracted file: {item_path}")
+                                os.remove(item_path)
+                            elif os.path.isdir(item_path):
+                                # For directories, check if all contents are old
+                                should_remove = True
+                                for subitem in os.listdir(item_path):
+                                    subitem_path = os.path.join(item_path, subitem)
+                                    if os.path.getmtime(subitem_path) >= cutoff_time:
+                                        should_remove = False
+                                        break
+                                
+                                if should_remove:
+                                    logger.debug(f"Removing old extracted directory: {item_path}")
+                                    shutil.rmtree(item_path, ignore_errors=True)
+                        except Exception as e:
+                            logger.debug(f"Error processing extracted item {item_path}: {e}")
+                
+                # Also check for any orphaned temporary files in the system temp directory
+                # that might have our prefix but not be in our main directory
+                system_temp = Path(tempfile.gettempdir())
+                try:
+                    for item in os.listdir(system_temp):
+                        if 'data_gov_archive' in item:
+                            item_path = os.path.join(system_temp, item)
+                            if os.path.isfile(item_path) and os.path.getmtime(item_path) < cutoff_time:
+                                logger.debug(f"Removing orphaned temp file: {item_path}")
+                                os.remove(item_path)
+                except Exception as e:
+                    logger.debug(f"Error cleaning system temp directory: {e}")
         except Exception as e:
-            logger.error(f"Error cleaning up: {e}")
+            logger.error(f"Error in cleanup_temp_files: {e}")
 
     def test_download(self, test_path="fruit-and-vegetable-prices/v1.json"):
         """Test downloading a single metadata file"""
@@ -1151,6 +1337,45 @@ class DataGovArchiveProcessor:
         except Exception as e:
             logger.error(f"Error in test download: {e}")
             return False
+
+    def cleanup_memory(self):
+        """Force garbage collection to free up memory"""
+        try:
+            # Force garbage collection
+            collected = gc.collect()
+            logger.debug(f"Garbage collector: collected {collected} objects")
+            return True
+        except Exception as e:
+            logger.error(f"Error cleaning up memory: {e}")
+            return False
+
+    def process_metadata_file(self, index, metadata_file, total_files):
+        """Process a single metadata file (to be used with ThreadPoolExecutor)"""
+        # Display index+1 to show 1-based numbering for human readability
+        # But keep the absolute index (which includes the start_index)
+        logger.info(f"Processing file {index+1}/{total_files}: {metadata_file}")
+        
+        # Check disk space every 5 files instead of 10
+        if index % 5 == 0:
+            self.check_and_cleanup_disk_space()
+            self.cleanup_memory()
+            
+        local_path = self.download_metadata_file(metadata_file)
+        
+        dataset_name = None
+        processed = False
+        
+        if local_path:
+            dataset_info = self.extract_dataset_info(local_path)
+            if dataset_info:
+                dataset_name = dataset_info["dataset_name"]
+                processed = self.process_dataset(local_path)
+                
+                # Clean up this dataset's files immediately after processing
+                if self.cleanup and dataset_name:
+                    self.cleanup_temp_files(dataset_name=dataset_name, version=dataset_info["version"])
+        
+        return dataset_name, processed
 
 
 class DataGovLinkRotChecker:
@@ -1335,6 +1560,7 @@ def main():
     parser.add_argument("--process-new-only", action="store_true", help="Only process new datasets")
     parser.add_argument("--cleanup", action="store_true", help="Clean up temporary files after processing")
     parser.add_argument("--path", type=str, help="Process a single path instead of listing all files")
+    parser.add_argument("--start-index", type=int, help="Start processing from this file index (0-based)")
     
     # Link rot checker arguments
     parser.add_argument("--check-resources", action="store_true", help="Check resources for link rot")
@@ -1369,7 +1595,8 @@ def main():
             limit=args.limit,
             process_new_only=args.process_new_only,
             cleanup=args.cleanup,
-            single_path=args.path
+            single_path=args.path,
+            start_index=args.start_index if args.start_index is not None else 0
         )
         processor.run()
 

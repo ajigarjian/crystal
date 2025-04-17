@@ -164,7 +164,7 @@ def local_stream_analyze(request_json):
             "data": {"message": error_message}
         }) + "\n"
 
-def run_local_analysis(parallel=False):
+def run_local_analysis(parallel):
     """
     Example of how to use the local_stream_analyze function
     
@@ -175,8 +175,29 @@ def run_local_analysis(parallel=False):
     
     # Example request data
     request_data = {
-        "dataset_ids": ['0d6a490f-84b4-4bea-9c8f-b61b69447bf2', '0c6e9a3c-e265-464a-8eaf-38873f9d496a', 'cf44a5d2-bd13-4f7f-90bd-5a72fdd61e5b', '3c8dc58d-5e8d-4f1e-b049-bd70f8f93cb9', '069446d9-10b3-4e25-8e63-ef8c977c4489', 'a74bb449-a747-4fe3-bb89-22a2c5d832e0', 'a3d65a40-4e51-42b4-95f2-84554e92beb8', 'bde2905d-98e0-40b5-8b29-bc9785f7ea7d', 'd7bff3c7-b71f-4644-8676-8e6b1f3e180f', '440e012f-1b5a-45fe-85c0-b8c5e7542ca0', '577dfef0-bd57-4d86-9271-3fce56fa50a4', 'be5a3038-769f-4c59-bbf1-14feca3578e1', 'aa00ecc1-667d-4407-a42c-880497c425e8', '4705e015-b09e-414d-a17d-2709be6d80b3', '3c4c5afd-0f25-40b1-b20d-efc9760e38b4'],  # Replace with actual dataset ID
-        "query": "Orange Grove emissions factors",
+        "dataset_ids": [
+            "2746fc68-190d-407f-bb86-44c5f42bb6d1",
+            "19bb999c-6208-4692-970a-131326d67be3",
+            "5f961a68-66f9-4e8d-b3ed-b41cc8e1f9be",
+            "7dea0c2b-b84e-48b2-95ad-0867fb14cd89",
+            "41cc4071-57bd-452e-af0d-03174f7ade5c",
+            "d5fa9b77-6b88-49e3-ba96-445254073d6f",
+            "960213c2-effc-4da7-8ccd-375327f6d1e6",
+            "e3f73ef6-ca46-4784-9161-c128109163b1",
+            "28e0f154-e68b-406a-8871-f9ad62df11b2",
+            "01f25998-f9c6-4508-a890-ef53ed596419",
+            "044f8ebb-0c54-4f8d-866c-2eb7071817dc",
+            "be5795c2-0737-4cad-915a-9a2783d78788",
+            "6df5dd5a-f5e5-422a-a069-6d801f3a7208",
+            "62915ff9-ca87-4f85-b9e6-6c1793fc4054",
+            "bb97ac7a-5cee-4fe5-b0f8-598e46f5d735",
+            "5a002f72-8ddb-4bd4-86e2-cdd991b9ad2d",
+            "e61357f3-7d69-4067-8b1d-721beafc57ec",
+            "9f691d06-ca23-43f7-acc6-90ec2db19dc9",
+            "85e95821-1460-4de3-8665-0ade178bb16e",
+            "fd699649-d276-43c8-829a-cb4a892cf776"
+        ],
+        "query": "Tell me about underground storage tanks",
         "parallel": parallel  # Add the parallel flag to the request data
     }
     
@@ -226,18 +247,20 @@ def run_local_analysis(parallel=False):
                 elif msg_type == 'web_search_results':
                     web_search_results = data.get('data')
                     logger.info(f"Received web search results with {len(web_search_results.get('results', []))} items")
-                    logger.debug(f"Web search results: {json.dumps(web_search_results, indent=2)}")
+                    logger.debug(f"Web search results:\\n{json.dumps(web_search_results, indent=2)}")
                     
                 elif msg_type == 'web_search_summary':
                     web_search_summary = data.get('data')
-                    logger.info(f"Web search summary: {web_search_summary.get('summary', 'No summary available')}")
+                    summary_text = web_search_summary.get('summary', 'No summary available')
+                    logger.info(f"Web search summary: {summary_text[:100]}...")
+                    logger.debug(f"Full web search summary:\\n{json.dumps(web_search_summary, indent=2)}")
                     
                 elif msg_type == 'analysis_result':
                     dataset_info = data.get('data', {}).get('dataset_info', {})
                     logger.info(f"Dataset: {dataset_info.get('title')}")
                     logger.info(f"Rows: {dataset_info.get('rows')}, Columns: {dataset_info.get('columns')}")
                     analysis_results.append(data.get('data'))
-                    logger.debug(f"Analysis result: {json.dumps(data.get('data'), indent=2)}")
+                    logger.debug(f"Analysis result:\\n{json.dumps(data.get('data'), indent=2)}")
                     
                 elif msg_type == 'analysis':
                     analysis = data.get('data', 'No analysis available')
@@ -285,19 +308,27 @@ def run_local_analysis(parallel=False):
                         logger.error(f"Error saving findings: {e}")
                         logger.error(traceback.format_exc())
                     
+                elif msg_type == 'dataset_status':
+                    dataset_id = data.get('dataset_id')
+                    status = data.get('status')
+                    progress = data.get('progress')
+                    message = data.get('message', '')
+                    logger.info(f"Dataset Status: ID={dataset_id}, Status={status}, Progress={progress}, Message='{message}'")
+                    logger.debug(f"Full dataset_status message:\\n{json.dumps(data, indent=2)}")
+                    
                 elif msg_type == 'complete':
                     complete_data = data.get('data')
                     logger.info(f"Analysis complete in {data.get('message', '')}")
-                    logger.debug(f"Complete data: {json.dumps(complete_data, indent=2)}")
+                    logger.debug(f"Complete data:\\n{json.dumps(complete_data, indent=2)}")
                     break  # Exit the loop when we receive the complete message
                     
                 else:
                     logger.warning(f"Unknown message type: {msg_type}")
-                    logger.debug(f"Full message: {json.dumps(data, indent=2)}")
+                    logger.debug(f"Full unknown message:\\n{json.dumps(data, indent=2)}")
                     
             except json.JSONDecodeError as e:
-                logger.error(f"Error parsing message: {chunk[:100]}...")
-                logger.error(f"Error details: {str(e)}")
+                logger.error(f"Error parsing non-JSON message chunk: {chunk[:150]}...")
+                logger.error(f"JSONDecodeError details: {str(e)}")
             except Exception as e:
                 logger.error(f"Error processing message: {str(e)}")
                 logger.error(f"Message content: {chunk[:100]}...")
@@ -323,4 +354,4 @@ def run_local_analysis(parallel=False):
 if __name__ == "__main__":
     # Run the local analysis function when script is executed directly
     # You can choose to run in parallel or sequential mode
-    run_local_analysis(parallel=False)  # Set to False for sequential processing 
+    run_local_analysis(parallel=True)  # Set to False for sequential processing 
