@@ -14,6 +14,7 @@ import concurrent.futures
 from threading import Lock
 import pprint
 import pandas as pd
+import queue
 try:
     import pyarrow.parquet as pq
 except ImportError:
@@ -369,419 +370,455 @@ def stream_analyze_helper(dataset_ids, query, file_path=None, parallel=True):
             # Add the best resource directly to the dataset dictionary
             datasets[dataset_id]['best_resource'] = best_resource
 
-        def process_dataset(dataset_id, dataset):
+        def process_dataset(dataset_id, dataset, message_queue, start_time):
             """Helper function to process a single dataset"""
-            # Set initial dataset status to queued
-            yield create_status_message(
-                f'Adding dataset "{dataset["title"]}" to processing queue',
-                start_time,
-                dataset_id=dataset_id,
-                status='queued'
-            )
-            
-            best_resource = dataset['best_resource']
-
-            # Set status to downloading
-            yield create_status_message(
-                f'Downloading files for dataset "{dataset["title"]}"',
-                start_time,
-                dataset_id=dataset_id,
-                status='downloading'
-            )
-
-            file_path = download_resource_helper(dataset_id, best_resource)
-            print(file_path)
-
-            if not file_path:
-                # Handle download failure
-                yield create_status_message(
-                    f'Failed to download dataset files',
-                    start_time,
-                    dataset_id=dataset_id,
-                    status='error'
-                )
-                return
-
-            # Update status to downloaded
-            yield create_status_message(
-                f'Successfully downloaded dataset files',
-                start_time,
-                dataset_id=dataset_id,
-                status='downloaded'
-            )
-
-            # Extract into CSV if the file path contains ".parquet":
-            if ".parquet" in file_path:
-                csv_file_path = parquet_to_csv(file_path)
-                os.remove(file_path)
-                file_path = csv_file_path
-
-            # Create dataset metadata
-            dataset_metadata = {
-                "id": dataset_id,
-                "title": os.path.basename(file_path),
-                "description": "Dataset for analysis"
-            }
-            
-            # Pre-download relevance assessment (new functionality)
-            yield create_status_message(
-                f'Performing initial relevance assessment...',
-                start_time
-            )
-            
-            # Update status to loading
-            yield create_status_message(
-                f'Loading the dataset from {file_path}...',
-                start_time,
-                dataset_id=dataset_id,
-                status='loading'
-            )
-            
             try:
-                dataset_content = load_datafile(file_path)
-                
-                # Report successful loading
-                if hasattr(dataset_content, 'shape'):
-                    yield create_status_message(
-                        f'Successfully loaded dataset with {dataset_content.shape[0]} rows and {dataset_content.shape[1]} columns.',
-                        start_time
-                    )
-                else:
-                    yield create_status_message(
-                        f'Successfully loaded dataset.',
-                        start_time
-                    )
-                    
-            except Exception as e:
-                logger.error(f"Error loading dataset: {str(e)}")
-                # Update status to error
-                yield create_status_message(
-                    f'Error loading dataset: {str(e)}',
+                # Set initial dataset status to queued
+                message_queue.put(create_status_message(
+                    f'Adding dataset "{dataset["title"]}" to processing queue',
                     start_time,
                     dataset_id=dataset_id,
-                    status='error'
-                )
+                    status='queued'
+                ))
                 
-                yield create_error_message(
-                    f'Error loading dataset: {str(e)}',
-                    details=traceback.format_exc(),
-                    start_time=start_time,
-                    dataset_id=dataset_id
-                )
-                return
-            
-            # Update status to assessing
-            yield create_status_message(
-                f'Assessing dataset relevance to your query...',
-                start_time,
-                dataset_id=dataset_id,
-                status='assessing'
-            )
-            
-            try:
-                # Create more detailed dataset info now that we have the data
-                if hasattr(dataset_content, 'shape'):
-                    dataset_info = {
-                        "id": dataset_id,
-                        "title": dataset.get('title', os.path.basename(file_path)),
-                        "description": dataset.get('description', "Dataset for analysis"),
-                        "file_path": file_path,
-                        "row_count": dataset_content.shape[0],
-                        "column_count": dataset_content.shape[1],
-                        "columns": list(dataset_content.columns)
-                    }
-                else:
-                    # Handle non-DataFrame content (like PDFs)
-                    dataset_info = {
-                        "id": dataset_id,
-                        "title": os.path.basename(file_path),
-                        "description": "Dataset for analysis",
-                        "file_path": file_path,
-                        "document_type": "pdf" if isinstance(dataset_content, dict) and dataset_content.get('type') == 'pdf' else "unknown"
-                    }
-                
-                # Assess relevance with the actual data
-                is_relevant, relevance_score, reasoning = assess_datafile_relevance(
-                    dataset_content, 
-                    query, 
-                    dataset_info,
-                    relevance_threshold=0.4
-                )
-                
-                # After assessment, update status based on relevance
-                relevance_status = 'relevant' if is_relevant else 'not_relevant'
-                yield create_status_message(
-                    f'Dataset assessed as {relevance_status} (Score: {relevance_score:.2f})',
+                best_resource = dataset['best_resource']
+
+                # Set status to downloading
+                message_queue.put(create_status_message(
+                    f'Downloading files for dataset "{dataset["title"]}"',
                     start_time,
                     dataset_id=dataset_id,
-                    status=relevance_status
-                )
-                
-                if is_relevant:
-                    yield create_status_message(
-                        f'Dataset is relevant to your query (Score: {relevance_score:.2f})',
-                        start_time
-                    )
-                    yield create_status_message(
-                        f'Reasoning: {reasoning}',
-                        start_time
-                    )
-                else:
-                    yield create_status_message(
-                        f'Dataset may not be highly relevant to your query (Score: {relevance_score:.2f})',
-                        start_time
-                    )
-                    yield create_status_message(
-                        f'Reasoning: {reasoning}',
-                        start_time
-                    )
-                
-            except Exception as e:
-                logger.warning(f"Error in relevance assessment: {str(e)}")
-                # Update status to error for assessment
-                yield create_status_message(
-                    f'Error assessing relevance: {str(e)}',
-                    start_time,
-                    dataset_id=dataset_id,
-                    status='error'
-                )
-                
-                # Continue with analysis even if relevance assessment fails
-                is_relevant = True  # Assume relevant if assessment fails
-            
-            # Extract relevant data if the dataset is deemed relevant
-            extracted_data = None
-            if is_relevant:
-                # Update status to extracting
-                yield create_status_message(
-                    f'Extracting relevant data from the dataset...',
-                    start_time,
-                    dataset_id=dataset_id,
-                    status='extracting'
-                )
-                
-                try:
-                    # Extract the relevant data
-                    relevant_data = extract_relevant_data(
-                        dataset_content, 
-                        query, 
-                        dataset_info
-                    )
-                    
-                    # Execute the relevant data extraction
-                    extracted_data = execute_relevant_data(relevant_data)
-                    
-                    # Debug print extracted_data
-                    # print("extracted_data", extracted_data)
-                    
-                    # Get dataset object with DB metadata
-                    dataset_obj = datasets.get(dataset_id, {})
-                    
-                    # Update extracted_data with the dataset info
-                    extracted_data["dataset_title"] = dataset_obj.get('title', os.path.basename(file_path))
-                    extracted_data["dataset_source"] = dataset_obj.get("organization", "Unknown Source")
-                    extracted_data["organization_title"] = dataset_obj.get("organization", "")
-                    extracted_data["organization_name"] = dataset_obj.get("organization_name", "")
-                    
-                    # Update extracted_data with dataset identity info before formatting
-                    extracted_data["dataset_id"] = dataset_id
-                    extracted_data["dataset_title"] = dataset.get('title', os.path.basename(file_path))
-                    extracted_data["organization"] = dataset.get('organization', "")
-                    extracted_data["organization_title"] = dataset.get('organization', "")
-                    extracted_data["organization_name"] = dataset.get('organization_name', "")
-                    
-                    # Send extracted data as part of the stream
-                    yield json.dumps({
-                        'type': 'extracted_data',
-                        'data': extracted_data,
-                        'timestamp': time.time() - start_time
-                    }, cls=NumpyEncoder) + '\n'
-                    
-                    # After successful extraction
-                    yield create_status_message(
-                        f'Successfully extracted relevant data',
-                        start_time,
-                        dataset_id=dataset_id,
-                        status='extracted'
-                    )
-                    
-                except Exception as e:
-                    logger.error(f"Error extracting relevant data: {str(e)}")
-                    # Update status for extraction error
-                    yield create_status_message(
-                        f'Error extracting data: {str(e)}',
+                    status='downloading'
+                ))
+
+                file_path = download_resource_helper(dataset_id, best_resource)
+                print(file_path)
+
+                if not file_path:
+                    # Handle download failure
+                    message_queue.put(create_status_message(
+                        f'Failed to download dataset files',
                         start_time,
                         dataset_id=dataset_id,
                         status='error'
-                    )
+                    ))
+                    return
+
+                # Update status to downloaded
+                message_queue.put(create_status_message(
+                    f'Successfully downloaded dataset files',
+                    start_time,
+                    dataset_id=dataset_id,
+                    status='downloaded'
+                ))
+
+                # Extract into CSV if the file path contains ".parquet":
+                if ".parquet" in file_path:
+                    csv_file_path = parquet_to_csv(file_path)
+                    os.remove(file_path)
+                    file_path = csv_file_path
+
+                # Create dataset metadata
+                dataset_metadata = {
+                    "id": dataset_id,
+                    "title": os.path.basename(file_path),
+                    "description": "Dataset for analysis"
+                }
+                
+                # Pre-download relevance assessment (new functionality)
+                message_queue.put(create_status_message(
+                    f'Performing initial relevance assessment...',
+                    start_time
+                ))
+                
+                # Update status to loading
+                message_queue.put(create_status_message(
+                    f'Loading the dataset from {file_path}...',
+                    start_time,
+                    dataset_id=dataset_id,
+                    status='loading'
+                ))
+                
+                try:
+                    dataset_content = load_datafile(file_path)
                     
-                    yield create_error_message(
-                        f'Error extracting data: {str(e)}',
+                    # Report successful loading
+                    if hasattr(dataset_content, 'shape'):
+                        message_queue.put(create_status_message(
+                            f'Successfully loaded dataset with {dataset_content.shape[0]} rows and {dataset_content.shape[1]} columns.',
+                            start_time
+                        ))
+                    else:
+                        message_queue.put(create_status_message(
+                            f'Successfully loaded dataset.',
+                            start_time
+                        ))
+                        
+                except Exception as e:
+                    logger.error(f"Error loading dataset: {str(e)}")
+                    # Update status to error
+                    message_queue.put(create_status_message(
+                        f'Error loading dataset: {str(e)}',
+                        start_time,
+                        dataset_id=dataset_id,
+                        status='error'
+                    ))
+                    
+                    message_queue.put(create_error_message(
+                        f'Error loading dataset: {str(e)}',
                         details=traceback.format_exc(),
                         start_time=start_time,
                         dataset_id=dataset_id
-                    )
-                    # Continue with analysis even if extraction fails
-            
-            # Update status to analyzing
-            yield create_status_message(
-                f'Analyzing the dataset content...',
-                start_time,
-                dataset_id=dataset_id,
-                status='analyzing'
-            )
-            
-            try:
-                # This will perform the analysis and return a dictionary with the results
-                analysis_result = analyze_dataset_overview(
-                    dataset_content,
-                    query,
-                    dataset_info,
-                    extracted_data=extracted_data  # Pass extracted data to enhance analysis
-                )
+                    ))
+                    return
                 
-                # Add to the list of dataset analyses
-                all_dataset_analyses.append({
-                    'dataset_id': dataset_id,
-                    'dataset_title': dataset_info["title"],
-                    'row_count': analysis_result.get('row_count', 0),
-                    'column_count': analysis_result.get('column_count', 0),
-                    'analysis': analysis_result.get('analysis', 'No analysis available'),
-                    'geographic_scope': analysis_result.get('geographic_scope', 'Unknown'),
-                    'temporal_scope': analysis_result.get('temporal_scope', 'Unknown'),
-                    'categorical_summaries': analysis_result.get('categorical_summaries', [])
-                })
+                # Update status to assessing
+                message_queue.put(create_status_message(
+                    f'Assessing dataset relevance to your query...',
+                    start_time,
+                    dataset_id=dataset_id,
+                    status='assessing'
+                ))
                 
-                # Format the extracted data using the new helper function
-                if extracted_data:
-                    yield create_status_message(
-                        f'Formatting extracted data for better readability...',
-                        start_time
-                    )
-                    
-                    formatted_data = format_extracted_data(
-                        extracted_data,
-                        analysis_result,
-                        query
-                    )
-                    
-                    # Log what we're getting back
-                    logger.info(f"Formatted data organization info: " + 
-                               f"source={formatted_data.get('formatted_data', {}).get('dataset_source')}")
-                    
-                    # Add to the list of formatted data with dataset identity preserved
-                    if isinstance(formatted_data, dict) and 'formatted_data' in formatted_data:
-                        # Create a copy of the formatted data with dataset identity fields
-                        formatted_entry = formatted_data['formatted_data'].copy() if isinstance(formatted_data['formatted_data'], dict) else {'data': formatted_data['formatted_data']}
-                        
-                        # Add dataset identity fields to the entry
-                        formatted_entry['dataset_id'] = dataset_id
-                        formatted_entry['dataset_title'] = dataset.get('title', os.path.basename(file_path))
-                        # Preserve organization information
-                        formatted_entry['organization'] = dataset.get('organization', '')
-                        formatted_entry['organization_title'] = dataset.get('organization', '')
-                        formatted_entry['organization_name'] = dataset.get('organization_name', '')
-                        
-                        # Log what we're adding to all_formatted_data
-                        logger.info(f"Adding formatted data with organization info: " + 
-                                  f"id={dataset_id}, " +
-                                  f"title={formatted_entry['dataset_title']}, " +
-                                  f"org={formatted_entry['organization']}")
-                        
-                        all_formatted_data.append(formatted_entry)
-                    
-                    # Send formatted data as part of the stream
-                    yield json.dumps({
-                        'type': 'formatted_data',
-                        'data': formatted_data,
-                        'timestamp': time.time() - start_time
-                    }, cls=NumpyEncoder) + '\n'
-                
-                # Stream each part of the analysis
-                yield json.dumps({
-                    'type': 'analysis_result',
-                    'data': {
-                        'dataset_info': {
-                            'id': dataset_id,
-                            'title': dataset_metadata.get('title', ''),
-                            'rows': analysis_result.get('row_count', 0),
-                            'columns': analysis_result.get('column_count', 0),
-                            'relevance_score': relevance_score if 'relevance_score' in locals() else None,
-                            'relevance_reasoning': reasoning if 'reasoning' in locals() else None
+                try:
+                    # Create more detailed dataset info now that we have the data
+                    if hasattr(dataset_content, 'shape'):
+                        dataset_info = {
+                            "id": dataset_id,
+                            "title": dataset.get('title', os.path.basename(file_path)),
+                            "description": dataset.get('description', "Dataset for analysis"),
+                            "file_path": file_path,
+                            "row_count": dataset_content.shape[0],
+                            "column_count": dataset_content.shape[1],
+                            "columns": list(dataset_content.columns)
                         }
-                    },
-                    'timestamp': time.time() - start_time
-                }, cls=NumpyEncoder) + '\n'
+                    else:
+                        # Handle non-DataFrame content (like PDFs)
+                        dataset_info = {
+                            "id": dataset_id,
+                            "title": os.path.basename(file_path),
+                            "description": "Dataset for analysis",
+                            "file_path": file_path,
+                            "document_type": "pdf" if isinstance(dataset_content, dict) and dataset_content.get('type') == 'pdf' else "unknown"
+                        }
+                    
+                    # Assess relevance with the actual data
+                    is_relevant, relevance_score, reasoning = assess_datafile_relevance(
+                        dataset_content, 
+                        query, 
+                        dataset_info,
+                        relevance_threshold=0.4
+                    )
+                    
+                    # After assessment, update status based on relevance
+                    relevance_status = 'relevant' if is_relevant else 'not_relevant'
+                    message_queue.put(create_status_message(
+                        f'Dataset assessed as {relevance_status} (Score: {relevance_score:.2f})',
+                        start_time,
+                        dataset_id=dataset_id,
+                        status=relevance_status
+                    ))
+                    
+                    if is_relevant:
+                        message_queue.put(create_status_message(
+                            f'Dataset is relevant to your query (Score: {relevance_score:.2f})',
+                            start_time
+                        ))
+                        message_queue.put(create_status_message(
+                            f'Reasoning: {reasoning}',
+                            start_time
+                        ))
+                    else:
+                        message_queue.put(create_status_message(
+                            f'Dataset may not be highly relevant to your query (Score: {relevance_score:.2f})',
+                            start_time
+                        ))
+                        message_queue.put(create_status_message(
+                            f'Reasoning: {reasoning}',
+                            start_time
+                        ))
+                    
+                except Exception as e:
+                    logger.warning(f"Error in relevance assessment: {str(e)}")
+                    # Update status to error for assessment
+                    message_queue.put(create_status_message(
+                        f'Error assessing relevance: {str(e)}',
+                        start_time,
+                        dataset_id=dataset_id,
+                        status='error'
+                    ))
+                    
+                    # Continue with analysis even if relevance assessment fails
+                    is_relevant = True  # Assume relevant if assessment fails
                 
-                # Send the full analysis
-                yield json.dumps({
-                    'type': 'analysis',
-                    'data': analysis_result.get('analysis', 'No analysis available'),
-                    'timestamp': time.time() - start_time
-                }, cls=NumpyEncoder) + '\n'
+                # Extract relevant data if the dataset is deemed relevant
+                extracted_data = None
+                if is_relevant:
+                    # Update status to extracting
+                    message_queue.put(create_status_message(
+                        f'Extracting relevant data from the dataset...',
+                        start_time,
+                        dataset_id=dataset_id,
+                        status='extracting'
+                    ))
+                    
+                    try:
+                        # Extract the relevant data
+                        relevant_data = extract_relevant_data(
+                            dataset_content, 
+                            query, 
+                            dataset_info
+                        )
+                        
+                        # Execute the relevant data extraction
+                        extracted_data = execute_relevant_data(relevant_data)
+                        
+                        # Update extracted_data with the dataset info - use the passed dataset param, not outer datasets
+                        extracted_data["dataset_title"] = dataset.get('title', os.path.basename(file_path))
+                        extracted_data["dataset_source"] = dataset.get("organization", "Unknown Source")
+                        extracted_data["organization_title"] = dataset.get("organization", "")
+                        extracted_data["organization_name"] = dataset.get("organization_name", "")
+                        
+                        # Update extracted_data with dataset identity info before formatting
+                        extracted_data["dataset_id"] = dataset_id
+                        extracted_data["dataset_title"] = dataset.get('title', os.path.basename(file_path))
+                        extracted_data["organization"] = dataset.get('organization', "")
+                        extracted_data["organization_title"] = dataset.get('organization', "")
+                        extracted_data["organization_name"] = dataset.get('organization_name', "")
+                        
+                        # Send extracted data as part of the stream
+                        message_queue.put(json.dumps({
+                            'type': 'extracted_data',
+                            'data': extracted_data,
+                            'timestamp': time.time() - start_time
+                        }, cls=NumpyEncoder) + '\n')
+                        
+                        # After successful extraction
+                        message_queue.put(create_status_message(
+                            f'Successfully extracted relevant data',
+                            start_time,
+                            dataset_id=dataset_id,
+                            status='extracted'
+                        ))
+                        
+                    except Exception as e:
+                        logger.error(f"Error extracting relevant data: {str(e)}")
+                        # Update status for extraction error
+                        message_queue.put(create_status_message(
+                            f'Error extracting data: {str(e)}',
+                            start_time,
+                            dataset_id=dataset_id,
+                            status='error'
+                        ))
+                        
+                        message_queue.put(create_error_message(
+                            f'Error extracting data: {str(e)}',
+                            details=traceback.format_exc(),
+                            start_time=start_time,
+                            dataset_id=dataset_id
+                        ))
+                        # Continue with analysis even if extraction fails
                 
-                # After successful analysis, update status to complete
-                yield create_status_message(
-                    f'Dataset analysis complete',
+                # Update status to analyzing
+                message_queue.put(create_status_message(
+                    f'Analyzing the dataset content...',
                     start_time,
                     dataset_id=dataset_id,
-                    status='complete'
-                )
+                    status='analyzing'
+                ))
                 
-            except Exception as e:
-                logger.error(f"Error analyzing dataset: {str(e)}")
-                # Update status for analysis error
-                yield create_status_message(
-                    f'Error analyzing dataset: {str(e)}',
-                    start_time,
-                    dataset_id=dataset_id,
-                    status='error'
-                )
-                
-                yield create_error_message(
-                    f'Error analyzing dataset: {str(e)}',
-                    details=traceback.format_exc(),
-                    start_time=start_time,
-                    dataset_id=dataset_id
-                )
-                return
+                try:
+                    # This will perform the analysis and return a dictionary with the results
+                    analysis_result = analyze_dataset_overview(
+                        dataset_content,
+                        query,
+                        dataset_info,
+                        extracted_data=extracted_data  # Pass extracted data to enhance analysis
+                    )
+                    
+                    # Add to the list of dataset analyses via special message type
+                    dataset_analysis = {
+                        'dataset_id': dataset_id,
+                        'dataset_title': dataset_info["title"],
+                        'row_count': analysis_result.get('row_count', 0),
+                        'column_count': analysis_result.get('column_count', 0),
+                        'analysis': analysis_result.get('analysis', 'No analysis available'),
+                        'geographic_scope': analysis_result.get('geographic_scope', 'Unknown'),
+                        'temporal_scope': analysis_result.get('temporal_scope', 'Unknown'),
+                        'categorical_summaries': analysis_result.get('categorical_summaries', [])
+                    }
+                    
+                    # Put dataset analysis into queue with special type for collection in main thread
+                    message_queue.put(json.dumps({
+                        'type': 'dataset_analysis_result_internal',
+                        'data': dataset_analysis,
+                        'timestamp': time.time() - start_time
+                    }, cls=NumpyEncoder) + '\n')
+                    
+                    # Format the extracted data using the new helper function
+                    if extracted_data:
+                        message_queue.put(create_status_message(
+                            f'Formatting extracted data for better readability...',
+                            start_time
+                        ))
+                        
+                        formatted_data = format_extracted_data(
+                            extracted_data,
+                            analysis_result,
+                            query
+                        )
+                        
+                        # Log what we're getting back
+                        logger.info(f"Formatted data organization info: " + 
+                                   f"source={formatted_data.get('formatted_data', {}).get('dataset_source')}")
+                        
+                        # Add to the list of formatted data with dataset identity preserved via special message type
+                        if isinstance(formatted_data, dict) and 'formatted_data' in formatted_data:
+                            # Create a copy of the formatted data with dataset identity fields
+                            formatted_entry = formatted_data['formatted_data'].copy() if isinstance(formatted_data['formatted_data'], dict) else {'data': formatted_data['formatted_data']}
+                            
+                            # Add dataset identity fields to the entry
+                            formatted_entry['dataset_id'] = dataset_id
+                            formatted_entry['dataset_title'] = dataset.get('title', os.path.basename(file_path))
+                            # Preserve organization information
+                            formatted_entry['organization'] = dataset.get('organization', '')
+                            formatted_entry['organization_title'] = dataset.get('organization', '')
+                            formatted_entry['organization_name'] = dataset.get('organization_name', '')
+                            
+                            # Log what we're adding to all_formatted_data
+                            logger.info(f"Adding formatted data with organization info: " + 
+                                      f"id={dataset_id}, " +
+                                      f"title={formatted_entry['dataset_title']}, " +
+                                      f"org={formatted_entry['organization']}")
+                            
+                            # Put formatted entry into queue with special type for collection in main thread
+                            message_queue.put(json.dumps({
+                                'type': 'formatted_data_internal',
+                                'data': formatted_entry,
+                                'timestamp': time.time() - start_time
+                            }, cls=NumpyEncoder) + '\n')
+                        
+                        # Send formatted data as part of the stream
+                        message_queue.put(json.dumps({
+                            'type': 'formatted_data',
+                            'data': formatted_data,
+                            'timestamp': time.time() - start_time
+                        }, cls=NumpyEncoder) + '\n')
+                    
+                    # Stream each part of the analysis
+                    message_queue.put(json.dumps({
+                        'type': 'analysis_result',
+                        'data': {
+                            'dataset_info': {
+                                'id': dataset_id,
+                                'title': dataset_metadata.get('title', ''),
+                                'rows': analysis_result.get('row_count', 0),
+                                'columns': analysis_result.get('column_count', 0),
+                                'relevance_score': relevance_score if 'relevance_score' in locals() else None,
+                                'relevance_reasoning': reasoning if 'reasoning' in locals() else None
+                            }
+                        },
+                        'timestamp': time.time() - start_time
+                    }, cls=NumpyEncoder) + '\n')
+                    
+                    # Send the full analysis
+                    message_queue.put(json.dumps({
+                        'type': 'analysis',
+                        'data': analysis_result.get('analysis', 'No analysis available'),
+                        'timestamp': time.time() - start_time
+                    }, cls=NumpyEncoder) + '\n')
+                    
+                    # After successful analysis, update status to complete
+                    message_queue.put(create_status_message(
+                        f'Dataset analysis complete',
+                        start_time,
+                        dataset_id=dataset_id,
+                        status='complete'
+                    ))
+                    
+                except Exception as e:
+                    logger.error(f"Error analyzing dataset: {str(e)}")
+                    # Update status for analysis error
+                    message_queue.put(create_status_message(
+                        f'Error analyzing dataset: {str(e)}',
+                        start_time,
+                        dataset_id=dataset_id,
+                        status='error'
+                    ))
+                    
+                    message_queue.put(create_error_message(
+                        f'Error analyzing dataset: {str(e)}',
+                        details=traceback.format_exc(),
+                        start_time=start_time,
+                        dataset_id=dataset_id
+                    ))
+            finally:
+                # Always put sentinel value to indicate task completion, even on error
+                message_queue.put(None)
 
         # Process datasets either in parallel or sequentially based on the parallel flag
+        message_queue = queue.Queue()
+        
         if parallel:
             print("Processing datasets in Parallel...")
             # Process datasets in parallel
             with concurrent.futures.ThreadPoolExecutor(max_workers=len(datasets)) as executor:
                 # Submit all tasks
-                future_to_dataset = {
-                    executor.submit(process_dataset, dataset_id, dataset): dataset_id 
-                    for dataset_id, dataset in datasets.items()
-                }
+                num_tasks = 0
+                for dataset_id, dataset in datasets.items():
+                    executor.submit(process_dataset, dataset_id, dataset, message_queue, start_time)
+                    num_tasks += 1
                 
-                # Process results as they complete
-                for future in concurrent.futures.as_completed(future_to_dataset):
-                    dataset_id = future_to_dataset[future]
-                    try:
-                        # Get the generator from the future
-                        generator = future.result()
-                        # Yield all messages from the generator
-                        for message in generator:
+                # Process messages from the queue as they arrive
+                finished_tasks = 0
+                while finished_tasks < num_tasks:
+                    message = message_queue.get()
+                    if message is None:
+                        finished_tasks += 1
+                    elif isinstance(message, str) and message.strip():
+                        try:
+                            # Check if this is a special internal message type
+                            message_obj = json.loads(message)
+                            message_type = message_obj.get('type', '')
+                            
+                            if message_type == 'dataset_analysis_result_internal':
+                                all_dataset_analyses.append(message_obj['data'])
+                            elif message_type == 'formatted_data_internal':
+                                all_formatted_data.append(message_obj['data'])
+                            else:
+                                # Regular message to be yielded to the client
+                                yield message
+                        except json.JSONDecodeError:
+                            # Not a JSON message, yield as is
                             yield message
-                    except Exception as e:
-                        logger.error(f"Error processing dataset {dataset_id}: {str(e)}")
-                        yield create_error_message(
-                            f'Error processing dataset {dataset_id}: {str(e)}',
-                            details=traceback.format_exc(),
-                            start_time=start_time,
-                            dataset_id=dataset_id
-                        )
         else:
             # Process datasets sequentially
             for dataset_id, dataset in datasets.items():
-                # Get the generator from process_dataset
-                generator = process_dataset(dataset_id, dataset)
-                # Yield all messages from the generator
-                for message in generator:
-                    yield message
+                # Process each dataset
+                process_dataset(dataset_id, dataset, message_queue, start_time)
+                
+                # Process all messages from this dataset
+                message = message_queue.get()
+                while message is not None:
+                    if isinstance(message, str) and message.strip():
+                        try:
+                            # Check if this is a special internal message type
+                            message_obj = json.loads(message)
+                            message_type = message_obj.get('type', '')
+                            
+                            if message_type == 'dataset_analysis_result_internal':
+                                all_dataset_analyses.append(message_obj['data'])
+                            elif message_type == 'formatted_data_internal':
+                                all_formatted_data.append(message_obj['data'])
+                            else:
+                                # Regular message to be yielded to the client
+                                yield message
+                        except json.JSONDecodeError:
+                            # Not a JSON message, yield as is
+                            yield message
+                    
+                    # Get next message
+                    message = message_queue.get()
 
         # Call parallel web search at the beginning
         yield create_status_message(
