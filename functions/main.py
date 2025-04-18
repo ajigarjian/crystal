@@ -60,7 +60,7 @@ except Exception as django_setup_error:
             raise
 
 # After Django is set up, import helpers that might use Django models
-from helpers.db_utils import execute_query, get_db_connection, get_connection_pool, check_usage_limit
+from helpers.db_utils import execute_query, get_connection_pool, check_usage_limit
 from helpers.stream_search_datasets import stream_search_datasets_helper
 from helpers.stream_analyze import stream_analyze_helper, NumpyEncoder
 # Import the query evaluator at the top level
@@ -181,7 +181,7 @@ def evaluate_search_query(request):
         ],
         cors_methods=["get", "post"]
     ),
-    memory=options.MemoryOption.GB_2,
+    memory=options.MemoryOption.GB_1,
     timeout_sec=180, # Let's increase timeout here to 3 mins.
     min_instances=1
 )
