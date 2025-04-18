@@ -456,6 +456,7 @@ def stream_analyze_helper(dataset_ids, query, file_path=None, parallel=True):
                         
                 except Exception as e:
                     logger.error(f"Error loading dataset: {str(e)}")
+                    logger.error(f"Failed to load resource file: {file_path} for dataset {dataset_id} error {str(e)}")
                     # Update status to error
                     message_queue.put(create_status_message(
                         f'Error loading dataset: {str(e)}',
