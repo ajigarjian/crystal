@@ -82,8 +82,7 @@ firebase_admin.initialize_app()
         ],
         cors_methods=["get", "post"]
     ),
-    memory=options.MemoryOption.MB_512,
-    timeout_sec=5  # Keep timeout short for responsiveness
+    timeout_sec=10  # Keep timeout short for responsiveness
 )
 def evaluate_search_query(request):
     """HTTP Cloud Function that evaluates a search query and provides suggestions."""
