@@ -76,60 +76,6 @@ def get_connection_pool(min_conn=1, max_conn=20):
     
     return _pool
 
-def get_db_connection():
-    """Get a connection from the pool or create a new one if pool not available"""
-    pool = get_connection_pool()
-    try:
-        return pool.getconn()
-    except Exception as e:
-        logger.error(f"Error getting connection from pool: {e}")
-        # Fall back to creating a new connection if pool fails
-        try:
-            # Check if running in production or local environment
-            if os.getenv('FUNCTIONS_EMULATOR'):
-                # Local development - connect via local Cloud SQL Proxy
-                conn = psycopg2.connect(
-                    host=os.environ.get('DB_HOST', '0.0.0.0'),
-                    database=os.environ.get('DB_NAME'),
-                    user=os.environ.get('DB_USER'),
-                    password=os.environ.get('DB_PASSWORD'),
-                    port=os.environ.get('DB_PORT', 1234)
-                )
-            else:
-                # Production environment - use Unix socket or public IP
-                db_instance = os.environ.get('DB_INSTANCE', 'crystal-2f87e:us-east4:crystal-sql')
-                db_name = os.environ.get('DB_NAME')
-                db_user = os.environ.get('DB_USER')
-                db_password = os.environ.get('DB_PASSWORD')
-                
-                # Try connecting via Unix socket first
-                try:
-                    # Unix socket path for Cloud SQL
-                    socket_dir = os.environ.get('DB_SOCKET_DIR', '/cloudsql')
-                    unix_socket = f'{socket_dir}/{db_instance}'
-                    
-                    conn = psycopg2.connect(
-                        dbname=db_name,
-                        user=db_user,
-                        password=db_password,
-                        host=unix_socket  # Use Unix socket in production
-                    )
-                except Exception as socket_error:
-                    logger.warning(f"Socket connection failed, trying public IP: {socket_error}")
-                    # Fall back to public IP connection
-                    conn = psycopg2.connect(
-                        dbname=db_name,
-                        user=db_user,
-                        password=db_password,
-                        host='34.48.13.135',  # Public IP address
-                        port=5432
-                    )
-            
-            return conn
-        except Exception as e:
-            logger.error(f"Database connection error: {e}")
-            raise
-
 def get_sqlalchemy_engine():
     """Get or create a SQLAlchemy engine"""
     global _engine
@@ -181,20 +127,29 @@ def get_db_session():
 def execute_query(query, params=None, fetch_all=True):
     """Execute a query and return results"""
     conn = None
+    pool = get_connection_pool() # Get the pool
     try:
-        conn = get_db_connection()
+        conn = pool.getconn() # Get connection from pool
+        conn.autocommit = True # Optional: Ensure commands are committed
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(query, params)
+            conn.commit() # Explicitly commit the transaction
             if fetch_all:
-                return cursor.fetchall()
+                results = cursor.fetchall()
             else:
-                return cursor.fetchone()
+                results = cursor.fetchone()
+            # Ensure cursor is closed before returning connection to pool
+            cursor.close() 
+            return results
     except Exception as e:
+        # Rollback in case of error
+        if conn:
+            conn.rollback() 
         logger.error(f"Query execution error: {e}")
         raise
     finally:
         if conn:
-            conn.close()
+            pool.putconn(conn) # Return connection to pool correctly
 
 def get_usable_resources(dataset_id):
     """
@@ -301,7 +256,8 @@ def check_usage_limit(ip_address, function_name):
     # Define limits for each function
     LIMITS = {
         'stream_search_datasets': 50,  # test for 3
-        'stream_analyze': 5
+        'stream_analyze': 5,
+        'evaluate_search_query': 200
     }
     
     # Get the limit for this function
