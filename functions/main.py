@@ -60,9 +60,12 @@ except Exception as django_setup_error:
             raise
 
 # After Django is set up, import helpers that might use Django models
-from helpers.db_utils import execute_query, get_db_connection, get_connection_pool
+from helpers.db_utils import execute_query, get_db_connection, get_connection_pool, check_usage_limit
 from helpers.stream_search_datasets import stream_search_datasets_helper
 from helpers.stream_analyze import stream_analyze_helper, NumpyEncoder
+# Import the query evaluator at the top level
+from factchecker.search.query_processing.query_evaluator import evaluate_query
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -82,7 +85,9 @@ firebase_admin.initialize_app()
         ],
         cors_methods=["get", "post", "options"]
     ),
-    timeout_sec=10  # Keep timeout short for responsiveness
+    timeout_sec=20,  # Keep timeout short for responsiveness
+    min_instances=1,
+    memory=options.MemoryOption.MB_512 # Increase memory
 )
 def evaluate_search_query(request):
     """HTTP Cloud Function that evaluates a search query and provides suggestions."""
@@ -109,12 +114,14 @@ def evaluate_search_query(request):
     # Get the query parameter
     query = request_json.get('query', '')
     
-    if not query:
+    # Return early for very short queries
+    MIN_QUERY_LENGTH = 3
+    if len(query) < MIN_QUERY_LENGTH:
         return https_fn.Response(
             json.dumps({
                 "quality": "typing",
                 "rating": 0,
-                "message": "Enter a search query",
+                "message": f"Keep typing...", # Suggest continuing typing
                 "suggestions": []
             }),
             status=200,
@@ -122,7 +129,7 @@ def evaluate_search_query(request):
         )
     
     # Get IP-based usage limits
-    from helpers.db_utils import check_usage_limit
+    # from helpers.db_utils import check_usage_limit # Moved to top
     
     # Get the client IP address
     ip_address = request.headers.get('X-Forwarded-For', '').split(',')[0].strip()
@@ -143,8 +150,8 @@ def evaluate_search_query(request):
             headers={"Content-Type": "application/json"}
         )
     
-    # Import the query evaluator
-    from factchecker.search.query_processing.query_evaluator import evaluate_query
+    # Import the query evaluator # Moved to top
+    # from factchecker.search.query_processing.query_evaluator import evaluate_query
     
     # Evaluate the query
     start_time = time.time()
@@ -174,7 +181,7 @@ def evaluate_search_query(request):
         ],
         cors_methods=["get", "post"]
     ),
-    memory=options.MemoryOption.GB_2,
+    memory=options.MemoryOption.GB_1,
     timeout_sec=180, # Let's increase timeout here to 3 mins.
     min_instances=1
 )
