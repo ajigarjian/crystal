@@ -301,11 +301,11 @@ def check_usage_limit(ip_address, function_name):
     # Define limits for each function
     LIMITS = {
         'stream_search_datasets': 50,  # test for 3
-        'stream_analyze': 5
+        'stream_analyze': 25,
     }
     
     # Get the limit for this function
-    limit = LIMITS.get(function_name, 10)  # Default to 10 if function not in limits
+    limit = LIMITS.get(function_name, 50)  # Default to 10 if function not in limits
     
     try:
         # Get Firestore client
