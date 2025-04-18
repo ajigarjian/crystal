@@ -337,7 +337,7 @@ def check_usage_limit(ip_address, function_name):
             error_message = (
                 "Thank you for using Crystal! To ensure everyone gets a fair chance to use our Alpha "
                 "version, we've set a limit of {} requests per user for this feature. "
-                "If you need a higher limit, please join the beta waitlist on the home page, or email us at ajigarjian@gmail.com and we'll get back to you."
+                "If you need a higher limit, please join the beta waitlist on the home page, or email us at ari@askcrystal.info and we'll get back to you."
             ).format(limit)
             
             # Update the timestamp even when exceeding limit
