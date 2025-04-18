@@ -181,7 +181,7 @@ def evaluate_search_query(request):
         ],
         cors_methods=["get", "post"]
     ),
-    memory=options.MemoryOption.GB_1,
+    memory=options.MemoryOption.GB_2,
     timeout_sec=180, # Let's increase timeout here to 3 mins.
     min_instances=1
 )
