@@ -123,7 +123,8 @@ export const streamSearchDatasets = async (
     census_max_results?: number;
     relevance_threshold?: number;
   },
-  onChunk?: (chunk: any) => void // Make callback optional
+  onChunk?: (chunk: any) => void, // Callback for processing chunks
+  signal?: AbortSignal // New parameter for AbortController signal
 ) => {
   // Create a default onChunk function if none is provided
   const processChunk = typeof onChunk === 'function' 
@@ -157,6 +158,7 @@ export const streamSearchDatasets = async (
         'Access-Control-Allow-Origin': '*',
       },
       body: JSON.stringify(data),
+      signal // Pass the abort signal to fetch
     });
     
     if (!response.ok) {
@@ -189,6 +191,11 @@ export const streamSearchDatasets = async (
     const chunks = []; // Store processed chunks to return
     
     while (true) {
+      // Check for abort before each read
+      if (signal?.aborted) {
+        throw new DOMException('The operation was aborted', 'AbortError');
+      }
+      
       const { done, value } = await reader.read();
       if (done) break;
       
@@ -244,6 +251,12 @@ export const streamSearchDatasets = async (
     
     return chunks; // Return all processed chunks
   } catch (error: any) {
+    // Check if this is an abort error
+    if (error.name === 'AbortError') {
+      console.log('Search was aborted by user');
+      throw error; // Re-throw the abort error to be caught by the caller
+    }
+    
     console.error('Error calling stream_search_datasets:', error);
     throw new Error(error.message || 'Failed to search datasets');
   }
@@ -369,7 +382,66 @@ export const submitFeedback = async (data: {
   }
 };
 
-// Update warmFunctions to include the new function
+// Add this new function for evaluating search queries
+export const evaluateSearchQuery = async (query: string) => {
+  // Get the region and project ID from the functions instance
+  const region = functions.region || 'us-central1';
+  const projectId = firebaseConfig.projectId;
+  
+  // Construct the URL for the HTTP function
+  let baseUrl = '';
+  if (process.env.NODE_ENV === 'development') {
+    // Use emulator URL in development
+    baseUrl = `http://localhost:5001/${projectId}/${region}`;
+  } else {
+    // Use production URL in production
+    baseUrl = `https://${region}-${projectId}.cloudfunctions.net`;
+  }
+  
+  const url = `${baseUrl}/evaluate_search_query`;
+  
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      },
+      body: JSON.stringify({ query }),
+    });
+    
+    if (!response.ok) {
+      let errorText = await response.text();
+      
+      // Try to parse JSON error message for usage limits
+      try {
+        const errorData = JSON.parse(errorText);
+        if (errorData.type === 'usage_limit_exceeded') {
+          // This is a usage limit error - use the provided message
+          throw new Error(errorData.error || `Usage limit exceeded for query evaluation`);
+        }
+      } catch (parseError) {
+        // If parsing fails, continue with the text error
+      }
+      
+      throw new Error(errorText || 'Failed to evaluate query');
+    }
+    
+    const result = await response.json();
+    return result;
+  } catch (error: any) {
+    console.error('Error evaluating search query:', error);
+    // Return a default response instead of throwing, to make error handling cleaner in UI
+    return {
+      quality: "error",
+      rating: 0,
+      message: "Unable to evaluate query",
+      suggestions: []
+    };
+  }
+};
+
+// Also update warmFunctions to include the new function
 export const warmFunctions = async () => {
   if (process.env.NODE_ENV === 'development') {
     console.log('Skipping function warming in development mode');
@@ -387,7 +459,8 @@ export const warmFunctions = async () => {
       'register_waitlist',
       'stream_search_datasets',
       'stream_analyze',
-      'submit_feedback'
+      'submit_feedback',
+      'evaluate_search_query' // Add the new function
     ];
     
     // Warm each function with a minimal payload
