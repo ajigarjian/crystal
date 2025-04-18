@@ -80,7 +80,7 @@ firebase_admin.initialize_app()
         "http://localhost:3000",
         "http://localhost:5173",
         ],
-        cors_methods=["get", "post"]
+        cors_methods=["get", "post", "options"]
     ),
     timeout_sec=10  # Keep timeout short for responsiveness
 )
