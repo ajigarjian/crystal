@@ -123,7 +123,8 @@ export const streamSearchDatasets = async (
     census_max_results?: number;
     relevance_threshold?: number;
   },
-  onChunk?: (chunk: any) => void // Make callback optional
+  onChunk?: (chunk: any) => void, // Callback for processing chunks
+  signal?: AbortSignal // New parameter for AbortController signal
 ) => {
   // Create a default onChunk function if none is provided
   const processChunk = typeof onChunk === 'function' 
@@ -157,6 +158,7 @@ export const streamSearchDatasets = async (
         'Access-Control-Allow-Origin': '*',
       },
       body: JSON.stringify(data),
+      signal // Pass the abort signal to fetch
     });
     
     if (!response.ok) {
@@ -189,6 +191,11 @@ export const streamSearchDatasets = async (
     const chunks = []; // Store processed chunks to return
     
     while (true) {
+      // Check for abort before each read
+      if (signal?.aborted) {
+        throw new DOMException('The operation was aborted', 'AbortError');
+      }
+      
       const { done, value } = await reader.read();
       if (done) break;
       
@@ -244,6 +251,12 @@ export const streamSearchDatasets = async (
     
     return chunks; // Return all processed chunks
   } catch (error: any) {
+    // Check if this is an abort error
+    if (error.name === 'AbortError') {
+      console.log('Search was aborted by user');
+      throw error; // Re-throw the abort error to be caught by the caller
+    }
+    
     console.error('Error calling stream_search_datasets:', error);
     throw new Error(error.message || 'Failed to search datasets');
   }

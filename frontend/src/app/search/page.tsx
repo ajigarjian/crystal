@@ -24,7 +24,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, TooltipNoArrow } from "@/components/TooltipNoArrow";
 import {
   Dialog,
   DialogContent,
@@ -311,6 +311,7 @@ export default function SearchPage() {
   const isMobile = useIsMobile(); // Use the mobile detection hook
   const loadedImagesRef = useRef<Record<string, boolean>>({});
   const scrollPositionRef = useRef<number>(0);
+  const [abortController, setAbortController] = useState<AbortController | null>(null);
 
   // Keep track of which images have loaded
   const markImageLoaded = useCallback((imageUrl: string) => {
@@ -397,27 +398,53 @@ export default function SearchPage() {
     }
   }, [searchStatus]);
 
+  // Add this new handler function
+  const handleStopSearch = () => {
+    if (abortController) {
+      // Abort the fetch request
+      abortController.abort();
+      
+      // Update state to show the search has been cancelled but keep results
+      setSearchStatus(SearchStatus.COMPLETE);
+      setSearchProgress(0);
+      setStatusMessage("Search stopped. Showing partial results.");
+      
+      // Re-enable the search input
+      if (inputRef.current) {
+        inputRef.current.disabled = false;
+        inputRef.current.focus();
+      }
+    }
+  };
+
   // Update the search handler
   const handleSearch = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!query.trim() || searchStatus === SearchStatus.SEARCHING) return;
 
-    // Reset state for new search - more thorough cleanup
+    // Reset state for new search
     setSearchStatus(SearchStatus.SEARCHING);
     setSearchProgress(0);
     setStatusMessage('Initiating search...');
+    
+    // Clear datasets and allDatasetsRef when starting a new search
     setDatasets([]);
-    allDatasetsRef.current = []; // Reset the raw datasets ref
+    allDatasetsRef.current = [];
+    
     setExpandedDataset(null);
-    setExecutionTime(0); // Reset execution time as well
-    setEllipsis(''); // Ensure ellipsis is reset
+    setExecutionTime(0);
+    setEllipsis('');
 
     try {
-      // Start the streaming search
+      // Create a new AbortController for this request
+      const controller = new AbortController();
+      setAbortController(controller);
+      
+      // Use the controller in your streamSearchDatasets function
       await streamSearchDatasets(
         {
           query: query.trim(),
-          search_method: null, // hybrid search
+          search_method: null,
           similarity_threshold: 0.35,
           max_results: 20
         },
@@ -499,13 +526,23 @@ export default function SearchPage() {
               );
             }, 300); // Brief delay to show 100% state
           }
-        }
+        },
+        controller.signal // Pass the abort signal to your API function
       );
     } catch (error: any) {
-      console.error("Search error:", error);
-      setStatusMessage(`Error: ${error.message || 'An unknown error occurred'}`);
-      setSearchStatus(SearchStatus.COMPLETE);
-      setSearchProgress(0);
+      // Check if it's an abort error
+      if (error.name === 'AbortError') {
+        console.log('Search was cancelled by user');
+        // State is already handled by handleStopSearch
+      } else {
+        console.error("Search error:", error);
+        setStatusMessage(`Error: ${error.message || 'An unknown error occurred'}`);
+        setSearchStatus(SearchStatus.COMPLETE);
+        setSearchProgress(0);
+      }
+    } finally {
+      // Clean up the controller
+      setAbortController(null);
     }
   };
 
@@ -897,6 +934,23 @@ export default function SearchPage() {
     };
   }, []);
 
+  // Add a new useEffect to listen for the Escape key
+  useEffect(() => {
+    const handleEscKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && searchStatus === SearchStatus.SEARCHING) {
+        handleStopSearch();
+      }
+    };
+    
+    // Add the event listener
+    window.addEventListener('keydown', handleEscKey);
+    
+    // Clean up the event listener when component unmounts
+    return () => {
+      window.removeEventListener('keydown', handleEscKey);
+    };
+  }, [searchStatus]); // Re-add listener when search status changes
+
   return (
     <div className="flex flex-col min-h-screen bg-gray-50 text-gray-900">
       {/* Header with logo */}
@@ -939,47 +993,58 @@ export default function SearchPage() {
       </div>
       
       {/* Search section */}
-      <div className="max-w-3xl mx-auto w-full px-4 pt-12 pb-8">
+      <div className="max-w-3xl mx-auto w-full px-4 pt-4 pb-8">
         <div className="relative w-full transition-all overflow-hidden rounded-xl">
           <Input
             ref={inputRef}
             placeholder="Search for gov't datasets..."
-            className="pl-12 pr-4 py-7 text-lg w-full rounded-xl border-gray-300 transition-all shadow-sm hover:shadow focus:shadow-md relative z-10 bg-white text-gray-900 selection:bg-green-100 selection:text-green-900"
+            className="pl-4 pr-4 pt-6 pb-20 text-lg w-full rounded-xl border-gray-300 transition-all shadow-sm hover:shadow focus:shadow-md relative z-10 bg-white text-gray-900 selection:bg-green-100 selection:text-green-900"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
             disabled={searchStatus === SearchStatus.SEARCHING}
+            style={{ 
+              alignItems: "flex-start", 
+              verticalAlign: "top"
+            }}
           />
+          {/* Move the icon from left to bottom right */}
           <div 
-            className={`absolute left-4 top-1/2 -translate-y-1/2 transition-colors duration-200 ease-in-out z-20 ${
+            className={`absolute right-4 bottom-4 flex items-end justify-end transition-colors duration-200 ease-in-out z-20 ${
               searchStatus !== SearchStatus.SEARCHING && query.trim() ? 'cursor-pointer' : ''
             }`}
             onClick={searchStatus !== SearchStatus.SEARCHING && query.trim() ? handleSearch : undefined}
           >
             {searchStatus === SearchStatus.SEARCHING ? (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.8 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="relative"
-              >
-                <Loader2 className="h-5 w-5 text-green-500 animate-spin" />
-              </motion.div>
+              <TooltipProvider delayDuration={150}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.8 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      className="relative cursor-pointer"
+                      onClick={handleStopSearch}
+                    >
+                      <div className="h-8 w-8 rounded-full bg-red-500 flex items-center justify-center transition-all duration-200 hover:bg-red-600 hover:shadow-md hover:scale-110">
+                        <div className="h-2.5 w-2.5 bg-white rounded-none"></div>
+                      </div>
+                    </motion.div>
+                  </TooltipTrigger>
+                  <TooltipNoArrow className="bg-gray-900 text-white text-xs px-2 py-1.5 border-0 rounded-md">
+                    Press ESC to stop
+                  </TooltipNoArrow>
+                </Tooltip>
+              </TooltipProvider>
             ) : (
               <Search 
-                className={`h-5 w-5 transition-all ${
+                className={`h-8 w-8 transition-all ${
                   query.trim() 
-                    ? 'text-green-500 scale-110 drop-shadow-[0_0_12px_rgba(34,197,94,0.8)] filter brightness-110' 
-                    : 'text-gray-400'
+                    ? 'text-green-500 scale-110 drop-shadow-[0_0_12px_rgba(34,197,94,0.8)] filter brightness-110 hover:scale-125 hover:brightness-125' 
+                    : 'text-gray-400 hover:text-gray-600 hover:scale-110'
                 }`} 
               />
             )}
           </div>
-          
-          {searchStatus !== SearchStatus.SEARCHING && query.trim() && (
-            <div className="absolute right-4 top-1/2 -translate-y-1/2 text-sm text-gray-400 opacity-70 z-20">
-              Press Enter to search
-            </div>
-          )}
           
           {searchStatus === SearchStatus.SEARCHING && searchProgress > 0 && (
             <div className="absolute bottom-0 left-0 w-full h-0.5 z-0">
