@@ -951,6 +951,64 @@ export default function SearchPage() {
     };
   }, [searchStatus]); // Re-add listener when search status changes
 
+  // Add this to your existing global style or inside a useEffect with document.head.appendChild
+  useEffect(() => {
+    // Create style element if it doesn't exist already
+    if (!document.getElementById('scrollbar-fix-style')) {
+      const style = document.createElement('style');
+      style.id = 'scrollbar-fix-style';
+      style.innerHTML = `
+        /* OpenAI-style custom scrollbar - very minimal */
+        ::-webkit-scrollbar {
+          width: 4px;
+          height: 4px;
+          background-color: transparent;
+        }
+        
+        ::-webkit-scrollbar-track {
+          background-color: transparent;
+        }
+        
+        ::-webkit-scrollbar-thumb {
+          background-color: rgba(155, 155, 155, 0.5);
+          border-radius: 20px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+          background-color: rgba(155, 155, 155, 0.7);
+        }
+        
+        /* For Firefox */
+        * {
+          scrollbar-width: thin;
+          scrollbar-color: rgba(155, 155, 155, 0.5) transparent;
+        }
+        
+        /* Instead of using scrollbar-gutter, modify the container padding and width */
+        body {
+          overflow-y: overlay !important;
+          margin-right: 0 !important;
+        }
+        
+        /* Fix for dark mode/dark background areas */
+        .dark-bg::-webkit-scrollbar-thumb {
+          background-color: rgba(200, 200, 200, 0.3);
+        }
+        
+        /* Add more padding to containers that need scrolling to prevent content from hiding under scrollbar */
+        .scrollbar-fix {
+          padding-right: 6px;
+        }
+      `;
+      document.head.appendChild(style);
+    }
+    
+    return () => {
+      const style = document.getElementById('scrollbar-fix-style');
+      if (style) style.remove();
+    };
+  }, []);
+
   return (
     <div className="flex flex-col min-h-screen bg-gray-50 text-gray-900">
       {/* Header with logo */}
@@ -1338,7 +1396,7 @@ export default function SearchPage() {
                 </div>
               ) : (
                 /* Desktop table view */
-                <div className="rounded-md rounded-tl-none border border-gray-200 bg-white">
+                <div className="rounded-md rounded-tl-none border border-gray-200 bg-white overflow-auto scrollbar-fix">
                   <Table className="table-fixed">
                     <TableHeader>
                       <TableRow className="hover:!bg-transparent border-b border-gray-200">
