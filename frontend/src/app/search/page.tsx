@@ -57,6 +57,19 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
 import { submitFeedback } from "@/lib/firebase";
 import { MessageSquareIcon, ThumbsUpIcon, BugIcon } from "lucide-react";
+import { useDebounce } from 'use-debounce';
+import { evaluateSearchQuery } from '@/lib/firebase';
+import { CheckCircle, AlertTriangle } from "lucide-react";
+import { SuggestionBadge } from "@/components/SuggestionBadge";
+
+// Add QueryEvaluation interface
+interface QueryEvaluation {
+  quality: 'typing' | 'poor' | 'basic' | 'good' | 'error';
+  rating: number;
+  message: string;
+  suggestions: string[];
+  execution_time?: number;
+}
 
 // Add the FeedbackWidget component
 const FeedbackWidget = () => {
@@ -313,6 +326,21 @@ export default function SearchPage() {
   const scrollPositionRef = useRef<number>(0);
   const [abortController, setAbortController] = useState<AbortController | null>(null);
 
+  // Add these state variables for query evaluation
+  const [debouncedQuery] = useDebounce(query, 800); // 800ms debounce time
+  const [queryEvaluation, setQueryEvaluation] = useState<QueryEvaluation | null>(null);
+  const [isEvaluating, setIsEvaluating] = useState<boolean>(false);
+
+  // Update the initialSuggestions with topics and full queries
+  const [initialSuggestions, setInitialSuggestions] = useState<Array<{topic: string, query: string}>>([
+    { topic: "COVID-19", query: "COVID-19 vaccination rates in Chicago" },
+    { topic: "Air Quality", query: "Air quality data for particulate matter for NYC" },
+    { topic: "Education", query: "Public school funding in California since 2010" },
+    { topic: "Energy", query: "Renewable energy adoption statistics including solar panels" },
+    { topic: "Employment", query: "Unemployment rates by age and gender" }
+  ]);
+  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState<number>(-1);
+
   // Keep track of which images have loaded
   const markImageLoaded = useCallback((imageUrl: string) => {
     loadedImagesRef.current[imageUrl] = true;
@@ -417,7 +445,149 @@ export default function SearchPage() {
     }
   };
 
-  // Update the search handler
+  // Update the handleSuggestionClick function to properly handle the abort controller
+  const handleSuggestionClick = (suggestion: {topic: string, query: string}) => {
+    // Set the query 
+    setQuery(suggestion.query);
+    
+    // Directly call handleSearch with the suggestion query
+    // This ensures the search starts even if the state update hasn't completed
+    if (searchStatus !== SearchStatus.SEARCHING) {
+      // Create a new AbortController and store it in state so we can access it later
+      const controller = new AbortController();
+      setAbortController(controller);
+      
+      // Update all the search-related states
+      setSearchStatus(SearchStatus.SEARCHING);
+      setSearchProgress(0);
+      setStatusMessage('Initiating search...');
+      setDatasets([]);
+      allDatasetsRef.current = [];
+      setExpandedDataset(null);
+      setExecutionTime(0);
+      setEllipsis('');
+      
+      // Disable the input during search
+      if (inputRef.current) {
+        inputRef.current.disabled = true;
+      }
+      
+      // We need to manually perform the search with the new query
+      // rather than relying on the state update
+      streamSearchDatasets(
+        {
+          query: suggestion.query.trim(),
+          search_method: null,
+          similarity_threshold: 0.35,
+          max_results: 20
+        },
+        handleSearchChunk,
+        controller.signal // Use our stored controller's signal
+      ).catch(error => {
+        // Check if it's an abort error
+        if (error.name === 'AbortError') {
+          console.log('Search was cancelled by user');
+          // State is already handled by handleStopSearch
+        } else {
+          console.error("Search error:", error);
+          setStatusMessage(`Error: ${error.message || 'An unknown error occurred'}`);
+          setSearchStatus(SearchStatus.COMPLETE);
+          setSearchProgress(0);
+        }
+      }).finally(() => {
+        // Clean up the controller
+        setAbortController(null);
+      });
+    }
+  };
+
+  // Extract the chunk handling logic to a separate function so we can reuse it
+  const handleSearchChunk = (chunk: any) => {
+    // Process incoming chunks
+    if (chunk.type === 'status') {
+      setStatusMessage(chunk.message);
+      // Bump progress a bit for each status message
+      setSearchProgress(prev => Math.min(prev + 3, 90));
+    } 
+    else if (chunk.type === 'dataset') {
+      // Store dataset in our ref but don't display yet
+      const allDatasets = allDatasetsRef.current;
+      // Check if we already have this dataset ID
+      if (!allDatasets.some(d => d.id === chunk.data.id)) {
+        // Use immutable update but more efficiently
+        allDatasetsRef.current.push(chunk.data);
+        
+        // Show datasets immediately as they come in
+        setDatasets(prev => {
+          // Create a new array with the new dataset added
+          return [...prev, chunk.data];
+        });
+      }
+      
+      // Small progress boost for each dataset found
+      setSearchProgress(prev => Math.min(prev + 1, 90));
+    }
+    else if (chunk.type === 'dataset_update') {
+      // Update dataset in our ref - more efficiently
+      const allDatasets = allDatasetsRef.current;
+      for (let i = 0; i < allDatasets.length; i++) {
+        if (allDatasets[i].id === chunk.data.id) {
+          allDatasetsRef.current[i] = { ...allDatasets[i], ...chunk.data };
+          break;
+        }
+      }
+      
+      // More selective update of the datasets array to minimize rerenders
+      setDatasets(prev => {
+        // Create a new array to maintain immutability
+        const updatedDatasets = prev.map(dataset => {
+          // Only update the specific dataset that changed
+          if (dataset.id === chunk.data.id) {
+            return { ...dataset, ...chunk.data };
+          }
+          return dataset;
+        });
+        
+        // Filter out irrelevant datasets
+        return updatedDatasets.filter(dataset => 
+          !dataset.relevance || dataset.relevance.is_relevant !== false
+        );
+      });
+    }
+    else if (chunk.type === 'complete') {
+      // Search complete
+      setSearchProgress(100); // Set to 100% before transitioning to complete
+      
+      // Add a small delay before fully completing, to show the 100% state briefly
+      setTimeout(() => {
+        setSearchStatus(SearchStatus.COMPLETE);
+        setSearchProgress(0);
+        
+        // Store the execution time
+        if (chunk.data && chunk.data.execution_time) {
+          setExecutionTime(chunk.data.execution_time);
+        }
+        
+        // Calculate our own relevant count based on actual processed datasets
+        const allDatasets = allDatasetsRef.current;
+        const relevantDatasets = allDatasets.filter(
+          dataset => dataset.relevance && dataset.relevance.is_relevant === true
+        );
+        
+        // Set status message with our calculated counts
+        setStatusMessage(
+          `Found ${relevantDatasets.length} relevant datasets.`
+        );
+        
+        // Re-enable the search input
+        if (inputRef.current) {
+          inputRef.current.disabled = false;
+        }
+      }, 300); // Brief delay to show 100% state
+    }
+  };
+
+  // Update the handleSearch function to use our extracted chunk handler
   const handleSearch = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!query.trim() || searchStatus === SearchStatus.SEARCHING) return;
@@ -440,7 +610,7 @@ export default function SearchPage() {
       const controller = new AbortController();
       setAbortController(controller);
       
-      // Use the controller in your streamSearchDatasets function
+      // Use the controller in your streamSearchDatasets function with our extracted handler
       await streamSearchDatasets(
         {
           query: query.trim(),
@@ -448,86 +618,8 @@ export default function SearchPage() {
           similarity_threshold: 0.35,
           max_results: 20
         },
-        (chunk) => {
-          // Process incoming chunks
-          if (chunk.type === 'status') {
-            setStatusMessage(chunk.message);
-            // Bump progress a bit for each status message
-            setSearchProgress(prev => Math.min(prev + 3, 90));
-          } 
-          else if (chunk.type === 'dataset') {
-            // Store dataset in our ref but don't display yet
-            const allDatasets = allDatasetsRef.current;
-            // Check if we already have this dataset ID
-            if (!allDatasets.some(d => d.id === chunk.data.id)) {
-              // Use immutable update but more efficiently
-              allDatasetsRef.current.push(chunk.data);
-              
-              // Show datasets immediately as they come in
-              setDatasets(prev => {
-                // Create a new array with the new dataset added
-                return [...prev, chunk.data];
-              });
-            }
-            
-            // Small progress boost for each dataset found
-            setSearchProgress(prev => Math.min(prev + 1, 90));
-          }
-          else if (chunk.type === 'dataset_update') {
-            // Update dataset in our ref - more efficiently
-            const allDatasets = allDatasetsRef.current;
-            for (let i = 0; i < allDatasets.length; i++) {
-              if (allDatasets[i].id === chunk.data.id) {
-                allDatasetsRef.current[i] = { ...allDatasets[i], ...chunk.data };
-                break;
-              }
-            }
-            
-            // More selective update of the datasets array to minimize rerenders
-            setDatasets(prev => {
-              // Create a new array to maintain immutability
-              const updatedDatasets = prev.map(dataset => {
-                // Only update the specific dataset that changed
-                if (dataset.id === chunk.data.id) {
-                  return { ...dataset, ...chunk.data };
-                }
-                return dataset;
-              });
-              
-              // Filter out irrelevant datasets
-              return updatedDatasets.filter(dataset => 
-                !dataset.relevance || dataset.relevance.is_relevant !== false
-              );
-            });
-          }
-          else if (chunk.type === 'complete') {
-            // Search complete
-            setSearchProgress(100); // Set to 100% before transitioning to complete
-            
-            // Add a small delay before fully completing, to show the 100% state briefly
-            setTimeout(() => {
-              setSearchStatus(SearchStatus.COMPLETE);
-              setSearchProgress(0);
-              
-              // Store the execution time
-              if (chunk.data && chunk.data.execution_time) {
-                setExecutionTime(chunk.data.execution_time);
-              }
-              
-              // Calculate our own relevant count based on actual processed datasets
-              const allDatasets = allDatasetsRef.current;
-              const relevantDatasets = allDatasets.filter(
-                dataset => dataset.relevance && dataset.relevance.is_relevant === true
-              );
-              
-              // Set status message with our calculated counts
-              setStatusMessage(
-                `Found ${relevantDatasets.length} relevant datasets.`
-              );
-            }, 300); // Brief delay to show 100% state
-          }
-        },
-        controller.signal // Pass the abort signal to your API function
+        handleSearchChunk,
+        controller.signal
       );
     } catch (error: any) {
       // Check if it's an abort error
@@ -546,10 +638,31 @@ export default function SearchPage() {
     }
   };
 
-  // Update key down handler
+  // Update handleKeyNavigation to also trigger search on Enter
+  const handleKeyNavigation = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!initialSuggestions.length || query.trim()) return;
+    
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setSelectedSuggestionIndex(prev => 
+        prev < initialSuggestions.length - 1 ? prev + 1 : prev
+      );
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setSelectedSuggestionIndex(prev => (prev > 0 ? prev - 1 : prev));
+    } else if (e.key === 'Enter' && selectedSuggestionIndex >= 0) {
+      e.preventDefault();
+      // Use the enhanced handleSuggestionClick that starts search immediately
+      handleSuggestionClick(initialSuggestions[selectedSuggestionIndex]);
+    }
+  };
+
+  // Update the handleKeyDown function to include the new navigation
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && query.trim() && searchStatus !== SearchStatus.SEARCHING) {
       handleSearch();
+    } else {
+      handleKeyNavigation(e);
     }
   };
 
@@ -1009,6 +1122,54 @@ export default function SearchPage() {
     };
   }, []);
 
+  // Add this useEffect for query evaluation
+  useEffect(() => {
+    const evaluateQuery = async () => {
+      // Don't evaluate if too short or currently searching
+      if (debouncedQuery.length < 3 || searchStatus === SearchStatus.SEARCHING) {
+        setQueryEvaluation(null);
+        return;
+      }
+      
+      // Always set isEvaluating to true when query changes, regardless of previous state
+      setIsEvaluating(true);
+      
+      try {
+        const evaluation = await evaluateSearchQuery(debouncedQuery);
+        setQueryEvaluation(evaluation);
+      } catch (error) {
+        console.error('Error evaluating query:', error);
+        // Handle error state if needed
+      } finally {
+        setIsEvaluating(false);
+      }
+    };
+    
+    evaluateQuery();
+  }, [debouncedQuery, searchStatus]);
+
+  // Update the QualityIndicator component to handle only three quality levels
+  const QualityIndicator = ({ quality }: { quality: string }) => {
+    switch (quality) {
+      case 'good':
+        return <div className="h-3 w-3 bg-green-500 rounded-full" />;
+      case 'basic':
+        return <div className="h-3 w-3 bg-blue-500 rounded-full" />;
+      case 'poor':
+        return <div className="h-3 w-3 bg-red-500 rounded-full" />;
+      default:
+        return <div className="h-3 w-3 bg-gray-400 rounded-full" />;
+    }
+  };
+
+  // Add a new state to track if we're on client side
+  const [isClient, setIsClient] = useState(false);
+
+  // Use useEffect to update this state - this only runs on the client
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
+
   return (
     <div className="flex flex-col min-h-screen bg-gray-50 text-gray-900">
       {/* Header with logo */}
@@ -1053,67 +1214,179 @@ export default function SearchPage() {
       {/* Search section */}
       <div className="max-w-3xl mx-auto w-full px-4 pt-4 pb-8">
         <div className="relative w-full transition-all overflow-hidden rounded-xl">
-          <Input
-            ref={inputRef}
-            placeholder="Search for gov't datasets..."
-            className="pl-4 pr-4 pt-6 pb-20 text-lg w-full rounded-xl border-gray-300 transition-all shadow-sm hover:shadow focus:shadow-md relative z-10 bg-white text-gray-900 selection:bg-green-100 selection:text-green-900"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={handleKeyDown}
-            disabled={searchStatus === SearchStatus.SEARCHING}
-            style={{ 
-              alignItems: "flex-start", 
-              verticalAlign: "top"
-            }}
-          />
-          {/* Move the icon from left to bottom right */}
+          {/* Add onClick handler to the container div */}
           <div 
-            className={`absolute right-4 bottom-4 flex items-end justify-end transition-colors duration-200 ease-in-out z-20 ${
-              searchStatus !== SearchStatus.SEARCHING && query.trim() ? 'cursor-pointer' : ''
-            }`}
-            onClick={searchStatus !== SearchStatus.SEARCHING && query.trim() ? handleSearch : undefined}
+            className="relative w-full cursor-text" 
+            onClick={() => inputRef.current?.focus()}
           >
-            {searchStatus === SearchStatus.SEARCHING ? (
-              <TooltipProvider delayDuration={150}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <motion.div
-                      initial={{ opacity: 0, scale: 0.8 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      className="relative cursor-pointer"
-                      onClick={handleStopSearch}
-                    >
-                      <div className="h-8 w-8 rounded-full bg-red-500 flex items-center justify-center transition-all duration-200 hover:bg-red-600 hover:shadow-md hover:scale-110">
-                        <div className="h-2.5 w-2.5 bg-white rounded-none"></div>
+            <Input
+              ref={inputRef}
+              placeholder="Search for government datasets..."
+              className="pl-4 pr-4 pt-8 pb-24 text-lg w-full rounded-xl border-gray-300 transition-all shadow-sm hover:shadow focus:shadow-md relative z-10 bg-white text-gray-900 selection:bg-green-100 selection:text-green-900"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={handleKeyDown}
+              disabled={searchStatus === SearchStatus.SEARCHING}
+              style={{ 
+                alignItems: "flex-start", 
+                verticalAlign: "top",
+                minHeight: "120px" // Make the search bar taller
+              }}
+            />
+            
+            {/* Query evaluation feedback area at bottom left */}
+            <div className={`absolute bottom-4 left-4 right-16 z-10 ${isMobile ? 'hidden' : ''}`}>
+              {/* Show initial suggestions when no query is entered */}
+              {!query.trim() && !isEvaluating && !queryEvaluation && !isMobile && (
+                <>
+                  <div className="flex items-center text-xs mb-2">
+                    <span className="text-gray-600">
+                      Try searching for:
+                    </span>
+                  </div>
+                  
+                  <div className="flex flex-wrap gap-1.5 mb-1">
+                    {/* Simplified rendering - always show the first 3 suggestions */}
+                    {initialSuggestions.slice(0, 3).map((suggestion) => (
+                      <TooltipProvider key={suggestion.topic}>
+                        <Tooltip delayDuration={300}>
+                          <TooltipTrigger asChild>
+                            <Badge 
+                              variant="outline" 
+                              className="py-1 cursor-pointer transition-colors border-0 bg-green-100 text-green-800 hover:bg-green-200 rounded-sm"
+                              onClick={() => handleSuggestionClick(suggestion)}
+                            >
+                              {suggestion.topic}
+                            </Badge>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom" className="bg-white p-2 shadow-md border border-gray-200 z-50">
+                            <p className="text-sm text-gray-900">{suggestion.query}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    ))}
+                  </div>
+                </>
+              )}
+              
+              {/* Evaluation loading state - show whenever isEvaluating is true, regardless of previous state */}
+              {isEvaluating && (
+                <div className="flex items-center text-xs text-gray-400">
+                  <div className="animate-spin mr-2">
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                  </div>
+                  <span>Evaluating query...</span>
+                </div>
+              )}
+              
+              {/* Query evaluation results - only show when not evaluating */}
+              {queryEvaluation && queryEvaluation.quality !== 'typing' && !isEvaluating && (
+                <>
+                  {queryEvaluation.quality === 'good' ? (
+                    // For good quality queries - position closer to the bottom
+                    <div className="flex items-center text-xs">
+                    <QualityIndicator quality={queryEvaluation.quality} />
+                    <span className="ml-2 text-gray-600">
+                        Great query!
+                    </span>
+                  </div>
+                  ) : (
+                    // For basic/poor quality queries - keep current position with mb-2
+                    <>
+                      <div className="flex items-center text-xs mb-2">
+                        <QualityIndicator quality={queryEvaluation.quality} />
+                        <span className="ml-2 text-gray-600">
+                          {queryEvaluation.quality === 'basic' && "Good query - consider adding more specifics:"}
+                          {queryEvaluation.quality === 'poor' && "Consider improving your query for more relevant results:"}
+                        </span>
                       </div>
-                    </motion.div>
-                  </TooltipTrigger>
-                  <TooltipNoArrow className="bg-gray-900 text-white text-xs px-2 py-1.5 border-0 rounded-md">
-                    Press ESC to stop
-                  </TooltipNoArrow>
-                </Tooltip>
-              </TooltipProvider>
-            ) : (
-              <Search 
-                className={`h-8 w-8 transition-all ${
-                  query.trim() 
-                    ? 'text-green-500 scale-110 drop-shadow-[0_0_12px_rgba(34,197,94,0.8)] filter brightness-110 hover:scale-125 hover:brightness-125' 
-                    : 'text-gray-400 hover:text-gray-600 hover:scale-110'
-                }`} 
-              />
+                      
+                      {queryEvaluation.suggestions.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mb-1">
+                          {queryEvaluation.suggestions.slice(0, 3).map((suggestion, index) => {
+                            // Updated labels matching our backend categories
+                            const labels = ["Specificity", "Geographic Scope", "Time Period"];
+                            
+                            return (
+                              <SuggestionBadge
+                                key={index}
+                                suggestion={suggestion}
+                                label={labels[index]}
+                                onClick={(suggestionText) => handleSuggestionClick({
+                                  topic: labels[index],
+                                  query: suggestionText
+                                })}
+                              />
+                            );
+                          })}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+            
+            {/* Move the icon from left to bottom right - keep existing icon code */}
+            <div 
+              className={`absolute right-4 bottom-4 flex items-end justify-end transition-colors duration-200 ease-in-out z-20 ${
+                searchStatus !== SearchStatus.SEARCHING && query.trim() ? 'cursor-pointer' : ''
+              }`}
+              onClick={(e) => {
+                e.stopPropagation(); // Prevent triggering the parent's onClick
+                if (searchStatus !== SearchStatus.SEARCHING && query.trim()) {
+                  handleSearch();
+                } else if (searchStatus === SearchStatus.SEARCHING) {
+                  handleStopSearch();
+                }
+              }}
+            >
+              {/* Keep your existing search icon or stop button code */}
+              {searchStatus === SearchStatus.SEARCHING ? (
+                <TooltipProvider delayDuration={150}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.8 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className="relative cursor-pointer"
+                        onClick={handleStopSearch}
+                      >
+                        <div className="h-7 w-7 rounded-full bg-red-500 flex items-center justify-center transition-all duration-200 hover:bg-red-600 hover:shadow-md hover:scale-110">
+                          <div className="h-2 w-2 bg-white rounded-none"></div>
+                        </div>
+                      </motion.div>
+                    </TooltipTrigger>
+                    <TooltipNoArrow className="bg-gray-900 text-white text-xs px-2 py-1.5 border-0 rounded-md">
+                      Press ESC to stop
+                    </TooltipNoArrow>
+                  </Tooltip>
+                </TooltipProvider>
+              ) : (
+                <Search 
+                  className={`h-7 w-7 transition-all ${
+                    query.trim() 
+                      ? 'text-green-500 scale-110 drop-shadow-[0_0_12px_rgba(34,197,94,0.8)] filter brightness-110 hover:scale-125 hover:brightness-125' 
+                      : 'text-gray-400 hover:text-gray-600 hover:scale-110'
+                  }`} 
+                />
+              )}
+            </div>
+            
+            {searchStatus === SearchStatus.SEARCHING && searchProgress > 0 && (
+              <div className="absolute bottom-0 left-0 w-full h-0.5 z-0">
+                <motion.div
+                  initial={{ width: 0 }}
+                  animate={{ width: `${searchProgress}%` }}
+                  transition={{ ease: "easeOut" }}
+                  className="h-full bg-green-500"
+                />
+              </div>
             )}
           </div>
-          
-          {searchStatus === SearchStatus.SEARCHING && searchProgress > 0 && (
-            <div className="absolute bottom-0 left-0 w-full h-0.5 z-0">
-              <motion.div
-                initial={{ width: 0 }}
-                animate={{ width: `${searchProgress}%` }}
-                transition={{ ease: "easeOut" }}
-                className="h-full bg-green-500"
-              />
-            </div>
-          )}
         </div>
       </div>
       
