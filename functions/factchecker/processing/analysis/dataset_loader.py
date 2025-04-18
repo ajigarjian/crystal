@@ -9,7 +9,7 @@ import PyPDF2
 from io import StringIO
 import json
 import xml.etree.ElementTree as ET
-import magic
+import mimetypes
 from collections import defaultdict
 from pandas import json_normalize
 
@@ -647,7 +647,14 @@ def load_datafile(file_path: str) -> Union[pd.DataFrame, Dict[str, Any]]:
         elif not file_extension or file_extension not in ['.csv', '.xlsx', '.xls', '.pdf', '.xml', '.json']:
             logger.info(f"Unknown or missing extension ('{file_extension}'). Attempting type inference.")
             try:
-                mime_type = magic.from_file(file_path, mime=True)
+                # Use mimetypes to guess type based on filename/extension
+                mime_type, encoding = mimetypes.guess_type(file_path)
+
+                if not mime_type:
+                    error_message = f"Could not infer file type for {os.path.basename(file_path)}"
+                    logger.error(error_message)
+                    raise ValueError(error_message)
+
                 logger.info(f"Inferred MIME type: {mime_type}")
 
                 # Map MIME types to our loader functions
@@ -667,17 +674,15 @@ def load_datafile(file_path: str) -> Union[pd.DataFrame, Dict[str, Any]]:
                     inferred_type = 'json'
                     result = _load_json(file_path)
                 else:
-                     error_message = f"Unsupported file type: Extension '{file_extension}', Inferred MIME type '{mime_type}'"
-                     logger.error(error_message)
-                     raise ValueError(error_message)
-            except magic.MagicException as magic_err:
-                 error_message = f"Failed to infer file type using magic: {magic_err}"
-                 logger.error(error_message)
-                 raise ValueError(error_message) from magic_err
-            except Exception as infer_err: # Catch errors during inferred load attempt
-                 error_message = f"Error loading file after inferring type as '{inferred_type}': {infer_err}"
-                 logger.error(error_message)
-                 raise ValueError(error_message) from infer_err # Re-raise error
+                    error_message = f"Unsupported file type: Extension '{file_extension}', Inferred MIME type '{mime_type}'"
+                    logger.error(error_message)
+                    raise ValueError(error_message)
+            except Exception as infer_err: # Catch errors during inferred load attempt (e.g., loading based on inferred type fails)
+                inferred_type_str = inferred_type if inferred_type else "unknown (based on mimetypes guess)"
+                error_message = f"Error loading file after inferring type as '{inferred_type_str}': {infer_err}"
+                logger.error(error_message)
+                # Re-raise the specific error from the loading attempt
+                raise ValueError(error_message) from infer_err
 
         # If we reach here and result is None, it means the extension was known but loading failed
         # within the specific _load_* function, which would have raised an exception.
@@ -708,7 +713,7 @@ def load_datafile(file_path: str) -> Union[pd.DataFrame, Dict[str, Any]]:
 
         return result
 
-    except (FileNotFoundError, ValueError, pd.errors.EmptyDataError, RuntimeError, magic.MagicException, Exception) as e:
+    except (FileNotFoundError, ValueError, pd.errors.EmptyDataError, RuntimeError, Exception) as e:
         # Log the final error before re-raising
         logger.error(f"Failed to load file {file_path}. Error: {type(e).__name__} - {str(e)}")
         # Re-raise the exception to be handled by the caller. Do not return placeholder.
