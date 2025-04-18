@@ -39,8 +39,37 @@ export default function ChangelogPage() {
             <CardTitle className="text-4xl">Changelog</CardTitle>
           </CardHeader>
           <CardContent className="space-y-6 text-neutral-800 dark:text-neutral-200">
+
+          <section className="space-y-3">
+              <div className="flex items-baseline gap-3">
+                <h2 className="text-xl font-semibold text-neutral-900 dark:text-white">Version 1.1.1</h2>
+                <span className="text-sm text-neutral-600 dark:text-neutral-400">April 18, 2025</span>
+              </div>
+              <div className="pl-2 border-l-2 border-green-500 dark:border-green-500/70">
+                <h3 className="text-lg font-medium text-neutral-900 dark:text-white mb-2">New Features</h3>
+                <ul className="list-disc pl-5 space-y-1">
+                  <li>Added ability to stop long searches</li>
+                  <li>Added query suggestions & guidance</li>
+                </ul>
+              </div>
+              <div className="pl-2 border-l-2 border-blue-500 dark:border-blue-500/70">
+                <h3 className="text-lg font-medium text-neutral-900 dark:text-white mb-2">Improvements</h3>
+                <ul className="list-disc pl-5 space-y-1">
+                  <li>Reduced average search time by ~18s via new LLM model</li>
+                  <li>Improved search box design for easier use</li>
+                  <li>Increased max search time to avoid timeouts</li>
+                </ul>
+              </div>
+              <div className="pl-2 border-l-2 border-red-500 dark:border-red-500/70">
+                <h3 className="text-lg font-medium text-neutral-900 dark:text-white mb-2">Bug Fixes</h3>
+                <ul className="list-disc pl-5 space-y-1">
+                  <li>Fixed scrollbar glitching issues</li>
+                </ul>
+              </div>
+            </section>
+
+            <Separator className="my-6 bg-neutral-300 dark:bg-neutral-700" />
             
-            {/* Version Entry Example */}
             <section className="space-y-3">
               <div className="flex items-baseline gap-3">
                 <h2 className="text-xl font-semibold text-neutral-900 dark:text-white">Version 1.1.0</h2>
