@@ -301,7 +301,8 @@ def check_usage_limit(ip_address, function_name):
     # Define limits for each function
     LIMITS = {
         'stream_search_datasets': 50,  # test for 3
-        'stream_analyze': 5
+        'stream_analyze': 5,
+        'evaluate_search_query': 200
     }
     
     # Get the limit for this function

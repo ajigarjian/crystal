@@ -82,6 +82,99 @@ firebase_admin.initialize_app()
         ],
         cors_methods=["get", "post"]
     ),
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=5  # Keep timeout short for responsiveness
+)
+def evaluate_search_query(request):
+    """HTTP Cloud Function that evaluates a search query and provides suggestions."""
+    
+    # Parse request data
+    request_json = request.get_json(silent=True)
+    
+    if not request_json:
+        return https_fn.Response(
+            json.dumps({"error": "No JSON data provided"}),
+            status=400,
+            headers={"Content-Type": "application/json"}
+        )
+    
+    # Handle warming requests quickly
+    if request_json.get('warming'):
+        logger.info("Warming request received for evaluate_search_query")
+        return https_fn.Response(
+            json.dumps({"status": "warmed"}),
+            status=200,
+            headers={"Content-Type": "application/json"}
+        )
+    
+    # Get the query parameter
+    query = request_json.get('query', '')
+    
+    if not query:
+        return https_fn.Response(
+            json.dumps({
+                "quality": "typing",
+                "rating": 0,
+                "message": "Enter a search query",
+                "suggestions": []
+            }),
+            status=200,
+            headers={"Content-Type": "application/json"}
+        )
+    
+    # Get IP-based usage limits
+    from helpers.db_utils import check_usage_limit
+    
+    # Get the client IP address
+    ip_address = request.headers.get('X-Forwarded-For', '').split(',')[0].strip()
+    if not ip_address:
+        ip_address = request.remote_addr
+    
+    # Check if the IP has exceeded the usage limit
+    exceeded, error_message = check_usage_limit(ip_address, 'evaluate_search_query')
+    if exceeded:
+        logger.info(f"Usage limit exceeded for IP {ip_address} on evaluate_search_query")
+        return https_fn.Response(
+            json.dumps({
+                "error": error_message,
+                "type": "usage_limit_exceeded",
+                "limit_type": "evaluate_search_query"
+            }),
+            status=429,  # Too Many Requests
+            headers={"Content-Type": "application/json"}
+        )
+    
+    # Import the query evaluator
+    from factchecker.search.query_processing.query_evaluator import evaluate_query
+    
+    # Evaluate the query
+    start_time = time.time()
+    evaluation = evaluate_query(query)
+    execution_time = time.time() - start_time
+    
+    # Add timing information
+    evaluation["execution_time"] = execution_time
+    
+    # Log the response
+    logger.info(f"Query evaluation completed in {execution_time:.2f}s for: '{query}'")
+    
+    return https_fn.Response(
+        json.dumps(evaluation),
+        status=200,
+        headers={"Content-Type": "application/json"}
+    )
+
+@https_fn.on_request(
+    cors=options.CorsOptions(
+        cors_origins=[
+        "https://crystal-2f87e.web.app",
+        "https://askcrystal.info",
+        "https://www.askcrystal.info",
+        "http://localhost:3000",
+        "http://localhost:5173",
+        ],
+        cors_methods=["get", "post"]
+    ),
     memory=options.MemoryOption.GB_2,
     timeout_sec=180, # Let's increase timeout here to 3 mins.
     min_instances=1
