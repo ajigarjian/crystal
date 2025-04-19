@@ -292,7 +292,7 @@ export default function Home() {
                   className="text-white flex items-center gap-1 hover:text-white/80 transition-colors"
                   style={{ fontFamily: 'var(--font-geist-sans)' }}
                 >
-                  Change Log <ArrowRight className="h-4 w-4" />
+                  Change Log <ArrowRight className="h-5 w-5" />
                 </Button>
               </Link>
               {/* <Link href="/blog">
@@ -307,10 +307,10 @@ export default function Home() {
               <Link href="/waitlist">
                 <Button
                   variant="link"
-                  className="text-white flex items-center gap-2 hover:text-white/80 transition-colors"
+                  className="text-white text-base flex items-center gap-2 hover:text-white/80 transition-colors"
                   style={{ fontFamily: 'var(--font-geist-sans)' }}
                 >
-                  Join <Badge className="bg-purple-500 hover:bg-purple-500 text-xs py-0 px-1.5 font-normal rounded-sm">BETA</Badge> Waitlist <ArrowRight className="h-4 w-4" />
+                  Join <Badge className="bg-purple-500 hover:bg-purple-500 text-xs py-0 px-1.5 font-normal rounded-sm">BETA</Badge> Waitlist <ArrowRight className="h-5 w-5" />
                 </Button>
               </Link>
             </>
@@ -319,20 +319,20 @@ export default function Home() {
               <div className="w-full flex items-center justify-between">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon" className="text-white hover:bg-white/10 hover:text-white">
-                      <Menu className="h-6 w-6" />
+                    <Button variant="ghost" size="icon" className="text-white hover:bg-white/10 hover:text-white p-2">
+                      <Menu className="h-7 w-7" />
                       <span className="sr-only">Open menu</span>
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start" className="bg-neutral-800 border-neutral-700 text-white">
-                    <DropdownMenuItem asChild className="focus:bg-neutral-700 focus:text-white">
-                      <Link href="/about" className="flex items-center gap-2">About <ArrowRight className="h-4 w-4" /></Link>
+                    <DropdownMenuItem asChild className="focus:bg-neutral-700 focus:text-white px-4 py-3">
+                      <Link href="/about" className="flex items-center gap-2 text-base">About <ArrowRight className="h-5 w-5" /></Link>
                     </DropdownMenuItem>
-                    <DropdownMenuItem asChild className="focus:bg-neutral-700 focus:text-white">
-                      <Link href="/log" className="flex items-center gap-2">Change Log <ArrowRight className="h-4 w-4" /></Link>
+                    <DropdownMenuItem asChild className="focus:bg-neutral-700 focus:text-white px-4 py-3">
+                      <Link href="/log" className="flex items-center gap-2 text-base">Change Log <ArrowRight className="h-5 w-5" /></Link>
                     </DropdownMenuItem>
-                    <DropdownMenuItem asChild className="focus:bg-neutral-700 focus:text-white">
-                      <Link href="/privacy" className="flex items-center gap-2">Privacy <ArrowRight className="h-4 w-4" /></Link>
+                    <DropdownMenuItem asChild className="focus:bg-neutral-700 focus:text-white px-4 py-3">
+                      <Link href="/privacy" className="flex items-center gap-2 text-base">Privacy <ArrowRight className="h-5 w-5" /></Link>
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -340,10 +340,10 @@ export default function Home() {
                 <Link href="/waitlist">
                   <Button
                     variant="link"
-                    className="text-white flex items-center gap-2 hover:text-white/80 transition-colors"
+                    className="text-white text-base flex items-center gap-2 hover:text-white/80 transition-colors"
                     style={{ fontFamily: 'var(--font-geist-sans)' }}
                   >
-                    Join <Badge className="bg-purple-500 hover:bg-purple-500 text-xs py-0 px-1.5 font-normal rounded-sm">BETA</Badge> Waitlist <ArrowRight className="h-4 w-4" />
+                    Join <Badge className="bg-purple-500 hover:bg-purple-500 text-xs py-0 px-1.5 font-normal rounded-sm">BETA</Badge> Waitlist <ArrowRight className="h-5 w-5" />
                   </Button>
                 </Link>
               </div>
