@@ -60,9 +60,12 @@ except Exception as django_setup_error:
             raise
 
 # After Django is set up, import helpers that might use Django models
-from helpers.db_utils import execute_query, get_db_connection, get_connection_pool
+from helpers.db_utils import execute_query, get_connection_pool, check_usage_limit
 from helpers.stream_search_datasets import stream_search_datasets_helper
 from helpers.stream_analyze import stream_analyze_helper, NumpyEncoder
+# Import the query evaluator at the top level
+from factchecker.search.query_processing.query_evaluator import evaluate_query
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -80,9 +83,105 @@ firebase_admin.initialize_app()
         "http://localhost:3000",
         "http://localhost:5173",
         ],
+        cors_methods=["get", "post", "options"]
+    ),
+    timeout_sec=20,  # Keep timeout short for responsiveness
+    min_instances=1,
+    memory=options.MemoryOption.MB_512 # Increase memory
+)
+def evaluate_search_query(request):
+    """HTTP Cloud Function that evaluates a search query and provides suggestions."""
+    
+    # Parse request data
+    request_json = request.get_json(silent=True)
+    
+    if not request_json:
+        return https_fn.Response(
+            json.dumps({"error": "No JSON data provided"}),
+            status=400,
+            headers={"Content-Type": "application/json"}
+        )
+    
+    # Handle warming requests quickly
+    if request_json.get('warming'):
+        logger.info("Warming request received for evaluate_search_query")
+        return https_fn.Response(
+            json.dumps({"status": "warmed"}),
+            status=200,
+            headers={"Content-Type": "application/json"}
+        )
+    
+    # Get the query parameter
+    query = request_json.get('query', '')
+    
+    # Return early for very short queries
+    MIN_QUERY_LENGTH = 3
+    if len(query) < MIN_QUERY_LENGTH:
+        return https_fn.Response(
+            json.dumps({
+                "quality": "typing",
+                "rating": 0,
+                "message": f"Keep typing...", # Suggest continuing typing
+                "suggestions": []
+            }),
+            status=200,
+            headers={"Content-Type": "application/json"}
+        )
+    
+    # Get IP-based usage limits
+    # from helpers.db_utils import check_usage_limit # Moved to top
+    
+    # Get the client IP address
+    ip_address = request.headers.get('X-Forwarded-For', '').split(',')[0].strip()
+    if not ip_address:
+        ip_address = request.remote_addr
+    
+    # Check if the IP has exceeded the usage limit
+    exceeded, error_message = check_usage_limit(ip_address, 'evaluate_search_query')
+    if exceeded:
+        logger.info(f"Usage limit exceeded for IP {ip_address} on evaluate_search_query")
+        return https_fn.Response(
+            json.dumps({
+                "error": error_message,
+                "type": "usage_limit_exceeded",
+                "limit_type": "evaluate_search_query"
+            }),
+            status=429,  # Too Many Requests
+            headers={"Content-Type": "application/json"}
+        )
+    
+    # Import the query evaluator # Moved to top
+    # from factchecker.search.query_processing.query_evaluator import evaluate_query
+    
+    # Evaluate the query
+    start_time = time.time()
+    evaluation = evaluate_query(query)
+    execution_time = time.time() - start_time
+    
+    # Add timing information
+    evaluation["execution_time"] = execution_time
+    
+    # Log the response
+    logger.info(f"Query evaluation completed in {execution_time:.2f}s for: '{query}'")
+    
+    return https_fn.Response(
+        json.dumps(evaluation),
+        status=200,
+        headers={"Content-Type": "application/json"}
+    )
+
+@https_fn.on_request(
+    cors=options.CorsOptions(
+        cors_origins=[
+        "https://crystal-2f87e.web.app",
+        "https://askcrystal.info",
+        "https://www.askcrystal.info",
+        "http://localhost:3000",
+        "http://localhost:5173",
+        ],
         cors_methods=["get", "post"]
     ),
-    memory=options.MemoryOption.GB_2,
+    memory=options.MemoryOption.GB_1,
     timeout_sec=180, # Let's increase timeout here to 3 mins.
     min_instances=1
 )
