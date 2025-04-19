@@ -226,10 +226,10 @@ export default function Home() {
     };
   }, []);
 
-  // Add this effect to warm functions when the page loads
-  useEffect(() => {
-    warmFunctions();
-  }, []);
+  // // Add this effect to warm functions when the page loads
+  // useEffect(() => {
+  //   warmFunctions();
+  // }, []);
 
   // Add this effect to check for mobile
   useEffect(() => {
