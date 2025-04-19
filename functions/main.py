@@ -131,10 +131,23 @@ def evaluate_search_query(request):
     # Get IP-based usage limits
     # from helpers.db_utils import check_usage_limit # Moved to top
     
-    # Get the client IP address
-    ip_address = request.headers.get('X-Forwarded-For', '').split(',')[0].strip()
+    # Get the client IP address, prioritizing Cloudflare header
+    cf_ip = request.headers.get('cf-connecting-ip')
+    if cf_ip:
+        ip_address = cf_ip
+    else:
+        # Fallback to X-Forwarded-For, taking the first IP if multiple exist
+        xff = request.headers.get('x-forwarded-for')
+        if xff:
+            ip_address = xff.split(',')[0].strip()
+        else:
+            # Fallback to remote_addr if no proxy headers are present
+            ip_address = request.remote_addr
+    
+    # Ensure ip_address is not None before logging or using it
     if not ip_address:
-        ip_address = request.remote_addr
+        ip_address = "unknown" # Or handle error appropriately
+        logger.warning("Could not determine client IP address for evaluate_search_query.")
     
     # Check if the IP has exceeded the usage limit
     exceeded, error_message = check_usage_limit(ip_address, 'evaluate_search_query')
@@ -223,10 +236,23 @@ def stream_search_datasets(request):
     # Check IP-based usage limits
     from helpers.db_utils import check_usage_limit
     
-    # Get the client IP address
-    ip_address = request.headers.get('X-Forwarded-For', '').split(',')[0].strip()
+    # Get the client IP address, prioritizing Cloudflare header
+    cf_ip = request.headers.get('cf-connecting-ip')
+    if cf_ip:
+        ip_address = cf_ip
+    else:
+        # Fallback to X-Forwarded-For, taking the first IP if multiple exist
+        xff = request.headers.get('x-forwarded-for')
+        if xff:
+            ip_address = xff.split(',')[0].strip()
+        else:
+            # Fallback to remote_addr if no proxy headers are present
+            ip_address = request.remote_addr
+    
+    # Ensure ip_address is not None before logging or using it
     if not ip_address:
-        ip_address = request.remote_addr
+        ip_address = "unknown" # Or handle error appropriately
+        logger.warning("Could not determine client IP address for stream_search_datasets.")
     
     # Check if the IP has exceeded the usage limit
     exceeded, error_message = check_usage_limit(ip_address, 'stream_search_datasets')
@@ -524,10 +550,23 @@ def stream_analyze(request):
     # Check IP-based usage limits
     from helpers.db_utils import check_usage_limit
     
-    # Get the client IP address
-    ip_address = request.headers.get('X-Forwarded-For', '').split(',')[0].strip()
+    # Get the client IP address, prioritizing Cloudflare header
+    cf_ip = request.headers.get('cf-connecting-ip')
+    if cf_ip:
+        ip_address = cf_ip
+    else:
+        # Fallback to X-Forwarded-For, taking the first IP if multiple exist
+        xff = request.headers.get('x-forwarded-for')
+        if xff:
+            ip_address = xff.split(',')[0].strip()
+        else:
+            # Fallback to remote_addr if no proxy headers are present
+            ip_address = request.remote_addr
+    
+    # Ensure ip_address is not None before logging or using it
     if not ip_address:
-        ip_address = request.remote_addr
+        ip_address = "unknown" # Or handle error appropriately
+        logger.warning("Could not determine client IP address for stream_analyze.")
     
     # Check if the IP has exceeded the usage limit
     exceeded, error_message = check_usage_limit(ip_address, 'stream_analyze')
