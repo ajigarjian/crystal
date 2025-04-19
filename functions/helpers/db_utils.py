@@ -250,7 +250,7 @@ def check_usage_limit(ip_address, function_name):
     from firebase_admin import firestore
     
     # Skip limit checking in local development environment
-    if os.getenv('FUNCTIONS_EMULATOR') or ip_address in ('127.0.0.1', '::1', 'localhost', '73.141.182.144', '162.83.246.82'):
+    if os.getenv('FUNCTIONS_EMULATOR') or ip_address in ('127.0.0.1', '::1', 'localhost', '162.83.246.82'):
         return False, None
     
     # Define limits for each function
@@ -261,7 +261,7 @@ def check_usage_limit(ip_address, function_name):
     }
     
     # Get the limit for this function
-    limit = LIMITS.get(function_name, 10)  # Default to 10 if function not in limits
+    limit = LIMITS.get(function_name, 50)  # Default to 10 if function not in limits
     
     try:
         # Get Firestore client
@@ -293,7 +293,7 @@ def check_usage_limit(ip_address, function_name):
             error_message = (
                 "Thank you for using Crystal! To ensure everyone gets a fair chance to use our Alpha "
                 "version, we've set a limit of {} requests per user for this feature. "
-                "If you need a higher limit, please join the beta waitlist on the home page, or email us at ajigarjian@gmail.com and we'll get back to you."
+                "If you need a higher limit, please join the beta waitlist on the home page, or email us at ari@askcrystal.info and we'll get back to you."
             ).format(limit)
             
             # Update the timestamp even when exceeding limit
