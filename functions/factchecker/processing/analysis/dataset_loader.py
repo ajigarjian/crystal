@@ -611,112 +611,156 @@ def _load_json(file_path: str) -> pd.DataFrame:
 
 # --- Main Loading Function ---
 
-def load_datafile(file_path: str) -> Union[pd.DataFrame, Dict[str, Any]]:
+def load_datafile(file_path: str, file_format: Optional[str] = None) -> Union[pd.DataFrame, Dict[str, Any]]:
     """
     Load a data file (CSV, Excel, PDF, XML, or JSON) using appropriate helpers.
-    Infers file type if extension is missing or unknown.
+    Prioritizes the explicitly provided file_format if available, otherwise uses extension/inference.
     Returns a DataFrame for tabular data or a Dict for PDF/failed XML.
     Raises FileNotFoundError if file doesn't exist, or ValueError/other exceptions on loading errors.
     """
-    logger.info(f"Initiating loading for: {file_path}")
+    logger.info(f"Initiating loading for: {file_path}. Explicit format provided: {file_format}")
 
     if not os.path.exists(file_path):
         logger.error(f"File not found: {file_path}")
         raise FileNotFoundError(f"The specified file does not exist: {file_path}")
 
-    file_extension = os.path.splitext(file_path)[1].lower()
     result: Union[pd.DataFrame, Dict[str, Any]] = None
-    inferred_type = None
+    final_log_type = None # To store the type used for final logging
 
     try:
-        # 1. Try loading based on extension first
-        if file_extension == '.csv':
-            result = _load_csv(file_path)
-        elif file_extension in ['.xlsx', '.xls']:
-            result = _load_excel(file_path)
-        elif file_extension == '.pdf':
-            result = _load_pdf(file_path) # Returns Dict
-        elif file_extension == '.xml':
-            result = _load_xml(file_path) # Returns DataFrame or Dict
-        elif file_extension == '.json':
-             result = _load_json(file_path)
-        # 2. If extension unknown/missing or loading failed, try inferring type
-        # Note: The individual loaders already have robust error handling.
-        # If they fail with a known extension, we probably shouldn't try inferring.
-        # We only infer if the extension itself was the blocker.
-        elif not file_extension or file_extension not in ['.csv', '.xlsx', '.xls', '.pdf', '.xml', '.json']:
-            logger.info(f"Unknown or missing extension ('{file_extension}'). Attempting type inference.")
-            try:
-                # Use mimetypes to guess type based on filename/extension
-                mime_type, encoding = mimetypes.guess_type(file_path)
+        # 1. Prioritize explicit format if provided
+        if file_format:
+            format_lower = file_format.lower().strip()
+            logger.info(f"Attempting to load using explicit format: '{format_lower}'")
+            load_function = None
+            if format_lower == 'csv':
+                load_function = _load_csv
+                final_log_type = 'CSV (explicit)'
+            elif format_lower in ['xlsx', 'xls']:
+                load_function = _load_excel
+                final_log_type = 'Excel (explicit)'
+            elif format_lower == 'pdf':
+                load_function = _load_pdf # Returns Dict
+                final_log_type = 'PDF (explicit)'
+            elif format_lower == 'xml':
+                load_function = _load_xml # Returns DataFrame or Dict
+                final_log_type = 'XML (explicit)'
+            elif format_lower == 'json':
+                load_function = _load_json
+                final_log_type = 'JSON (explicit)'
+            else:
+                logger.warning(f"Explicit format '{file_format}' provided but not recognized or supported. Falling back to extension/inference.")
 
-                if not mime_type:
-                    error_message = f"Could not infer file type for {os.path.basename(file_path)}"
-                    logger.error(error_message)
-                    raise ValueError(error_message)
+            if load_function:
+                try:
+                    result = load_function(file_path)
+                    logger.info(f"Successfully loaded using explicit format '{file_format}'.")
+                except Exception as e:
+                    logger.error(f"Error loading file using explicit format '{file_format}': {e}. Falling back to extension/inference.")
+                    # Reset result and log type to allow fallback
+                    result = None
+                    final_log_type = None
 
-                logger.info(f"Inferred MIME type: {mime_type}")
-
-                # Map MIME types to our loader functions
-                if 'csv' in mime_type or 'text/plain' in mime_type: # Treat plain text as potential CSV
-                    inferred_type = 'csv'
-                    result = _load_csv(file_path)
-                elif 'excel' in mime_type or 'spreadsheet' in mime_type or 'application/vnd.ms-excel' in mime_type or 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' in mime_type:
-                    inferred_type = 'excel'
-                    result = _load_excel(file_path)
-                elif 'pdf' in mime_type:
-                    inferred_type = 'pdf'
-                    result = _load_pdf(file_path)
-                elif 'xml' in mime_type:
-                    inferred_type = 'xml'
-                    result = _load_xml(file_path)
-                elif 'json' in mime_type:
-                    inferred_type = 'json'
-                    result = _load_json(file_path)
-                else:
-                    error_message = f"Unsupported file type: Extension '{file_extension}', Inferred MIME type '{mime_type}'"
-                    logger.error(error_message)
-                    raise ValueError(error_message)
-            except Exception as infer_err: # Catch errors during inferred load attempt (e.g., loading based on inferred type fails)
-                inferred_type_str = inferred_type if inferred_type else "unknown (based on mimetypes guess)"
-                error_message = f"Error loading file after inferring type as '{inferred_type_str}': {infer_err}"
-                logger.error(error_message)
-                # Re-raise the specific error from the loading attempt
-                raise ValueError(error_message) from infer_err
-
-        # If we reach here and result is None, it means the extension was known but loading failed
-        # within the specific _load_* function, which would have raised an exception.
-        # Or, the extension was recognized but not one we handle (e.g., '.txt' if not added above).
+        # 2. If explicit format wasn't provided, failed, or wasn't recognized, use extension/inference
         if result is None:
-             # This case should ideally not be reached if all loaders raise exceptions on failure.
-             # But as a safeguard:
-             if file_extension and file_extension not in ['.csv', '.xlsx', '.xls', '.pdf', '.xml', '.json']:
+            logger.info("Using file extension or inference for loading.")
+            file_extension = os.path.splitext(file_path)[1].lower()
+            inferred_type = None
+
+            # Try loading based on extension first
+            if file_extension == '.csv':
+                result = _load_csv(file_path)
+                final_log_type = 'CSV (extension)'
+            elif file_extension in ['.xlsx', '.xls']:
+                result = _load_excel(file_path)
+                final_log_type = 'Excel (extension)'
+            elif file_extension == '.pdf':
+                result = _load_pdf(file_path) # Returns Dict
+                final_log_type = 'PDF (extension)'
+            elif file_extension == '.xml':
+                result = _load_xml(file_path) # Returns DataFrame or Dict
+                final_log_type = 'XML (extension)'
+            elif file_extension == '.json':
+                 result = _load_json(file_path)
+                 final_log_type = 'JSON (extension)'
+            # If extension unknown/missing or loading failed, try inferring type
+            elif not file_extension or file_extension not in ['.csv', '.xlsx', '.xls', '.pdf', '.xml', '.json']:
+                logger.info(f"Unknown or missing extension ('{file_extension}'). Attempting type inference.")
+                try:
+                    mime_type, encoding = mimetypes.guess_type(file_path)
+                    if not mime_type:
+                        raise ValueError(f"Could not infer file type for {os.path.basename(file_path)}")
+
+                    logger.info(f"Inferred MIME type: {mime_type}")
+                    load_function = None
+                    if 'csv' in mime_type or 'text/plain' in mime_type:
+                        inferred_type = 'csv'
+                        load_function = _load_csv
+                    elif 'excel' in mime_type or 'spreadsheet' in mime_type or 'application/vnd.ms-excel' in mime_type or 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' in mime_type:
+                        inferred_type = 'excel'
+                        load_function = _load_excel
+                    elif 'pdf' in mime_type:
+                        inferred_type = 'pdf'
+                        load_function = _load_pdf
+                    elif 'xml' in mime_type:
+                        inferred_type = 'xml'
+                        load_function = _load_xml
+                    elif 'json' in mime_type:
+                        inferred_type = 'json'
+                        load_function = _load_json
+                    else:
+                        raise ValueError(f"Unsupported inferred MIME type '{mime_type}'")
+
+                    if load_function:
+                         logger.info(f"Loading based on inferred type: {inferred_type}")
+                         result = load_function(file_path)
+                         final_log_type = f"{inferred_type.upper()} (inferred)"
+
+                except Exception as infer_err:
+                    error_message = f"File type inference/loading failed: {infer_err}"
+                    logger.error(error_message)
+                    # Let the final check handle the error reporting / raising
+            # else: -> This handles the case where the extension was recognized but is not one we support
+            elif file_extension not in ['.csv', '.xlsx', '.xls', '.pdf', '.xml', '.json']:
                  error_message = f"Unsupported file extension: {file_extension}"
                  logger.error(error_message)
                  raise ValueError(error_message)
-             else:
-                 # Should have been caught by exceptions in _load_* or inference block
-                 error_message = f"Loading failed for unknown reason for file: {file_path}"
-                 logger.error(error_message)
-                 raise RuntimeError(error_message)
 
 
-        # Log success and basic info
-        log_type = inferred_type or file_extension.lstrip('.')
+        # 3. Final check: If result is still None after all attempts
+        if result is None:
+             # This implies loading failed within a specific _load_* function (which should have raised)
+             # or inference failed, or the extension was known but loading returned None unexpectedly.
+             error_message = f"Failed to load file {os.path.basename(file_path)} after all attempts. Explicit format: {file_format}, Extension: {file_extension}."
+             logger.error(error_message)
+             # We rely on the _load_* functions or inference logic to raise specific errors.
+             # If we reach here, it's an unexpected state.
+             raise RuntimeError(error_message + " Ensure loader functions raise exceptions on failure.")
+
+
+        # Log success and return result
+        log_type_str = final_log_type or "UnknownType" # Use the determined type for logging
         if isinstance(result, pd.DataFrame):
-            logger.info(f"Successfully loaded {log_type} into DataFrame. Shape: {result.shape}, Columns: {list(result.columns)}")
-            logger.info(f"DataFrame sample:\\n{result.head(3).to_string()}")
-        elif isinstance(result, dict) and result.get('type') == 'pdf':
-            logger.info(f"Successfully processed PDF ({log_type}). Pages: {result.get('num_pages')}, Extracted {result.get('pages_extracted')}")
-        elif isinstance(result, dict) and result.get('type') == 'xml_meta':
-            logger.warning(f"XML loading ({log_type}) resulted in metadata dictionary, not DataFrame. Root tag: {result.get('root_tag')}")
+            logger.info(f"Successfully loaded {log_type_str} into DataFrame. Shape: {result.shape}")
+            # logger.info(f"DataFrame sample:\\n{result.head(3).to_string()}") # Keep commented for brevity
+        elif isinstance(result, dict):
+             data_type = result.get('type', 'dictionary')
+             if data_type == 'pdf':
+                 logger.info(f"Successfully processed PDF ({log_type_str}). Pages: {result.get('num_pages', 0)}")
+             elif data_type == 'xml_meta':
+                 logger.warning(f"XML loading ({log_type_str}) resulted in metadata dictionary, not DataFrame. Root tag: {result.get('root_tag')}")
+             else:
+                  logger.info(f"Successfully loaded data as dictionary ({log_type_str}). Keys: {list(result.keys())}")
+        else:
+             # Should not happen with current loaders, but for safety
+             logger.info(f"Successfully loaded data ({log_type_str}). Type: {type(result).__name__}")
 
         return result
 
     except (FileNotFoundError, ValueError, pd.errors.EmptyDataError, RuntimeError, Exception) as e:
         # Log the final error before re-raising
         logger.error(f"Failed to load file {file_path}. Error: {type(e).__name__} - {str(e)}")
-        # Re-raise the exception to be handled by the caller. Do not return placeholder.
+        # Re-raise the exception to be handled by the caller.
         raise
 
 

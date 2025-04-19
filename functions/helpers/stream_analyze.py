@@ -440,7 +440,9 @@ def stream_analyze_helper(dataset_ids, query, file_path=None, parallel=True):
                 ))
                 
                 try:
-                    dataset_content = load_datafile(file_path)
+                    # Pass the explicit format from the resource metadata if available
+                    file_format = best_resource.get('resource_format')
+                    dataset_content = load_datafile(file_path, file_format=file_format)
                     
                     # Report successful loading
                     if hasattr(dataset_content, 'shape'):
@@ -1134,7 +1136,7 @@ def process_resource_metadata(resource_metadata):
 
     # If length is 0, return None. This means no datasets were processed.
     if len(datasets) == 0:
-        logger.error("No usable resources were identified for resource", resource_id)
+        logger.error("No usable dataset resources were identified in the provided metadata.")
         return None
 
     # Sort resources by position for each dataset
