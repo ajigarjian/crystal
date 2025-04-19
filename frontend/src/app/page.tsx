@@ -1,15 +1,19 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { useEffect, useRef, useState } from "react";
-import { ArrowRight, Twitter } from "lucide-react";
+import { ArrowRight, Menu } from "lucide-react";
 import Link from "next/link";
-import { trackDwellTimeEnd, trackDwellTimeStart, warmFunctions } from "@/lib/firebase";
+import { trackDwellTimeEnd, trackDwellTimeStart } from "@/lib/firebase";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
-import { QUERY_EXAMPLES } from "@/lib/constants";
 import { FeedbackWidget } from '@/components/FeedbackWidget';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 // Pre-generate the data text outside the component
 const DATA_TEXTS = generateDataTexts(150);
@@ -32,9 +36,6 @@ export default function Home() {
     opacity: number;
     transform: string;
   }>>([]);
-  
-  // Initialize with empty examples
-  const [exampleQueries, setExampleQueries] = useState<string[]>([]);
   
   // Initialize trail positions
   useEffect(() => {
@@ -226,11 +227,6 @@ export default function Home() {
     };
   }, []);
 
-  // // Add this effect to warm functions when the page loads
-  // useEffect(() => {
-  //   warmFunctions();
-  // }, []);
-
   // Add this effect to check for mobile
   useEffect(() => {
     const checkMobile = () => {
@@ -241,19 +237,6 @@ export default function Home() {
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
-  
-  // Get random examples on client-side only
-  useEffect(() => {
-    const getRandomExamples = (count: number) => {
-      const shuffled = [...QUERY_EXAMPLES].sort(() => 0.5 - Math.random());
-      return shuffled.slice(0, count);
-    };
-    
-    setExampleQueries(getRandomExamples(3));
-  }, []);
-  
-  // Get displayed examples based on screen size
-  const displayedExamples = isMobile ? exampleQueries.slice(0, 3) : exampleQueries;
   
   // Modified handler for the Let's Go button click
   const handleGoButtonClick = () => {
@@ -282,52 +265,90 @@ export default function Home() {
         } as React.CSSProperties}
       >
         {/* Navigation links */}
-        <div className="absolute top-6 right-6 z-30 flex gap-4">
-          <Link href="/about">
-            <Button 
-              variant="link" 
-              className="text-white flex items-center gap-1 hover:text-white/80 transition-colors"
-              style={{ fontFamily: 'var(--font-geist-sans)' }}
-            >
-              About <ArrowRight className="h-4 w-4" />
-            </Button>
-          </Link>
-          <Link href="/privacy">
-            <Button 
-              variant="link" 
-              className="text-white flex items-center gap-1 hover:text-white/80 transition-colors"
-              style={{ fontFamily: 'var(--font-geist-sans)' }}
-            >
-              Privacy <ArrowRight className="h-4 w-4" />
-            </Button>
-          </Link>
-          <Link href="/log">
-            <Button 
-              variant="link" 
-              className="text-white flex items-center gap-1 hover:text-white/80 transition-colors"
-              style={{ fontFamily: 'var(--font-geist-sans)' }}
-            >
-              Change Log <ArrowRight className="h-4 w-4" />
-            </Button>
-          </Link>
-          {/* <Link href="/blog">
-            <Button 
-              variant="link" 
-              className="text-white flex items-center gap-1 hover:text-white/80 transition-colors"
-              style={{ fontFamily: 'var(--font-geist-sans)' }}
-            >
-              Blog <ArrowRight className="h-4 w-4" />
-            </Button>
-          </Link> */}
-          <Link href="/waitlist">
-            <Button 
-              variant="link" 
-              className="text-white flex items-center gap-2 hover:text-white/80 transition-colors"
-              style={{ fontFamily: 'var(--font-geist-sans)' }}
-            >
-              Join <Badge className="bg-purple-500 hover:bg-purple-500 text-xs py-0 px-1.5 font-normal rounded-sm">BETA</Badge> Waitlist <ArrowRight className="h-4 w-4" />
-            </Button>
-          </Link>
+        <div className="absolute top-6 left-0 right-0 px-6 z-30 flex items-center justify-end sm:justify-end gap-4">
+          {!isMobile ? (
+            <>
+              <Link href="/about">
+                <Button
+                  variant="link"
+                  className="text-white flex items-center gap-1 hover:text-white/80 transition-colors"
+                  style={{ fontFamily: 'var(--font-geist-sans)' }}
+                >
+                  About <ArrowRight className="h-4 w-4" />
+                </Button>
+              </Link>
+              <Link href="/privacy">
+                <Button
+                  variant="link"
+                  className="text-white flex items-center gap-1 hover:text-white/80 transition-colors"
+                  style={{ fontFamily: 'var(--font-geist-sans)' }}
+                >
+                  Privacy <ArrowRight className="h-4 w-4" />
+                </Button>
+              </Link>
+              <Link href="/log">
+                <Button
+                  variant="link"
+                  className="text-white flex items-center gap-1 hover:text-white/80 transition-colors"
+                  style={{ fontFamily: 'var(--font-geist-sans)' }}
+                >
+                  Change Log <ArrowRight className="h-4 w-4" />
+                </Button>
+              </Link>
+              {/* <Link href="/blog">
+                <Button
+                  variant="link"
+                  className="text-white flex items-center gap-1 hover:text-white/80 transition-colors"
+                  style={{ fontFamily: 'var(--font-geist-sans)' }}
+                >
+                  Blog <ArrowRight className="h-4 w-4" />
+                </Button>
+              </Link> */}
+              <Link href="/waitlist">
+                <Button
+                  variant="link"
+                  className="text-white flex items-center gap-2 hover:text-white/80 transition-colors"
+                  style={{ fontFamily: 'var(--font-geist-sans)' }}
+                >
+                  Join <Badge className="bg-purple-500 hover:bg-purple-500 text-xs py-0 px-1.5 font-normal rounded-sm">BETA</Badge> Waitlist <ArrowRight className="h-4 w-4" />
+                </Button>
+              </Link>
+            </>
+          ) : (
+            <>
+              <div className="w-full flex items-center justify-between">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon" className="text-white hover:bg-white/10 hover:text-white">
+                      <Menu className="h-6 w-6" />
+                      <span className="sr-only">Open menu</span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="bg-neutral-800 border-neutral-700 text-white">
+                    <DropdownMenuItem asChild className="focus:bg-neutral-700 focus:text-white">
+                      <Link href="/about" className="flex items-center gap-2">About <ArrowRight className="h-4 w-4" /></Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild className="focus:bg-neutral-700 focus:text-white">
+                      <Link href="/log" className="flex items-center gap-2">Change Log <ArrowRight className="h-4 w-4" /></Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild className="focus:bg-neutral-700 focus:text-white">
+                      <Link href="/privacy" className="flex items-center gap-2">Privacy <ArrowRight className="h-4 w-4" /></Link>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                <Link href="/waitlist">
+                  <Button
+                    variant="link"
+                    className="text-white flex items-center gap-2 hover:text-white/80 transition-colors"
+                    style={{ fontFamily: 'var(--font-geist-sans)' }}
+                  >
+                    Join <Badge className="bg-purple-500 hover:bg-purple-500 text-xs py-0 px-1.5 font-normal rounded-sm">BETA</Badge> Waitlist <ArrowRight className="h-4 w-4" />
+                  </Button>
+                </Link>
+              </div>
+            </>
+          )}
         </div>
 
         {/* Data Text Background Layer */}
@@ -395,7 +416,7 @@ export default function Home() {
             className="w-full py-7 text-lg bg-green-500 hover:bg-green-600 text-white font-medium flex items-center justify-center gap-2 shadow-lg shadow-green-500/30 transition-all hover:shadow-green-500/40 hover:scale-105"
             size="lg"
           >
-            Let's Go
+            Let&apos;s Go
             <ArrowRight className="h-5 w-5" />
           </Button>
         </div>
