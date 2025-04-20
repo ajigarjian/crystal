@@ -206,7 +206,20 @@ def run_local_analysis(parallel):
     logger.info(f"Parallel mode: {parallel}")
     
     # Tracking variables
+    all_messages = [] # List to store all received messages
     message_count = 0
+    notable_messages = [] # List to store only notable messages for saving
+    notable_types = {
+        'extracted_data', 
+        'web_search_results', 
+        'web_search_summary', 
+        'analysis_result', 
+        'analysis', # Add analysis text if desired
+        'formatted_data', 
+        'findings', 
+        'complete', 
+        'error'
+    }
     status_messages = []
     extracted_data = None
     formatted_data = None
@@ -230,10 +243,15 @@ def run_local_analysis(parallel):
                 # Parse the chunk as JSON
                 data = json.loads(chunk.strip())
                 message_count += 1
+                all_messages.append(data) # Add the raw message data to the list
                 
                 # Process based on type
                 msg_type = data.get('type')
                 logger.debug(f"Processing message type: {msg_type}")
+                
+                # Add to notable messages if the type matches
+                if msg_type in notable_types:
+                    notable_messages.append(data)
                 
                 if msg_type == 'status':
                     status_messages.append(data.get('message', ''))
@@ -244,23 +262,28 @@ def run_local_analysis(parallel):
                     if 'details' in data:
                         logger.error(f"Details: {data.get('details', '')}")
                     
+                elif msg_type == 'extracted_data':
+                    extracted_data = data.get('data')
+                    logger.info(f"Received extracted data for dataset: {extracted_data.get('dataset_title', 'Unknown')}")
+                    # Removed individual file saving
+                    
                 elif msg_type == 'web_search_results':
                     web_search_results = data.get('data')
                     logger.info(f"Received web search results with {len(web_search_results.get('results', []))} items")
-                    logger.debug(f"Web search results:\\n{json.dumps(web_search_results, indent=2)}")
+                    # Removed individual file saving
                     
                 elif msg_type == 'web_search_summary':
                     web_search_summary = data.get('data')
                     summary_text = web_search_summary.get('summary', 'No summary available')
                     logger.info(f"Web search summary: {summary_text[:100]}...")
-                    logger.debug(f"Full web search summary:\\n{json.dumps(web_search_summary, indent=2)}")
+                    # Removed individual file saving
                     
                 elif msg_type == 'analysis_result':
                     dataset_info = data.get('data', {}).get('dataset_info', {})
                     logger.info(f"Dataset: {dataset_info.get('title')}")
                     logger.info(f"Rows: {dataset_info.get('rows')}, Columns: {dataset_info.get('columns')}")
                     analysis_results.append(data.get('data'))
-                    logger.debug(f"Analysis result:\\n{json.dumps(data.get('data'), indent=2)}")
+                    logger.debug(f"Analysis result:\n{json.dumps(data.get('data'), indent=2)}")
                     
                 elif msg_type == 'analysis':
                     analysis = data.get('data', 'No analysis available')
@@ -269,44 +292,12 @@ def run_local_analysis(parallel):
                 elif msg_type == 'formatted_data':
                     formatted_data = data.get('data')
                     logger.info("Received formatted data")
-                    # Save formatted data to a JSON file
-                    try:
-                        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                        output_dir = "test_runs"
-                        os.makedirs(output_dir, exist_ok=True)
-                        
-                        # Create a filename based on the query
-                        query_slug = '_'.join(request_data.get('query', 'query').lower().split()[:4])
-                        filename = f"{output_dir}/formatted_data_{query_slug}_{timestamp}.json"
-                        
-                        # Save the data to the file
-                        with open(filename, 'w', encoding='utf-8') as f:
-                            json.dump(formatted_data, f, indent=2, ensure_ascii=False)
-                        logger.info(f"Saved formatted data to {filename}")
-                    except Exception as e:
-                        logger.error(f"Error saving formatted data: {e}")
-                        logger.error(traceback.format_exc())
+                    # Removed individual file saving
                     
                 elif msg_type == 'findings':
                     findings = data.get('data')
                     logger.info("Received findings summary")
-                    # Save findings to a JSON file
-                    try:
-                        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                        output_dir = "test_runs"
-                        os.makedirs(output_dir, exist_ok=True)
-                        
-                        # Create a filename based on the query
-                        query_slug = '_'.join(request_data.get('query', 'query').lower().split()[:4])
-                        filename = f"{output_dir}/findings_{query_slug}_{timestamp}.json"
-                        
-                        # Save the data to the file
-                        with open(filename, 'w', encoding='utf-8') as f:
-                            json.dump(findings, f, indent=2, ensure_ascii=False)
-                        logger.info(f"Saved findings to {filename}")
-                    except Exception as e:
-                        logger.error(f"Error saving findings: {e}")
-                        logger.error(traceback.format_exc())
+                    # Removed individual file saving
                     
                 elif msg_type == 'dataset_status':
                     dataset_id = data.get('dataset_id')
@@ -314,17 +305,17 @@ def run_local_analysis(parallel):
                     progress = data.get('progress')
                     message = data.get('message', '')
                     logger.info(f"Dataset Status: ID={dataset_id}, Status={status}, Progress={progress}, Message='{message}'")
-                    logger.debug(f"Full dataset_status message:\\n{json.dumps(data, indent=2)}")
+                    logger.debug(f"Full dataset_status message:\n{json.dumps(data, indent=2)}")
                     
                 elif msg_type == 'complete':
                     complete_data = data.get('data')
                     logger.info(f"Analysis complete in {data.get('message', '')}")
-                    logger.debug(f"Complete data:\\n{json.dumps(complete_data, indent=2)}")
+                    logger.debug(f"Complete data:\n{json.dumps(complete_data, indent=2)}")
                     break  # Exit the loop when we receive the complete message
                     
                 else:
                     logger.warning(f"Unknown message type: {msg_type}")
-                    logger.debug(f"Full unknown message:\\n{json.dumps(data, indent=2)}")
+                    logger.debug(f"Full unknown message:\n{json.dumps(data, indent=2)}")
                     
             except json.JSONDecodeError as e:
                 logger.error(f"Error parsing non-JSON message chunk: {chunk[:150]}...")
@@ -334,16 +325,32 @@ def run_local_analysis(parallel):
                 logger.error(f"Message content: {chunk[:100]}...")
                 logger.error(traceback.format_exc())
         
+        # Save all collected messages to a single file
+        if notable_messages:
+            try:
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                output_dir = "test_runs"
+                os.makedirs(output_dir, exist_ok=True)
+                query_slug = '_'.join(request_data.get('query', 'query').lower().split()[:4])
+                filename = f"{output_dir}/consolidated_run_{query_slug}_{timestamp}.json"
+                with open(filename, 'w', encoding='utf-8') as f:
+                    json.dump(notable_messages, f, indent=2, ensure_ascii=False)
+                logger.info(f"Saved {len(notable_messages)} notable messages to {filename}")
+            except Exception as e:
+                logger.error(f"Error saving consolidated messages: {e}")
+        
         # Print summary
         logger.info(f"\nReceived {message_count} messages in total")
         logger.info("\nAnalysis Summary:")
         logger.info(f"- Status messages: {len(status_messages)}")
-        logger.info(f"- Has web search results: {web_search_results is not None}")
-        logger.info(f"- Has web search summary: {web_search_summary is not None}")
+        logger.info(f"- Web search results received: {web_search_results is not None}")
+        logger.info(f"- Web search summary received: {web_search_summary is not None}")
         logger.info(f"- Analysis results count: {len(analysis_results)}")
-        logger.info(f"- Has formatted data: {formatted_data is not None}")
-        logger.info(f"- Has findings: {findings is not None}")
+        logger.info(f"- Extracted data received: {extracted_data is not None}")
+        logger.info(f"- Formatted data received: {formatted_data is not None}")
+        logger.info(f"- Findings received: {findings is not None}")
         logger.info(f"- Complete data received: {complete_data is not None}")
+        logger.info(f"- Notable messages saved to consolidated file.")
         
     except KeyboardInterrupt:
         logger.info("\nAnalysis interrupted by user")
