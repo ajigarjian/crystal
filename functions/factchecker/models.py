@@ -59,6 +59,13 @@ class DatasetCatalog(models.Model):
     datagov_progress = models.TextField(blank=True, null=True)
     datagov_resource_type = models.TextField(blank=True, null=True)
     datagov_identifier = models.TextField(blank=True, null=True)
+
+    # Harvard Archive Fields
+    harvard_name = models.TextField(blank=True, null=True)
+    harvard_metadata_path = models.TextField(blank=True, null=True)
+    harvard_collection_path = models.TextField(blank=True, null=True)
+    harvard_datagov_url = models.TextField(blank=True, null=True)
+    harvard_datagov_dec_2024_exists = models.TextField(blank=True, null=True)
     
     class Meta:
         app_label = 'factchecker'

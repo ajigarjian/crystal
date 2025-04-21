@@ -58,13 +58,13 @@ export default function AboutPage() {
             <section className="space-y-3">
               <h2 className="text-xl font-semibold text-neutral-900 dark:text-white">The Road Ahead</h2>
               <p>
-                Crystal begins with search, but our ambitions stretch further. We're ultimatley building a platform that enables anyone to find, understand, and use public data. Roadmap ideas include:
+                Crystal begins with search, but our ambitions stretch further. We're ultimately building a platform that enables anyone to find, understand, and use public data. Roadmap ideas include:
               </p>
               <ul className="list-disc pl-5 space-y-1">
                 <li>U.S. government data from more sources besides just data.gov</li>
                 <li>International government data from sources like the World Bank and OECD</li>
                 <li>APIs that enable developers to build applications using public data</li>
-                <li>An analsis tool that takes search results and actually analyzes them for you</li>
+                <li>An analysis tool that takes search results and actually analyzes them for you</li>
                 <li>Educational resources to improve data literacy</li>
                 <li>Collaborative features for researchers and journalists</li>
                 <li>Advocacy for better open data practices in government</li>

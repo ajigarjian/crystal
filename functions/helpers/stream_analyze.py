@@ -11,7 +11,7 @@ import json
 import traceback
 import numpy as np
 import concurrent.futures
-from threading import Lock
+import threading
 import pprint
 import pandas as pd
 import queue
@@ -313,35 +313,162 @@ def download_resource_helper(dataset_id, best_resource, output_dir="./downloads"
 def stream_analyze_helper(dataset_ids, query, file_path=None, parallel=True):
     """
     Helper function that generates the streaming analysis results for a dataset.
-    Now includes web search results from search_and_analyze at the beginning.
+    Runs web search in parallel and streams results alongside dataset analysis.
     
     Args:
-        dataset_id: ID of the dataset to analyze
+        dataset_ids: List of dataset IDs to analyze
         query: The user query
         file_path: Optional path to the dataset file (if not provided, will look in standard locations)
-        parallel: Boolean flag to control whether to run web searches in parallel (default: True)
+        parallel: Boolean flag to control whether to run web searches and dataset processing in parallel (default: True)
         
     Yields:
         Streaming analysis results as JSON strings, including web search results
     """
+    start_time = time.time()
+    message_queue = queue.Queue()
+    web_search_results_storage = {} # Dictionary to store final web results for completion message
+
+    # --- Web Search Runner Function (to be run in a separate thread) ---
+    def run_web_search_and_process(query, message_queue, start_time, web_search_results_storage):
+        try:
+            message_queue.put(create_status_message(
+                'Initiating parallel web searches...', start_time
+            ))
+            
+            # Generate similar queries
+            similar_queries = generate_similar_queries(query, num_variations=3)
+            logger.info(f"Generated similar queries for web search: {similar_queries}")
+            message_queue.put(create_status_message(
+                f'Searching with variations: {", ".join(similar_queries[:2])}...', start_time
+            ))
+
+            # Function to run web search for a specific query
+            def search_worker(search_query):
+                try:
+                    logger.info(f"Executing search for query variation: '{search_query}'")
+                    # Use enhanced_web_search or combined_web_search as appropriate
+                    # This example uses enhanced_web_search
+                    results = enhanced_web_search(
+                        query=search_query,
+                        max_results=10, 
+                        search_type="comprehensive" # Or other type
+                    )
+                    # Check structure of results - might vary based on search function used
+                    # Assuming results is a dict containing a list under 'results'
+                    return {"query": search_query, "results": results.get("results", []) if isinstance(results, dict) else results}
+                except Exception as e:
+                    logger.error(f"Error in web search worker for query '{search_query}': {str(e)}")
+                    return {"query": search_query, "error": str(e), "results": []}
+
+            all_search_results_raw = []
+            # Execute searches in parallel
+            with concurrent.futures.ThreadPoolExecutor(max_workers=len(similar_queries)) as executor:
+                future_to_query = {executor.submit(search_worker, q): q for q in similar_queries}
+                for future in concurrent.futures.as_completed(future_to_query):
+                    query_variation = future_to_query[future]
+                    try:
+                        result = future.result()
+                        all_search_results_raw.append(result)
+                        message_queue.put(create_status_message(
+                            f'Completed search variation: "{query_variation}"', start_time
+                        ))
+                    except Exception as e:
+                        logger.error(f"Error processing result for query '{query_variation}': {e}")
+                        message_queue.put(create_error_message(
+                            f'Error processing search result for "{query_variation}": {e}', start_time=start_time
+                        ))
+
+            # Process and combine the results
+            message_queue.put(create_status_message('Processing web search results...', start_time))
+            combined_results = []
+            for result in all_search_results_raw:
+                # Assuming 'results' key holds the list of search items
+                if "results" in result and isinstance(result["results"], list):
+                    combined_results.extend(result["results"])
+
+            # Deduplicate and sort
+            unique_urls = set()
+            unique_results = []
+            for res in combined_results:
+                url = res.get("url")
+                if url and url not in unique_urls:
+                    unique_urls.add(url)
+                    unique_results.append(res)
+            unique_results.sort(key=lambda x: x.get("score", 0), reverse=True)
+            
+            final_search_payload = {
+                "query": query,
+                "results": unique_results[:10], # Limit results
+                "total_results": len(unique_results),
+                "search_method": "parallel_similar_queries"
+            }
+
+            # Analyze results
+            analysis = analyze_search_results(query, final_search_payload, max_results=10)
+            summary = summarize_search_analysis(query, analysis)
+
+            processed_search_results = {
+                "search_results": final_search_payload,
+                "analysis": analysis,
+                "summary": summary
+            }
+
+            # Store results for final message
+            web_search_results_storage.update(processed_search_results) 
+
+            # Put results onto the queue for streaming
+            message_queue.put(json.dumps({
+                'type': 'web_search_results',
+                'data': processed_search_results['search_results'], # Send the 'results' part
+                'timestamp': time.time() - start_time
+            }, cls=NumpyEncoder) + '\n')
+            
+            message_queue.put(json.dumps({
+                'type': 'web_search_summary',
+                'data': processed_search_results['summary'], # Send the summary
+                'timestamp': time.time() - start_time
+            }, cls=NumpyEncoder) + '\n')
+
+            message_queue.put(create_status_message('Web search processing complete.', start_time))
+
+        except Exception as e:
+            logger.error(f"Error in web search thread: {str(e)}")
+            logger.error(traceback.format_exc())
+            message_queue.put(create_error_message(
+                f'An error occurred during web search: {str(e)}',
+                details=traceback.format_exc(),
+                start_time=start_time
+            ))
+            web_search_results_storage['error'] = f"Web search failed: {str(e)}" # Store error
+        finally:
+            # Signal completion of this thread
+            message_queue.put(None) 
+    # --- End Web Search Runner Function ---
+
     try:
-        start_time = time.time()
-        
         # Send initial message
         yield create_status_message(
-            f'I\'m starting my analysis of the dataset for your query: "{query}"...',
+            f'I am starting my analysis of the dataset for your query: "{query}"...',
             start_time
         )
         
         # Validate inputs
         if not dataset_ids:
-            yield create_error_message(
+            message_queue.put(create_error_message(
                 'Dataset ID is required for analysis.',
                 start_time=start_time
-            )
+            ))
+            message_queue.put(None) # Signal immediate completion if invalid input
+            web_search_thread = None # No web search if input invalid
             return
-        
-        
+        else:
+            # Start the web search thread
+            web_search_thread = threading.Thread(
+                target=run_web_search_and_process, 
+                args=(query, message_queue, start_time, web_search_results_storage)
+            )
+            web_search_thread.start()
+
         # Get the resource metadata from the DB
         resource_metadata = query_datasets_helper(dataset_ids)
 
@@ -357,6 +484,8 @@ def stream_analyze_helper(dataset_ids, query, file_path=None, parallel=True):
         all_formatted_data = []
         all_dataset_analyses = []
         
+        num_dataset_tasks = 0
+
         # For each dataset, find and add the best resource
         for dataset_id, dataset in datasets.items():
             # Pretty print the dataset for debugging
@@ -440,7 +569,9 @@ def stream_analyze_helper(dataset_ids, query, file_path=None, parallel=True):
                 ))
                 
                 try:
-                    dataset_content = load_datafile(file_path)
+                    # Pass the explicit format from the resource metadata if available
+                    file_format = best_resource.get('resource_format')
+                    dataset_content = load_datafile(file_path, file_format=file_format)
                     
                     # Report successful loading
                     if hasattr(dataset_content, 'shape'):
@@ -757,9 +888,7 @@ def stream_analyze_helper(dataset_ids, query, file_path=None, parallel=True):
                 # Always put sentinel value to indicate task completion, even on error
                 message_queue.put(None)
 
-        # Process datasets either in parallel or sequentially based on the parallel flag
-        message_queue = queue.Queue()
-        
+        # --- Dataset Processing Execution ---
         if parallel:
             print("Processing datasets in Parallel...")
             # Process datasets in parallel
@@ -767,271 +896,85 @@ def stream_analyze_helper(dataset_ids, query, file_path=None, parallel=True):
                 # Submit all tasks
                 num_tasks = 0
                 for dataset_id, dataset in datasets.items():
-                    executor.submit(process_dataset, dataset_id, dataset, message_queue, start_time)
-                    num_tasks += 1
-                
-                # Process messages from the queue as they arrive
-                finished_tasks = 0
-                while finished_tasks < num_tasks:
-                    message = message_queue.get()
-                    if message is None:
-                        finished_tasks += 1
-                    elif isinstance(message, str) and message.strip():
-                        try:
-                            # Check if this is a special internal message type
-                            message_obj = json.loads(message)
-                            message_type = message_obj.get('type', '')
-                            
-                            if message_type == 'dataset_analysis_result_internal':
-                                all_dataset_analyses.append(message_obj['data'])
-                            elif message_type == 'formatted_data_internal':
-                                all_formatted_data.append(message_obj['data'])
-                            else:
-                                # Regular message to be yielded to the client
-                                yield message
-                        except json.JSONDecodeError:
-                            # Not a JSON message, yield as is
-                            yield message
+                    if dataset_id in datasets: # Ensure dataset exists before submitting
+                        executor.submit(process_dataset, dataset_id, datasets[dataset_id], message_queue, start_time)
+                        num_dataset_tasks += 1
+                    else:
+                        logger.warning(f"Dataset ID {dataset_id} not found in processed datasets dict, skipping task submission.")
+                        # If a task isn't submitted, we shouldn't wait for its sentinel later
+                        # No need to explicitly decrement total_tasks here if calculated later
         else:
             # Process datasets sequentially
+            print("Processing datasets Sequentially...")
             for dataset_id, dataset in datasets.items():
-                # Process each dataset
+                 # Process each dataset
                 process_dataset(dataset_id, dataset, message_queue, start_time)
-                
-                # Process all messages from this dataset
-                message = message_queue.get()
-                while message is not None:
-                    if isinstance(message, str) and message.strip():
-                        try:
-                            # Check if this is a special internal message type
-                            message_obj = json.loads(message)
-                            message_type = message_obj.get('type', '')
-                            
-                            if message_type == 'dataset_analysis_result_internal':
-                                all_dataset_analyses.append(message_obj['data'])
-                            elif message_type == 'formatted_data_internal':
-                                all_formatted_data.append(message_obj['data'])
-                            else:
-                                # Regular message to be yielded to the client
-                                yield message
-                        except json.JSONDecodeError:
-                            # Not a JSON message, yield as is
-                            yield message
-                    
-                    # Get next message
-                    message = message_queue.get()
+                num_dataset_tasks += 1
 
-        # Call parallel web search at the beginning
-        yield create_status_message(
-            f'Performing {"parallel" if parallel else "sequential"} web searches for your query...',
-            start_time
-        )
+        # --- Main Message Consumption Loop ---
+        total_tasks = num_dataset_tasks + (1 if web_search_thread else 0)
+        finished_tasks = 0
         
-        # Perform web search with similar queries
-        search_results = {}
-        try:
-            # Generate similar queries for web search
-            similar_queries = generate_similar_queries(query, num_variations=3)
-            logger.info(f"Generated similar queries: {similar_queries}")
-            
-            yield create_status_message(
-                f'Searching with multiple query variations: {", ".join(similar_queries[:2])}...',
-                start_time
-            )
-            
-            # Function to run web search for a specific query
-            def search_worker(search_query):
+        while finished_tasks < total_tasks:
+            message = message_queue.get()
+            if message is None:
+                finished_tasks += 1
+            elif isinstance(message, str) and message.strip():
                 try:
-                    logger.info(f"Executing search for query variation: '{search_query}'")
-                    return {
-                        "query": search_query,
-                        "results": enhanced_web_search(
-                            query=search_query,
-                            max_results=5,
-                            search_type="comprehensive"
-                        )
-                    }
-                except Exception as e:
-                    logger.error(f"Error in web search for query '{search_query}': {str(e)}")
-                    return {
-                        "query": search_query,
-                        "error": str(e),
-                        "results": []
-                    }
-            
-            all_search_results = []
-            
-            if parallel:
-                # Execute searches in parallel using ThreadPoolExecutor
-                with concurrent.futures.ThreadPoolExecutor(max_workers=len(similar_queries)) as executor:
-                    # Submit all search tasks
-                    future_to_query = {executor.submit(search_worker, q): q for q in similar_queries}
+                    message_obj = json.loads(message)
+                    message_type = message_obj.get('type', '')
                     
-                    # Process results as they complete
-                    for future in concurrent.futures.as_completed(future_to_query):
-                        query_variation = future_to_query[future]
-                        try:
-                            result = future.result()
-                            all_search_results.append(result)
-                            yield create_status_message(
-                                f'Completed search for variation: "{query_variation}"',
-                                start_time
-                            )
-                        except Exception as e:
-                            logger.error(f"Error processing results for query '{query_variation}': {e}")
-            else:
-                # Execute searches sequentially
-                for search_query in similar_queries:
-                    try:
-                        result = search_worker(search_query)
-                        all_search_results.append(result)
-                        yield create_status_message(
-                            f'Completed search for variation: "{search_query}"',
-                            start_time
-                        )
-                    except Exception as e:
-                        logger.error(f"Error processing results for query '{search_query}': {e}")
-            
-            # Process and combine the search results
-            combined_results = []
-            for result in all_search_results:
-                if "results" in result and isinstance(result["results"], dict) and "results" in result["results"]:
-                    combined_results.extend(result["results"]["results"])
-                elif "results" in result and isinstance(result["results"], list):
-                    combined_results.extend(result["results"])
-            
-            # Sort results by score (if available) or title
-            combined_results.sort(key=lambda x: x.get("score", 0), reverse=True)
-            
-            # Remove duplicates (based on URL)
-            unique_urls = set()
-            unique_results = []
-            for result in combined_results:
-                url = result.get("url")
-                if url and url not in unique_urls:
-                    unique_urls.add(url)
-                    unique_results.append(result)
-            
-            # Analyze the combined results
-            combined_search_results = {
-                "query": query,
-                "results": unique_results[:10],  # Limit to top 10 results
-                "total_results": len(unique_results),
-                "search_method": "parallel_similar_queries" if parallel else "sequential_similar_queries"
-            }
-            
-            # Run analysis on the combined results
-            analysis_results = analyze_search_results(
-                query=query,
-                search_results=combined_search_results,
-                max_results=10
-            )
-            
-            # Create a summary of the analysis
-            summary = summarize_search_analysis(
-                query=query,
-                analysis_results=analysis_results
-            )
-            
-            # Return the combined results with analysis
-            search_results = {
-                "search_results": combined_search_results,
-                "analysis": analysis_results,
-                "summary": summary
-            }
-            
-            yield create_status_message(
-                f'Successfully completed {"parallel" if parallel else "sequential"} web searches. Found {len(unique_results)} relevant results.',
-                start_time
-            )
-            
-        except Exception as e:
-            logger.error(f"Error in web search: {str(e)}")
-            logger.error(traceback.format_exc())
-            # Fallback to standard search if parallel search fails
-            try:
-                logger.info("Falling back to standard search...")
-                yield create_status_message(
-                    f'Falling back to standard web search...',
-                    start_time
-                )
-                search_results = search_and_analyze(
-                    query=query,
-                    max_results=10,
-                    search_type="comprehensive",
-                    analyze_results=True
-                )
-            except Exception as e2:
-                logger.error(f"Error in fallback web search: {str(e2)}")
-                # Continue with empty search results rather than failing
-                search_results = {}
-        
-        # Stream search results as they become available
-        if search_results:
-            try:
-                yield json.dumps({
-                    'type': 'web_search_results',
-                    'data': search_results.get('search_results', search_results),
-                    'timestamp': time.time() - start_time
-                }, cls=NumpyEncoder) + '\n'
-                
-                # If there's a summary, send it as a separate message
-                if 'summary' in search_results:
-                    # Direct summary from search_results structure
-                    yield json.dumps({
-                        'type': 'web_search_summary',
-                        'data': search_results['summary'],
-                        'timestamp': time.time() - start_time
-                    }, cls=NumpyEncoder) + '\n'
-                # Check for summary in search_results.search_results (nested structure)
-                elif 'search_results' in search_results and 'summary' in search_results.get('search_results', {}):
-                    yield json.dumps({
-                        'type': 'web_search_summary',
-                        'data': search_results['search_results']['summary'],
-                        'timestamp': time.time() - start_time
-                    }, cls=NumpyEncoder) + '\n'
-            except Exception as e:
-                logger.error(f"Error streaming web search results: {str(e)}")
+                    # Collect internal data for final summary
+                    if message_type == 'dataset_analysis_result_internal':
+                        all_dataset_analyses.append(message_obj['data'])
+                    elif message_type == 'formatted_data_internal':
+                        all_formatted_data.append(message_obj['data'])
+                    else:
+                        # Yield regular messages to the client
+                        yield message
+                except json.JSONDecodeError:
+                    # Not a JSON message, yield as is (e.g., plain status updates)
+                    yield message
+                except Exception as e:
+                    logger.error(f"Error processing message from queue: {e} | Message: {message}")
+                    # Decide if you want to yield an error message here
+
+        # Wait for the web search thread to finish if it was started
+        if web_search_thread:
+            web_search_thread.join()
 
         # After processing all datasets, send a message that all datasets have been analyzed
-        yield create_status_message(
-            f'All datasets have been analyzed successfully.',
-            start_time,
-            status='all_datasets_analyzed'
-        )
+        # This message might be redundant now due to the loop structure, consider removing
+        # yield create_status_message(
+        #     f'All datasets have been analyzed successfully.',
+        #     start_time,
+        #     status='all_datasets_analyzed'
+        # )
 
-        # After processing all datasets, generate the findings summary
+        # Generate final findings summary if data was collected
         if all_formatted_data:
             yield create_status_message(
-                f'Generating summary of findings from all datasets...',
-                start_time
+                f'Generating summary of findings from all datasets...', start_time
             )
-            
             try:
-                # Generate findings summary from all formatted data
                 findings = summarize_findings(
                     query=query,
                     formatted_data_list=all_formatted_data,
                     dataset_analyses=all_dataset_analyses
                 )
-                
-                # Send the findings as part of the stream
                 yield json.dumps({
                     'type': 'findings',
                     'data': findings,
                     'timestamp': time.time() - start_time
                 }, cls=NumpyEncoder) + '\n'
-                
             except Exception as e:
                 logger.error(f"Error generating findings summary: {str(e)}")
                 yield create_error_message(
                     f'Error generating findings summary: {str(e)}',
                     details=traceback.format_exc(),
-                    start_time=start_time,
-                    dataset_id=None
+                    start_time=start_time
                 )
-                # Continue with completion even if findings summary fails
-        
+
         # Final completion message
         analysis_time = time.time() - start_time
         
@@ -1039,22 +982,10 @@ def stream_analyze_helper(dataset_ids, query, file_path=None, parallel=True):
         complete_data = {
             'query': query,
             'dataset_ids': dataset_ids,
-            'execution_time': analysis_time
+            'execution_time': analysis_time,
+            # Use the stored web search results
+            'web_search_results': web_search_results_storage 
         }
-        
-        # Add web search results (ensuring it's a valid dictionary)
-        if search_results and isinstance(search_results, dict):
-            # Extract the search_results nested dictionary if it exists
-            if 'search_results' in search_results:
-                complete_data['web_search_results'] = search_results['search_results']
-            else:
-                complete_data['web_search_results'] = search_results
-        else:
-            complete_data['web_search_results'] = {
-                "query": query,
-                "results": [],
-                "error": "Web search results unavailable or in unexpected format"
-            }
         
         yield json.dumps({
             'type': 'complete',
@@ -1069,7 +1000,7 @@ def stream_analyze_helper(dataset_ids, query, file_path=None, parallel=True):
         traceback_str = traceback.format_exc()
         logger.error(f"Error in stream_analyze: {error_message}")
         logger.error(traceback_str)
-        
+
         yield create_error_message(
             "I'm sorry, I encountered an error while processing your request. Please try again.",
             details=error_message,
@@ -1134,7 +1065,7 @@ def process_resource_metadata(resource_metadata):
 
     # If length is 0, return None. This means no datasets were processed.
     if len(datasets) == 0:
-        logger.error("No usable resources were identified for resource", resource_id)
+        logger.error("No usable dataset resources were identified in the provided metadata.")
         return None
 
     # Sort resources by position for each dataset

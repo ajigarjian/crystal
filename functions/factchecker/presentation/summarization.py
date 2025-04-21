@@ -155,11 +155,11 @@ DATA POINTS:
 {chr(10).join(dataset_summaries)}
 
 INSTRUCTIONS:
-1. Focus primarily on answering the user's query with clarity and accuracy
-2. Present KEY DATA POINTS that directly answer the query - include SPECIFIC NUMBERS and VALUES
-3. Be concise but thorough - include all relevant data in your analysis
+1. Focus primarily on answering the user's query with clarity and accuracy and be concise
+2. Present KEY DATA POINTS from multiple source datasets - include SPECIFIC NUMBERS and VALUES
+3. Don't mention data quality issues, present relevant data to the query.
 4. Format as bullet points where appropriate
-5. Still cite the source dataset in brackets [] but keep citations brief and unobtrusive
+5. Cite the source dataset in brackets [] being brief and unobtrusive
 6. When discussing data with dates:
    - Present the most recent data first (as of April 2025)
    - Include the full time range and specific values
@@ -195,8 +195,9 @@ Paragraph with additional context, qualifications, or trends only if relevant to
         response = chat_completion(
             prompt=prompt,
             system_message="You are a data analyst who directly answers users' questions using data, focusing primarily on providing clear, accurate, and actionable insights rather than describing data sources.",
-            temperature=0.3,
-            model_name="gpt-4o" # Using a more capable model for this task
+            temperature=0.2,
+            model_name="gpt-4.1-mini", # Using a more capable model for this task
+            max_tokens=1300
         )
         
         # Parse the response
