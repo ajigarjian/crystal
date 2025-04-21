@@ -309,6 +309,228 @@ const useIsMobile = () => {
   return isMobile;
 };
 
+// Add this footer component to your search page
+const Footer = () => {
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [feedbackType, setFeedbackType] = useState<string>("suggestion");
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [email, setEmail] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    
+    console.log("Starting feedback submission");
+    
+    try {
+      const result = await submitFeedback({
+        feedback_type: feedbackType,
+        title,
+        description,
+        email: email || undefined,
+        page_url: window.location.href,
+        tags: [],
+        metadata: {}
+      });
+      
+      console.log("Submission successful:", result);
+      
+      // Show success message
+      setSubmitted(true);
+      
+      // Reset form after 3 seconds
+      setTimeout(() => {
+        setSubmitted(false);
+        setTimeout(() => {
+          setTitle("");
+          setDescription("");
+          setEmail("");
+          setFeedbackType("suggestion");
+        }, 300);
+      }, 3000);
+    } catch (error: any) {
+      console.error("Error submitting feedback:", error);
+      setError(error.message || "Failed to submit feedback. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <footer className="w-full border-t border-gray-200 bg-white py-4 px-4 md:px-6 mt-auto">
+      <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
+        <div className="flex items-center text-sm text-gray-500">
+          <img 
+            src="/images/crystal-icon.png" 
+            alt="Crystal Logo" 
+            className="h-5 w-5 mr-2 filter brightness-0 opacity-70" 
+          />
+          <span>© {new Date().getFullYear()} Crystal</span>
+        </div>
+        
+        <div className="flex items-center gap-6">
+          <Link href="/about" className="text-sm text-gray-500 hover:text-gray-900 transition-colors">
+            About
+          </Link>
+          <Link href="/privacy" className="text-sm text-gray-500 hover:text-gray-900 transition-colors">
+            Privacy
+          </Link>
+          
+          {/* Feedback dialog */}
+          <Dialog>
+            <DialogTrigger asChild>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="text-sm flex items-center gap-1.5 text-gray-600 hover:text-white bg-white border-gray-300"
+              >
+                <MessageSquare className="h-3.5 w-3.5" />
+                Feedback
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-[425px]">
+              <DialogHeader>
+                <DialogTitle>Send Feedback</DialogTitle>
+                <DialogDescription>
+                  Help us improve Crystal with your suggestions.
+                </DialogDescription>
+              </DialogHeader>
+              
+              {submitted ? (
+                <div className="py-6 space-y-4 text-center">
+                  <div className="mx-auto bg-green-100 text-green-800 rounded-full p-3 w-fit">
+                    <ThumbsUpIcon className="h-6 w-6" />
+                  </div>
+                  <h3 className="font-semibold text-lg">Thank you for your feedback!</h3>
+                  <p className="text-sm text-gray-500">
+                    We appreciate your input and will take it into consideration.
+                  </p>
+                </div>
+              ) : (
+                <form onSubmit={handleSubmit} className="space-y-4 py-4">
+                  {error && (
+                    <Alert variant="destructive">
+                      <AlertCircle className="h-4 w-4" />
+                      <AlertTitle>Error</AlertTitle>
+                      <AlertDescription>{error}</AlertDescription>
+                    </Alert>
+                  )}
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="feedback-type" className="text-sm font-medium">
+                      Feedback Type
+                    </Label>
+                    <RadioGroup 
+                      value={feedbackType} 
+                      onValueChange={setFeedbackType}
+                      className="grid grid-cols-2 gap-2"
+                    >
+                      <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="suggestion" id="suggestion" />
+                        <Label htmlFor="suggestion" className="flex items-center text-sm cursor-pointer">
+                          <Lightbulb className="mr-1 h-3 w-3" />
+                          Suggestion
+                        </Label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="bug" id="bug" />
+                        <Label htmlFor="bug" className="flex items-center text-sm cursor-pointer">
+                          <Bug className="mr-1 h-3 w-3" />
+                          Bug report
+                        </Label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="feature_request" id="feature_request" />
+                        <Label htmlFor="feature_request" className="flex items-center text-sm cursor-pointer">
+                          <ThumbsUp className="mr-1 h-3 w-3" />
+                          Feature request
+                        </Label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="praise" id="praise" />
+                        <Label htmlFor="praise" className="flex items-center text-sm cursor-pointer">
+                          <ThumbsUp className="mr-1 h-3 w-3" />
+                          Praise
+                        </Label>
+                      </div>
+                    </RadioGroup>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="feedback-title" className="text-sm font-medium">
+                      Title
+                    </Label>
+                    <Input
+                      id="feedback-title"
+                      placeholder="Brief summary of your feedback"
+                      value={title}
+                      onChange={(e) => setTitle(e.target.value)}
+                      className="w-full"
+                      required
+                    />
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="feedback-description" className="text-sm font-medium">
+                      Description
+                    </Label>
+                    <Textarea
+                      id="feedback-description"
+                      placeholder="Please provide more details about your feedback..."
+                      value={description}
+                      onChange={(e) => setDescription(e.target.value)}
+                      className="min-h-[100px]"
+                      required
+                    />
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="feedback-email" className="text-sm font-medium">
+                      Email (optional)
+                    </Label>
+                    <Input
+                      id="feedback-email"
+                      type="email"
+                      placeholder="your@email.com"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                    />
+                    <p className="text-xs text-gray-500">
+                      We'll only use this to follow up on your feedback if needed.
+                    </p>
+                  </div>
+                  
+                  <DialogFooter className="pt-2">
+                    <Button variant="outline" type="button" disabled={submitting}>
+                      Cancel
+                    </Button>
+                    <Button 
+                      type="submit" 
+                      disabled={submitting}
+                      className="bg-green-600 hover:bg-green-700"
+                    >
+                      {submitting ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Submitting...
+                        </>
+                      ) : "Submit Feedback"}
+                    </Button>
+                  </DialogFooter>
+                </form>
+              )}
+            </DialogContent>
+          </Dialog>
+        </div>
+      </div>
+    </footer>
+  );
+};
+
 export default function SearchPage() {
   const [query, setQuery] = useState('');
   const [searchStatus, setSearchStatus] = useState<SearchStatus>(SearchStatus.IDLE);
@@ -1205,9 +1427,6 @@ export default function SearchPage() {
               Join <Badge className="bg-purple-500 hover:bg-purple-500 text-xs py-0 px-1.5 text-white font-normal rounded-sm">BETA</Badge> Waitlist <ArrowRight className="h-4 w-4" />
             </Button>
           </Link>
-          
-          {/* Feedback widget */}
-          <FeedbackWidget />
         </div>
       </div>
       
@@ -1945,6 +2164,9 @@ export default function SearchPage() {
           )}
         </AnimatePresence>
       </div>
+      
+      {/* Add the footer component */}
+      <Footer />
     </div>
   );
 }
