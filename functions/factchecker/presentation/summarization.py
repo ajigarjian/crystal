@@ -197,6 +197,7 @@ Paragraph with additional context, qualifications, or trends only if relevant to
             system_message="You are a data analyst who directly answers users' questions using data, focusing primarily on providing clear, accurate, and actionable insights rather than describing data sources.",
             temperature=0.2,
             model_name="gpt-4.1-mini" # Using a more capable model for this task
+            max_tokens=1300
         )
         
         # Parse the response
