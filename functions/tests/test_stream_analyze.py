@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 import django
 import datetime
 import pprint # For pretty printing if needed
+import re
 
 # --- (Keep the existing setup code: imports, path, django setup, etc.) ---
 os.environ["FUNCTIONS_EMULATOR"] = "True"
@@ -239,34 +240,32 @@ def run_local_analysis(parallel_mode):
     """
     logger.info(f"--- Starting new analysis run (Parallel={parallel_mode}) ---")
 
-    # Example request data (using the one from the original problem)
+    # Example request data
     request_data = {
         "dataset_ids": [
-            "2746fc68-190d-407f-bb86-44c5f42bb6d1", # CT UST Facilities & Tanks
-            "19bb999c-6208-4692-970a-131326d67be3", # CT UST Enforcement
-            "5f961a68-66f9-4e8d-b3ed-b41cc8e1f9be", # DC Leaking USTs
-            "7dea0c2b-b84e-48b2-95ad-0867fb14cd89", # CA WellSTAR Gas Storage Projects
-            "41cc4071-57bd-452e-af0d-03174f7ade5c", # CA Tank (Likely empty/irrelevant based on summary)
-            "d5fa9b77-6b88-49e3-ba96-445254073d6f", # Chicago CDPH Storage Tanks (Likely empty/irrelevant)
-            # Add more relevant IDs if available, remove irrelevant ones maybe?
-            # "960213c2-effc-4da7-8ccd-375327f6d1e6", # VT UST List
-            # "e3f73ef6-ca46-4784-9161-c128109163b1", # Austin, TX UST Summary
-            # ... keep other IDs or curate based on relevance to query ...
-            # "28e0f154-e68b-406a-8871-f9ad62df11b2",
-            # "01f25998-f9c6-4508-a890-ef53ed596419",
-            # "044f8ebb-0c54-4f8d-866c-2eb7071817dc",
-            # "be5795c2-0737-4cad-915a-9a2783d78788",
-            # "6df5dd5a-f5e5-422a-a069-6d801f3a7208",
-            # "62915ff9-ca87-4f85-b9e6-6c1793fc4054",
-            # "bb97ac7a-5cee-4fe5-b0f8-598e46f5d735",
-            # "5a002f72-8ddb-4bd4-86e2-cdd991b9ad2d",
-            # "e61357f3-7d69-4067-8b1d-721beafc57ec",
-            # "9f691d06-ca23-43f7-acc6-90ec2db19dc9",
-            # "85e95821-1460-4de3-8665-0ade178bb16e",
-            # "fd699649-d276-43c8-829a-cb4a892cf776"
+            "2746fc68-190d-407f-bb86-44c5f42bb6d1",
+            "19bb999c-6208-4692-970a-131326d67be3",
+            "5f961a68-66f9-4e8d-b3ed-b41cc8e1f9be",
+            "7dea0c2b-b84e-48b2-95ad-0867fb14cd89",
+            "41cc4071-57bd-452e-af0d-03174f7ade5c",
+            "d5fa9b77-6b88-49e3-ba96-445254073d6f",
+            "960213c2-effc-4da7-8ccd-375327f6d1e6",
+            "e3f73ef6-ca46-4784-9161-c128109163b1",
+            "28e0f154-e68b-406a-8871-f9ad62df11b2",
+            "01f25998-f9c6-4508-a890-ef53ed596419",
+            "044f8ebb-0c54-4f8d-866c-2eb7071817dc",
+            "be5795c2-0737-4cad-915a-9a2783d78788",
+            "6df5dd5a-f5e5-422a-a069-6d801f3a7208",
+            "62915ff9-ca87-4f85-b9e6-6c1793fc4054",
+            "bb97ac7a-5cee-4fe5-b0f8-598e46f5d735",
+            "5a002f72-8ddb-4bd4-86e2-cdd991b9ad2d",
+            "e61357f3-7d69-4067-8b1d-721beafc57ec",
+            "9f691d06-ca23-43f7-acc6-90ec2db19dc9",
+            "85e95821-1460-4de3-8665-0ade178bb16e",
+            "fd699649-d276-43c8-829a-cb4a892cf776"
         ],
-        "query": "Tell me about underground storage tanks, focusing on regulations, leaks, and common substances stored.",
-        "parallel": parallel_mode # Pass the parallel mode flag
+        "query": "Tell me about underground storage tanks",
+        "parallel": parallel_mode  # Add the parallel flag to the request data
     }
 
     logger.info(f"Running analysis with {len(request_data['dataset_ids'])} dataset IDs.")
