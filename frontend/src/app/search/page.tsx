@@ -1609,8 +1609,8 @@ export default function SearchPage() {
         </div>
       </div>
       
-      {/* Dataset results section */}
-      <div className="flex-1 max-w-7xl mx-auto w-full px-4 pb-12">
+      {/* Dataset results section - Update max-width to full width */}
+      <div className="flex-1 w-full mx-auto px-4 pb-12">
         <AnimatePresence>
           {(searchStatus === SearchStatus.SEARCHING || 
             (searchStatus === SearchStatus.COMPLETE && datasets.length > 0)) && (
@@ -1887,15 +1887,14 @@ export default function SearchPage() {
                   }
                 </div>
               ) : (
-                /* Desktop table view */
-                <div className="rounded-md rounded-tl-none border border-gray-200 bg-white overflow-auto scrollbar-fix">
-                  <Table className="table-fixed">
+                /* Desktop table view - Ensure table takes full width */
+                <div className="rounded-md rounded-tl-none border border-gray-200 bg-white overflow-auto scrollbar-fix w-full">
+                  <Table className="w-full">
                     <TableHeader>
                       <TableRow className="hover:!bg-transparent border-b border-gray-200">
                         <TableHead className="w-[5%] h-10 text-gray-700"></TableHead>
-                        <TableHead className="w-[25%] font-medium text-gray-700">Source</TableHead>
-                        <TableHead className="w-[50%] font-medium text-gray-700">Dataset</TableHead>
-                        <TableHead className="w-[10%] text-center font-medium text-gray-700">Relevance</TableHead>
+                        <TableHead className="w-[20%] font-medium text-gray-700">Source</TableHead>
+                        <TableHead className="w-[55%] font-medium text-gray-700">Dataset</TableHead>
                         <TableHead className="w-[10%] text-center font-medium text-gray-700">Resources</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -1933,7 +1932,7 @@ export default function SearchPage() {
                                   </Avatar>
                                 <div className="min-w-0 flex-1">
                                   <span 
-                                    className="text-sm block text-gray-800 leading-tight truncate"
+                                    className="text-xs block text-gray-800 leading-tight truncate"
                                     title={getOrganizationName(dataset)}
                                   >
                                     {getOrganizationName(dataset)}
@@ -1944,31 +1943,14 @@ export default function SearchPage() {
                             <TableCell className="py-4">
                               <div>
                                 <h3 
-                                  className="font-medium text-gray-900 truncate" 
+                                  className="text-xs font-medium text-gray-900 truncate" 
                                   title={dataset.title}
                                 >
                                     {dataset.title}
                                   </h3>
                                 </div>
                               </TableCell>
-                              <TableCell className="py-4 text-center">
-                                <Badge 
-                                  variant="outline" 
-                                  className={`font-medium text-xs ${
-                                    dataset.relevance?.relevance_score >= 0.7 
-                                      ? 'bg-green-50 text-green-700 border-green-200' 
-                                      : dataset.relevance?.relevance_score >= 0.5
-                                        ? 'bg-blue-50 text-blue-700 border-blue-200'
-                                        : 'bg-gray-50 text-gray-700 border-gray-200'
-                                  }`}
-                                >
-                                  {dataset.relevance?.relevance_score 
-                                    ? (dataset.relevance.relevance_score * 100).toFixed(0) + '%' 
-                                    : dataset.similarity
-                                      ? (dataset.similarity * 100).toFixed(0) + '%'
-                                      : 'N/A'}
-                                </Badge>
-                              </TableCell>
+                              
                               <TableCell className="py-4 text-center">
                                 <Drawer>
                                   <DrawerTrigger asChild>
@@ -2079,7 +2061,25 @@ export default function SearchPage() {
                                       {/* Relevance reasoning */}
                                       {dataset.relevance && dataset.relevance.reasoning && (
                                       <div className="mb-4">
-                                          <h4 className="text-sm font-medium mb-1 text-gray-800">Relevance Assessment</h4>
+                                          <div className="flex items-center mb-1">
+                                            <h4 className="text-sm font-medium text-gray-800">Relevance Assessment</h4>
+                                            <Badge 
+                                              variant="outline" 
+                                              className={`ml-2 font-medium text-xs ${
+                                                dataset.relevance?.relevance_score >= 0.7 
+                                                  ? 'bg-green-50 text-green-700 border-green-200' 
+                                                  : dataset.relevance?.relevance_score >= 0.5
+                                                    ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                                    : 'bg-gray-50 text-gray-700 border-gray-200'
+                                              }`}
+                                            >
+                                              {dataset.relevance?.relevance_score 
+                                                ? (dataset.relevance.relevance_score * 100).toFixed(0) + '%' 
+                                                : dataset.similarity
+                                                  ? (dataset.similarity * 100).toFixed(0) + '%'
+                                                  : 'N/A'}
+                                            </Badge>
+                                          </div>
                                           <p className="text-sm text-gray-600">
                                             {dataset.relevance.reasoning}
                                           </p>
@@ -2165,7 +2165,7 @@ export default function SearchPage() {
         </AnimatePresence>
       </div>
       
-      {/* Add the footer component */}
+      {/* Footer */}
       <Footer />
     </div>
   );
