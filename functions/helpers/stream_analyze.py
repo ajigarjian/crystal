@@ -350,7 +350,7 @@ def stream_analyze_helper(dataset_ids, query, file_path=None, parallel=True):
                     # This example uses enhanced_web_search
                     results = enhanced_web_search(
                         query=search_query,
-                        max_results=5, 
+                        max_results=10, 
                         search_type="comprehensive" # Or other type
                     )
                     # Check structure of results - might vary based on search function used
