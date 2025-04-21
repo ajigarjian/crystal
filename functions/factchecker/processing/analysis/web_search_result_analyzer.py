@@ -375,7 +375,7 @@ KEY POINTS:
         response = chat_completion(
             prompt=prompt,
             system_message=system_message,
-            model_name="o4-mini",
+            model_name="gpt-4.1",
             temperature=0.1,
             max_tokens=2000
         )
