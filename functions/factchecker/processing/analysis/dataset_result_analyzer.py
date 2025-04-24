@@ -167,7 +167,7 @@ SCORING GUIDE:
 
 Format your response exactly as:
 SCORE: [0.00-1.00]
-REASONING: [2-3 sentence explanation]
+REASONING: [2-3 sentence explanation, reference the user as "you" or "your"]
 RESOURCE: [resource number or "none" if score < 0.4 or no resources]
 RESOURCE_REASONING: [brief explanation or "not applicable" if score < 0.4]
 '''

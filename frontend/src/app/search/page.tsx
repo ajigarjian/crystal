@@ -1420,8 +1420,8 @@ export default function SearchPage() {
 
   // Add this function inside your SearchPage component, before the return statement
   const handleAnalyzeDatasets = () => {
-    // Get relevant datasets
-    const relevantDatasets = datasets.slice(0, 3); // Limit to first 3
+    // Get all relevant datasets instead of just the first 3
+    const relevantDatasets = datasets; // Use all datasets instead of slicing
     const currentQuery = query.trim();
     
     if (relevantDatasets.length > 0 && currentQuery) {
@@ -1435,7 +1435,7 @@ export default function SearchPage() {
         
         streamAnalyzeDatasets({
           query: currentQuery,
-          datasets: relevantDatasets
+          datasets: relevantDatasets // Pass all datasets
         }, (chunk) => {
           console.log("Analysis chunk received:", chunk);
           
@@ -2330,7 +2330,7 @@ export default function SearchPage() {
             <DialogHeader className="border-b border-gray-100 pb-4">
               <DialogTitle className="text-gray-900">Analyzing Datasets...</DialogTitle>
               <DialogDescription className="text-gray-600">
-                Processing {datasets.slice(0, 3).length} datasets for insights related to "{query}"
+                Processing {datasets.length} datasets for insights related to "{query}"
               </DialogDescription>
             </DialogHeader>
             
@@ -2342,7 +2342,8 @@ export default function SearchPage() {
               </p>
               
               <div className="w-full mt-8 space-y-3">
-                {datasets.slice(0, 3).map((dataset, idx) => (
+                {datasets.slice(0, 5).map((dataset, idx) => (
+                  // Show the first 5 datasets
                   <div key={dataset.id} className="flex items-center space-x-3">
                     <div className="h-8 w-8 rounded-full bg-gray-100 text-gray-600 flex items-center justify-center">
                       {idx + 1}
@@ -2354,6 +2355,11 @@ export default function SearchPage() {
                     </div>
                   </div>
                 ))}
+                {datasets.length > 5 && (
+                  <div className="text-center text-sm text-gray-500 mt-2">
+                    +{datasets.length - 5} more datasets
+                  </div>
+                )}
               </div>
             </div>
             
@@ -2377,7 +2383,7 @@ export default function SearchPage() {
           query={query}
           summary={analysisResults?.summary || 'The analysis provides insights into the datasets related to your query.'}
           keyFindings={analysisResults?.key_findings || []}
-          sources={analysisResults?.sources || datasets.slice(0, 3).map((dataset, idx) => ({
+          sources={analysisResults?.sources || datasets.map((dataset, idx) => ({
             citation_id: `${idx + 1}`,
             title: dataset.title,
             organization: getOrganizationName(dataset)
