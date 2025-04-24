@@ -61,6 +61,10 @@ import { useDebounce } from 'use-debounce';
 import { evaluateSearchQuery } from '@/lib/firebase';
 import { CheckCircle, AlertTriangle } from "lucide-react";
 import { SuggestionBadge } from "@/components/SuggestionBadge";
+import { SummaryReport } from "@/components/SummaryReport";
+import { ScrollArea } from "@/components/ui/scroll-area";
+// Import the new component
+import { AnalysisResultsModal } from "@/components/AnalysisResultsModal";
 
 // Add QueryEvaluation interface
 interface QueryEvaluation {
@@ -367,7 +371,7 @@ const Footer = () => {
           <img 
             src="/images/crystal-icon.png" 
             alt="Crystal Logo" 
-            className="h-5 w-5 mr-2 filter brightness-0 opacity-70" 
+            className="h-5 w-5 mr-1 filter brightness-0 opacity-70" 
           />
           <span>© {new Date().getFullYear()} Crystal</span>
         </div>
@@ -386,7 +390,7 @@ const Footer = () => {
               <Button 
                 variant="outline" 
                 size="sm" 
-                className="text-sm flex items-center gap-1.5 text-gray-600 hover:text-white bg-white border-gray-300"
+                className="text-sm flex items-center gap-1.5 text-gray-600 hover:text-black bg-white border-gray-300"
               >
                 <MessageSquare className="h-3.5 w-3.5" />
                 Feedback
@@ -805,6 +809,9 @@ export default function SearchPage() {
         if (inputRef.current) {
           inputRef.current.disabled = false;
         }
+
+        // REMOVE the auto-triggering analysis code
+        // Instead, we'll let the user explicitly click the "Analyze these datasets" button
       }, 300); // Brief delay to show 100% state
     }
   };
@@ -1392,6 +1399,79 @@ export default function SearchPage() {
     setIsClient(true);
   }, []);
 
+  // Modify the useEffect that previously auto-triggered the search
+  useEffect(() => {
+    // Remove the auto-triggering of handleSearch
+    // We'll now only search when the button is clicked
+    
+    // Keep any other initialization code from this useEffect
+    // ...
+    
+    // Add proper cleanup if needed
+    return () => {
+      // Any cleanup code
+    };
+  }, [/* dependencies */]);
+
+  // Add these state variables with your other useState declarations
+  const [analysisStatus, setAnalysisStatus] = useState<'idle' | 'analyzing' | 'complete'>('idle');
+  const [analysisResults, setAnalysisResults] = useState<any>(null);
+  const [analysisModalOpen, setAnalysisModalOpen] = useState(false);
+
+  // Add this function inside your SearchPage component, before the return statement
+  const handleAnalyzeDatasets = () => {
+    // Get relevant datasets
+    const relevantDatasets = datasets.slice(0, 3); // Limit to first 3
+    const currentQuery = query.trim();
+    
+    if (relevantDatasets.length > 0 && currentQuery) {
+      // Set analyzing state
+      setAnalysisStatus('analyzing');
+      setAnalysisResults(null);
+      
+      // Import the streamAnalyzeDatasets function
+      import("@/lib/firebase").then(({ streamAnalyzeDatasets }) => {
+        let accumulatedResults = {};
+        
+        streamAnalyzeDatasets({
+          query: currentQuery,
+          datasets: relevantDatasets
+        }, (chunk) => {
+          console.log("Analysis chunk received:", chunk);
+          
+          // Specifically look for the 'findings' chunk type
+          if (chunk.type === 'findings' && chunk.data) {
+            // Store the findings data directly
+            setAnalysisResults({
+              summary: chunk.data.summary || '',
+              key_findings: chunk.data.key_data_points || [],
+              sources: chunk.data.sources || []
+            });
+            
+            // Since we got the findings, we can mark analysis as complete
+            setAnalysisStatus('complete');
+          } 
+          // Also handle regular result chunks as fallback
+          else if (chunk.type === 'result' || chunk.type === 'complete') {
+            accumulatedResults = { ...accumulatedResults, ...chunk.data };
+            setAnalysisResults(prev => ({
+              ...prev,
+              ...accumulatedResults
+            }));
+            
+            // When complete, update status
+            if (chunk.type === 'complete') {
+              setAnalysisStatus('complete');
+            }
+          }
+        }).catch(error => {
+          console.error("Analysis error:", error);
+          setAnalysisStatus('idle');
+        });
+      });
+    }
+  };
+
   return (
     <div className="flex flex-col min-h-screen bg-gray-50 text-gray-900">
       {/* Header with logo */}
@@ -1650,223 +1730,282 @@ export default function SearchPage() {
                 onValueChange={setActiveTab}
                 className="mb-0 w-full"
               >
-                <TabsList className={`bg-white border border-gray-200 rounded-md border-b-0 rounded-b-none w-auto justify-start ${isMobile ? 'overflow-auto' : ''}`}>
-                  <TabsTrigger value="data.gov" className="data-[state=active]:bg-green-50 data-[state=active]:text-green-700">
-                    data.gov
-                  </TabsTrigger>
-                  
-                  {/* Replace each locked tab with a tooltip wrapper */}
-                  <TooltipProvider delayDuration={0}>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <div className="cursor-not-allowed touch-manipulation">
-                          <TabsTrigger 
-                            value="census" 
-                            disabled 
-                            className="opacity-60 text-gray-400 hover:!bg-transparent hover:!text-gray-400 data-[state=active]:bg-transparent" 
-                          >
-                            <div className="flex items-center gap-1.5">
-                              U.S. Census Bureau
-                              <Lock className="h-3.5 w-3.5 text-gray-400" />
-                            </div>
-                          </TabsTrigger>
-                        </div>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom" className="bg-white p-3 shadow-lg border border-gray-200 z-50">
-                        <div className="text-sm">
-                          <Link 
-                            href="/waitlist" 
-                            target="_blank"
-                            className="text-gray-900 hover:text-green-700 font-medium inline-flex items-center gap-1.5 transition-colors"
-                          >
-                            Join beta waitlist for early access <ExternalLink className="h-3 w-3" />
-                          </Link>
-                        </div>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
+                <div className="flex justify-between items-center">
+                  <TabsList className={`bg-white border border-gray-200 rounded-md border-b-0 rounded-b-none w-auto justify-start ${isMobile ? 'overflow-auto' : ''}`}>
+                    <TabsTrigger value="data.gov" className="data-[state=active]:bg-green-50 data-[state=active]:text-green-700">
+                      data.gov
+                    </TabsTrigger>
+                    
+                    {/* Keep first locked tab */}
+                    <TooltipProvider delayDuration={0}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <div className="cursor-not-allowed touch-manipulation">
+                            <TabsTrigger 
+                              value="census" 
+                              disabled 
+                              className="opacity-60 text-gray-400 hover:!bg-transparent hover:!text-gray-400 data-[state=active]:bg-transparent" 
+                            >
+                              <div className="flex items-center gap-1.5">
+                                U.S. Census Bureau
+                                <Lock className="h-3.5 w-3.5 text-gray-400" />
+                              </div>
+                            </TabsTrigger>
+                          </div>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" className="bg-white p-3 shadow-lg border border-gray-200 z-50">
+                          <div className="text-sm">
+                            <Link 
+                              href="/waitlist" 
+                              target="_blank"
+                              className="text-gray-900 hover:text-green-700 font-medium inline-flex items-center gap-1.5 transition-colors"
+                            >
+                              Join beta waitlist for early access <ExternalLink className="h-3 w-3" />
+                            </Link>
+                          </div>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
 
-                  {/* Repeat for other locked tabs */}
-                  <TooltipProvider delayDuration={0}>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <div className="cursor-not-allowed touch-manipulation">
-                          <TabsTrigger 
-                            value="bls" 
-                            disabled 
-                            className="opacity-60 text-gray-400 hover:!bg-transparent hover:!text-gray-400 data-[state=active]:bg-transparent" 
-                          >
-                            <div className="flex items-center gap-1.5">
-                              U.S. BLS
-                              <Lock className="h-3.5 w-3.5 text-gray-400" />
-                            </div>
-                          </TabsTrigger>
-                        </div>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom" className="bg-white p-3 shadow-lg border border-gray-200 z-50">
-                        <div className="text-sm">
-                          <Link 
-                            href="/waitlist" 
-                            target="_blank"
-                            className="text-gray-900 hover:text-green-700 font-medium inline-flex items-center gap-1.5 transition-colors"
-                          >
-                            Join beta waitlist for early access <ExternalLink className="h-3 w-3" />
-                          </Link>
-                        </div>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
+                    {/* Second locked tab */}
+                    <TooltipProvider delayDuration={0}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <div className="cursor-not-allowed touch-manipulation">
+                            <TabsTrigger 
+                              value="bls" 
+                              disabled 
+                              className="opacity-60 text-gray-400 hover:!bg-transparent hover:!text-gray-400 data-[state=active]:bg-transparent" 
+                            >
+                              <div className="flex items-center gap-1.5">
+                                U.S. BLS
+                                <Lock className="h-3.5 w-3.5 text-gray-400" />
+                              </div>
+                            </TabsTrigger>
+                          </div>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" className="bg-white p-3 shadow-lg border border-gray-200 z-50">
+                          <div className="text-sm">
+                            <Link 
+                              href="/waitlist" 
+                              target="_blank"
+                              className="text-gray-900 hover:text-green-700 font-medium inline-flex items-center gap-1.5 transition-colors"
+                            >
+                              Join beta waitlist for early access <ExternalLink className="h-3 w-3" />
+                            </Link>
+                          </div>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
 
-                  <TooltipProvider delayDuration={0}>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <div className="cursor-not-allowed touch-manipulation">
-                          <TabsTrigger 
-                            value="eia" 
-                            disabled 
-                            className="opacity-60 text-gray-400 hover:!bg-transparent hover:!text-gray-400 data-[state=active]:bg-transparent" 
-                          >
-                            <div className="flex items-center gap-1.5">
-                              U.S. EIA
-                              <Lock className="h-3.5 w-3.5 text-gray-400" />
-                            </div>
-                          </TabsTrigger>
-                        </div>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom" className="bg-white p-3 shadow-lg border border-gray-200 z-50">
-                        <div className="text-sm">
-                          <Link 
-                            href="/waitlist" 
-                            target="_blank"
-                            className="text-gray-900 hover:text-green-700 font-medium inline-flex items-center gap-1.5 transition-colors"
-                          >
-                            Join beta waitlist for early access <ExternalLink className="h-3 w-3" />
-                          </Link>
-                        </div>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
+                    {/* Third locked tab */}
+                    <TooltipProvider delayDuration={0}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <div className="cursor-not-allowed touch-manipulation">
+                            <TabsTrigger 
+                              value="eia" 
+                              disabled 
+                              className="opacity-60 text-gray-400 hover:!bg-transparent hover:!text-gray-400 data-[state=active]:bg-transparent" 
+                            >
+                              <div className="flex items-center gap-1.5">
+                                U.S. EIA
+                                <Lock className="h-3.5 w-3.5 text-gray-400" />
+                              </div>
+                            </TabsTrigger>
+                          </div>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" className="bg-white p-3 shadow-lg border border-gray-200 z-50">
+                          <div className="text-sm">
+                            <Link 
+                              href="/waitlist" 
+                              target="_blank"
+                              className="text-gray-900 hover:text-green-700 font-medium inline-flex items-center gap-1.5 transition-colors"
+                            >
+                              Join beta waitlist for early access <ExternalLink className="h-3 w-3" />
+                            </Link>
+                          </div>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
 
-                  <TooltipProvider delayDuration={0}>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <div className="cursor-not-allowed touch-manipulation">
-                          <TabsTrigger 
-                            value="noaa" 
-                            disabled 
-                            className="opacity-60 text-gray-400 hover:!bg-transparent hover:!text-gray-400 data-[state=active]:bg-transparent" 
-                          >
-                            <div className="flex items-center gap-1.5">
-                              NOAA
-                              <Lock className="h-3.5 w-3.5 text-gray-400" />
-                            </div>
-                          </TabsTrigger>
-                        </div>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom" className="bg-white p-3 shadow-lg border border-gray-200 z-50">
-                        <div className="text-sm">
-                          <Link 
-                            href="/waitlist" 
-                            target="_blank"
-                            className="text-gray-900 hover:text-green-700 font-medium inline-flex items-center gap-1.5 transition-colors"
-                          >
-                            Join beta waitlist for early access <ExternalLink className="h-3 w-3" />
-                          </Link>
-                        </div>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
+                    {/* Fourth locked tab */}
+                    <TooltipProvider delayDuration={0}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <div className="cursor-not-allowed touch-manipulation">
+                            <TabsTrigger 
+                              value="noaa" 
+                              disabled 
+                              className="opacity-60 text-gray-400 hover:!bg-transparent hover:!text-gray-400 data-[state=active]:bg-transparent" 
+                            >
+                              <div className="flex items-center gap-1.5">
+                                NOAA
+                                <Lock className="h-3.5 w-3.5 text-gray-400" />
+                              </div>
+                            </TabsTrigger>
+                          </div>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" className="bg-white p-3 shadow-lg border border-gray-200 z-50">
+                          <div className="text-sm">
+                            <Link 
+                              href="/waitlist" 
+                              target="_blank"
+                              className="text-gray-900 hover:text-green-700 font-medium inline-flex items-center gap-1.5 transition-colors"
+                            >
+                              Join beta waitlist for early access <ExternalLink className="h-3 w-3" />
+                            </Link>
+                          </div>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
 
-                  <TooltipProvider delayDuration={0}>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <div className="cursor-not-allowed touch-manipulation">
-                          <TabsTrigger 
-                            value="cdc" 
-                            disabled 
-                            className="opacity-60 text-gray-400 hover:!bg-transparent hover:!text-gray-400 data-[state=active]:bg-transparent" 
-                          >
-                            <div className="flex items-center gap-1.5">
-                              CDC
-                              <Lock className="h-3.5 w-3.5 text-gray-400" />
-                            </div>
-                          </TabsTrigger>
-                        </div>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom" className="bg-white p-3 shadow-lg border border-gray-200 z-50">
-                        <div className="text-sm">
-                          <Link 
-                            href="/waitlist" 
-                            target="_blank"
-                            className="text-gray-900 hover:text-green-700 font-medium inline-flex items-center gap-1.5 transition-colors"
-                          >
-                            Join beta waitlist for early access <ExternalLink className="h-3 w-3" />
-                          </Link>
-                        </div>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
+                    {/* Fifth locked tab */}
+                    <TooltipProvider delayDuration={0}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <div className="cursor-not-allowed touch-manipulation">
+                            <TabsTrigger 
+                              value="cdc" 
+                              disabled 
+                              className="opacity-60 text-gray-400 hover:!bg-transparent hover:!text-gray-400 data-[state=active]:bg-transparent" 
+                            >
+                              <div className="flex items-center gap-1.5">
+                                CDC
+                                <Lock className="h-3.5 w-3.5 text-gray-400" />
+                              </div>
+                            </TabsTrigger>
+                          </div>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" className="bg-white p-3 shadow-lg border border-gray-200 z-50">
+                          <div className="text-sm">
+                            <Link 
+                              href="/waitlist" 
+                              target="_blank"
+                              className="text-gray-900 hover:text-green-700 font-medium inline-flex items-center gap-1.5 transition-colors"
+                            >
+                              Join beta waitlist for early access <ExternalLink className="h-3 w-3" />
+                            </Link>
+                          </div>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
 
-                  <TooltipProvider delayDuration={0}>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <div className="cursor-not-allowed touch-manipulation">
-                          <TabsTrigger 
-                            value="usgs" 
-                            disabled 
-                            className="opacity-60 text-gray-400 hover:!bg-transparent hover:!text-gray-400 data-[state=active]:bg-transparent" 
-                          >
-                            <div className="flex items-center gap-1.5">
-                              USGS
-                              <Lock className="h-3.5 w-3.5 text-gray-400" />
-                            </div>
-                          </TabsTrigger>
-                        </div>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom" className="bg-white p-3 shadow-lg border border-gray-200 z-50">
-                        <div className="text-sm">
-                          <Link 
-                            href="/waitlist" 
-                            target="_blank"
-                            className="text-gray-900 hover:text-green-700 font-medium inline-flex items-center gap-1.5 transition-colors"
-                          >
-                            Join beta waitlist for early access <ExternalLink className="h-3 w-3" />
-                          </Link>
-                        </div>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
+                    {/* Sixth locked tab */}
+                    <TooltipProvider delayDuration={0}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <div className="cursor-not-allowed touch-manipulation">
+                            <TabsTrigger 
+                              value="usgs" 
+                              disabled 
+                              className="opacity-60 text-gray-400 hover:!bg-transparent hover:!text-gray-400 data-[state=active]:bg-transparent" 
+                            >
+                              <div className="flex items-center gap-1.5">
+                                USGS
+                                <Lock className="h-3.5 w-3.5 text-gray-400" />
+                              </div>
+                            </TabsTrigger>
+                          </div>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" className="bg-white p-3 shadow-lg border border-gray-200 z-50">
+                          <div className="text-sm">
+                            <Link 
+                              href="/waitlist" 
+                              target="_blank"
+                              className="text-gray-900 hover:text-green-700 font-medium inline-flex items-center gap-1.5 transition-colors"
+                            >
+                              Join beta waitlist for early access <ExternalLink className="h-3 w-3" />
+                            </Link>
+                          </div>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
 
-                  <TooltipProvider delayDuration={0}>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <div className="cursor-not-allowed touch-manipulation">
-                          <TabsTrigger 
-                            value="fred" 
-                            disabled 
-                            className="opacity-60 text-gray-400 hover:!bg-transparent hover:!text-gray-400 data-[state=active]:bg-transparent" 
+                    {/* Seventh locked tab */}
+                    <TooltipProvider delayDuration={0}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <div className="cursor-not-allowed touch-manipulation">
+                            <TabsTrigger 
+                              value="fred" 
+                              disabled 
+                              className="opacity-60 text-gray-400 hover:!bg-transparent hover:!text-gray-400 data-[state=active]:bg-transparent" 
+                            >
+                              <div className="flex items-center gap-1.5">
+                                FRED
+                                <Lock className="h-3.5 w-3.5 text-gray-400" />
+                              </div>
+                            </TabsTrigger>
+                          </div>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" className="bg-white p-3 shadow-lg border border-gray-200 z-50">
+                          <div className="text-sm">
+                            <Link 
+                              href="/waitlist" 
+                              target="_blank"
+                              className="text-gray-900 hover:text-green-700 font-medium inline-flex items-center gap-1.5 transition-colors"
+                            >
+                              Join beta waitlist for early access <ExternalLink className="h-3 w-3" />
+                            </Link>
+                          </div>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </TabsList>
+
+                  {/* Updated button rendering logic with new CSS classes */}
+                  {(searchStatus === SearchStatus.COMPLETE && datasets.length > 0) && (
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button 
+                            onClick={() => {
+                              if (analysisStatus === 'complete') {
+                                // If analysis is complete, show the results modal
+                                setAnalysisModalOpen(true);
+                              } else if (analysisStatus !== 'analyzing') {
+                                // If not currently analyzing, start a new analysis
+                                handleAnalyzeDatasets();
+                              }
+                              // If analyzing, clicking does nothing (button will be disabled anyway)
+                            }}
+                            className={`${
+                              analysisStatus === 'complete'
+                                ? 'bg-gray-800 hover:bg-gray-900' // Different style for "View Analysis"
+                                : 'bg-green-600 hover:bg-green-700' // Original style for "Analyze"
+                            } text-white transition-all duration-200 border border-gray-200 border-b-0 rounded-b-none rounded-md rounded-bl-none rounded-br-none h-[38px]`}
+                            disabled={datasets.length === 0 || !query.trim() || searchStatus === SearchStatus.SEARCHING || analysisStatus === 'analyzing'}
                           >
-                            <div className="flex items-center gap-1.5">
-                              FRED
-                              <Lock className="h-3.5 w-3.5 text-gray-400" />
-                            </div>
-                          </TabsTrigger>
-                        </div>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom" className="bg-white p-3 shadow-lg border border-gray-200 z-50">
-                        <div className="text-sm">
-                          <Link 
-                            href="/waitlist" 
-                            target="_blank"
-                            className="text-gray-900 hover:text-green-700 font-medium inline-flex items-center gap-1.5 transition-colors"
-                          >
-                            Join beta waitlist for early access <ExternalLink className="h-3 w-3" />
-                          </Link>
-                        </div>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                </TabsList>
+                            {analysisStatus === 'analyzing' ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Analyzing...
+                              </>
+                            ) : analysisStatus === 'complete' ? (
+                              <>
+                                <FileText className="mr-2 h-4 w-4" />
+                                View Analysis
+                              </>
+                            ) : (
+                              <>
+                                <Lightbulb className="mr-2 h-4 w-4" />
+                                Analyze these datasets (~1 min)
+                              </>
+                            )}
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>{
+                            analysisStatus === 'analyzing' ? 'Analysis in progress...' :
+                            analysisStatus === 'complete' ? 'View your analysis results' :
+                            'Run deep analysis on the selected datasets with your query'
+                          }</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  )}
+                </div>
               </Tabs>
               
               {isMobile ? (
@@ -1888,13 +2027,14 @@ export default function SearchPage() {
                 </div>
               ) : (
                 /* Desktop table view - Ensure table takes full width */
-                <div className="rounded-md rounded-tl-none border border-gray-200 bg-white overflow-auto scrollbar-fix w-full">
+                <div className="rounded-md rounded-t-none border border-gray-200 bg-white overflow-auto scrollbar-fix w-full">
                   <Table className="w-full">
                     <TableHeader>
                       <TableRow className="hover:!bg-transparent border-b border-gray-200">
                         <TableHead className="w-[5%] h-10 text-gray-700"></TableHead>
-                        <TableHead className="w-[20%] font-medium text-gray-700">Source</TableHead>
-                        <TableHead className="w-[55%] font-medium text-gray-700">Dataset</TableHead>
+                        <TableHead className="w-[10%] font-medium text-gray-700">Source</TableHead>
+                        <TableHead className="w-[20%] font-medium text-gray-700">Dataset</TableHead>
+                        <TableHead className="w-[55%] font-medium text-gray-700">Insights</TableHead>
                         <TableHead className="w-[10%] text-center font-medium text-gray-700">Resources</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -1908,7 +2048,7 @@ export default function SearchPage() {
                               }`}
                               onClick={() => toggleExpand(dataset.id)}
                             >
-                              <TableCell className="py-4 px-4">
+                              <TableCell className="py-8 px-4">
                                 <motion.div
                                   initial={{ rotate: 0 }}
                                   animate={{ rotate: expandedDataset === dataset.id ? 90 : 0 }}
@@ -1932,7 +2072,7 @@ export default function SearchPage() {
                                   </Avatar>
                                 <div className="min-w-0 flex-1">
                                   <span 
-                                    className="text-xs block text-gray-800 leading-tight truncate"
+                                    className="text-xs block text-gray-800 leading-tight break-words whitespace-normal"
                                     title={getOrganizationName(dataset)}
                                   >
                                     {getOrganizationName(dataset)}
@@ -1943,11 +2083,24 @@ export default function SearchPage() {
                             <TableCell className="py-4">
                               <div>
                                 <h3 
-                                  className="text-xs font-medium text-gray-900 truncate" 
+                                  className="text-xs font-medium text-gray-900 break-words whitespace-normal" 
                                   title={dataset.title}
                                 >
                                     {dataset.title}
                                   </h3>
+                                </div>
+                              </TableCell>
+                              
+                              {/* New Insights column */}
+                              <TableCell className="py-4">
+                                <div>
+                                  {dataset.relevance && dataset.relevance.reasoning ? (
+                                    <p className="text-xs text-black break-words whitespace-normal" title={dataset.relevance.reasoning}>
+                                      {dataset.relevance.reasoning}
+                                    </p>
+                                  ) : (
+                                    <Skeleton className="h-8 w-full bg-gray-200" />
+                                  )}
                                 </div>
                               </TableCell>
                               
@@ -2116,15 +2269,15 @@ export default function SearchPage() {
                         </React.Fragment>
                     ))}
                     
-                    {/* Show skeleton rows only when searching */}
-                    {searchStatus === SearchStatus.SEARCHING && (
-                      // Skeleton rows when searching
+                    {/* Show skeleton rows only when searching and no datasets are available yet */}
+                    {searchStatus === SearchStatus.SEARCHING && datasets.length === 0 && (
+                      // Skeleton rows when searching and no datasets loaded yet
                       Array(6).fill(0).map((_, index) => (
                         <TableRow 
                           key={`skeleton-${index}`}
                           className="border-b border-gray-200 hover:!bg-transparent"
                         >
-                          <TableCell className="py-4 px-4">
+                          <TableCell className="py-8 px-4">
                             <div className="flex items-center justify-center w-5 h-5">
                               <Skeleton className="h-4 w-4 bg-gray-200 rounded-sm" />
                             </div>
@@ -2142,9 +2295,10 @@ export default function SearchPage() {
                               <Skeleton className="h-5 w-full bg-gray-200" />
                             </div>
                           </TableCell>
-                          <TableCell className="py-4 text-center">
-                            <div className="flex justify-center">
-                              <Skeleton className="h-6 w-16 bg-gray-200 rounded-full" />
+                          {/* New skeleton for Insights column */}
+                          <TableCell className="py-4">
+                            <div>
+                              <Skeleton className="h-8 w-full bg-gray-200" />
                             </div>
                           </TableCell>
                           <TableCell className="py-4 text-center">
@@ -2167,6 +2321,69 @@ export default function SearchPage() {
       
       {/* Footer */}
       <Footer />
+
+      {/* Analysis Results Modal */}
+      {analysisStatus === 'analyzing' ? (
+        // Show loading state
+        <Dialog open={analysisModalOpen} onOpenChange={setAnalysisModalOpen}>
+          <DialogContent className="sm:max-w-[800px] max-h-[80vh] bg-white">
+            <DialogHeader className="border-b border-gray-100 pb-4">
+              <DialogTitle className="text-gray-900">Analyzing Datasets...</DialogTitle>
+              <DialogDescription className="text-gray-600">
+                Processing {datasets.slice(0, 3).length} datasets for insights related to "{query}"
+              </DialogDescription>
+            </DialogHeader>
+            
+            <div className="p-8 flex flex-col items-center justify-center">
+              <Loader2 className="h-12 w-12 animate-spin text-green-600 mb-4" />
+              <p className="text-center text-gray-600">
+                Our AI is analyzing the datasets to extract relevant insights.
+                <br/>This may take a minute...
+              </p>
+              
+              <div className="w-full mt-8 space-y-3">
+                {datasets.slice(0, 3).map((dataset, idx) => (
+                  <div key={dataset.id} className="flex items-center space-x-3">
+                    <div className="h-8 w-8 rounded-full bg-gray-100 text-gray-600 flex items-center justify-center">
+                      {idx + 1}
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-gray-700 truncate">
+                        {dataset.title}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            
+            <DialogFooter className="border-t border-gray-100 pt-4 bg-white">
+              <Button 
+                variant="outline" 
+                onClick={() => setAnalysisModalOpen(false)}
+                className="text-gray-700 border-gray-300 hover:bg-gray-100 hover:text-gray-900"
+              >
+                Close
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      ) : (
+        // Use our new component for the completed analysis
+        <AnalysisResultsModal
+          open={analysisModalOpen}
+          onOpenChange={setAnalysisModalOpen}
+          isMobile={isMobile}
+          query={query}
+          summary={analysisResults?.summary || 'The analysis provides insights into the datasets related to your query.'}
+          keyFindings={analysisResults?.key_findings || []}
+          sources={analysisResults?.sources || datasets.slice(0, 3).map((dataset, idx) => ({
+            citation_id: `${idx + 1}`,
+            title: dataset.title,
+            organization: getOrganizationName(dataset)
+          }))}
+        />
+      )}
     </div>
   );
 }
