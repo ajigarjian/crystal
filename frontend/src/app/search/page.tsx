@@ -1421,7 +1421,7 @@ export default function SearchPage() {
   // Add this function inside your SearchPage component, before the return statement
   const handleAnalyzeDatasets = () => {
     // Get all relevant datasets instead of just the first 3
-    const relevantDatasets = datasets; // Use all datasets instead of slicing
+    const relevantDatasets = datasets.slice(0, 15); // Limit to first 3
     const currentQuery = query.trim();
     
     if (relevantDatasets.length > 0 && currentQuery) {
@@ -2383,7 +2383,7 @@ export default function SearchPage() {
           query={query}
           summary={analysisResults?.summary || 'The analysis provides insights into the datasets related to your query.'}
           keyFindings={analysisResults?.key_findings || []}
-          sources={analysisResults?.sources || datasets.map((dataset, idx) => ({
+          sources={analysisResults?.sources || datasets.slice(0, 3).map((dataset, idx) => ({
             citation_id: `${idx + 1}`,
             title: dataset.title,
             organization: getOrganizationName(dataset)
