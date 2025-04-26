@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Input } from "@/components/ui/input";
-import { Search, Loader2, ChevronDown, ChevronUp, FileText, ExternalLink, Info, ChevronRight, Download, X, Lock, AlertCircle, Lightbulb, MessageSquare, ThumbsUp, Bug, ArrowRight } from "lucide-react";
+import { Search, Loader2, ChevronDown, ChevronUp, FileText, ExternalLink, Info, ChevronRight, Download, X, Lock, AlertCircle, Lightbulb, MessageSquare, ThumbsUp, Bug, ArrowRight, Calendar, Hash } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { trackDwellTimeEnd, trackDwellTimeStart, warmFunctions, streamSearchDatasets } from "@/lib/firebase";
 import { Badge } from "@/components/ui/badge";
@@ -780,6 +780,53 @@ export default function SearchPage() {
         );
       });
     }
+    // Add a new handler for analysis_result chunks 
+    else if (chunk.type === 'analysis_result' && chunk.data && chunk.data.dataset_info) {
+      // Add this log
+      console.log('Received analysis_result:', chunk.data.dataset_info);
+      
+      const datasetInfo = chunk.data.dataset_info;
+      const datasetId = datasetInfo.id;
+      
+      // Create a dataset update with the row and column counts
+      const datasetUpdate = {
+        id: datasetId,
+        row_count: datasetInfo.rows,
+        column_count: datasetInfo.columns,
+        // We can also add relevance data if it's not already set
+        relevance: {
+          ...allDatasetsRef.current.find(d => d.id === datasetId)?.relevance,
+          relevance_score: datasetInfo.relevance_score,
+          reasoning: datasetInfo.relevance_reasoning
+        }
+      };
+      
+      // Update datasets in allDatasetsRef and state
+      const allDatasets = allDatasetsRef.current;
+      for (let i = 0; i < allDatasets.length; i++) {
+        if (allDatasets[i].id === datasetId) {
+          allDatasetsRef.current[i] = { ...allDatasets[i], ...datasetUpdate };
+          break;
+        }
+      }
+      
+      setDatasets(prev => {
+        const updated = prev.map(dataset => 
+          dataset.id === datasetId ? { ...dataset, ...datasetUpdate } : dataset
+        );
+        
+        // Add this log
+        console.log('Updated datasets with dimensions:', 
+          updated.find(d => d.id === datasetId)?.row_count,
+          updated.find(d => d.id === datasetId)?.column_count
+        );
+        
+        return updated;
+      });
+      
+      // Small progress boost for receiving analysis
+      setSearchProgress(prev => Math.min(prev + 1, 90));
+    }
     else if (chunk.type === 'complete') {
       // Search complete
       setSearchProgress(100); // Set to 100% before transitioning to complete
@@ -1420,14 +1467,17 @@ export default function SearchPage() {
 
   // Add this function inside your SearchPage component, before the return statement
   const handleAnalyzeDatasets = () => {
-    // Get all relevant datasets instead of just the first 3
-    const relevantDatasets = datasets.slice(0, 15); // Limit to first 3
+    // Get all relevant datasets
+    const relevantDatasets = datasets.slice(0, 15); 
     const currentQuery = query.trim();
     
     if (relevantDatasets.length > 0 && currentQuery) {
       // Set analyzing state
       setAnalysisStatus('analyzing');
       setAnalysisResults(null);
+      
+      // Create an abort controller for cancellation if needed
+      const controller = new AbortController();
       
       // Import the streamAnalyzeDatasets function
       import("@/lib/firebase").then(({ streamAnalyzeDatasets }) => {
@@ -1436,39 +1486,143 @@ export default function SearchPage() {
         streamAnalyzeDatasets({
           query: currentQuery,
           datasets: relevantDatasets // Pass all datasets
-        }, (chunk) => {
-          console.log("Analysis chunk received:", chunk);
+        }, 
+        // Ensure handleAnalysisChunk gets called immediately for each chunk
+        (chunk) => {
+          handleAnalysisChunk(chunk);
           
-          // Specifically look for the 'findings' chunk type
-          if (chunk.type === 'findings' && chunk.data) {
-            // Store the findings data directly
-            setAnalysisResults({
-              summary: chunk.data.summary || '',
-              key_findings: chunk.data.key_data_points || [],
-              sources: chunk.data.sources || []
-            });
-            
-            // Since we got the findings, we can mark analysis as complete
-            setAnalysisStatus('complete');
-          } 
-          // Also handle regular result chunks as fallback
-          else if (chunk.type === 'result' || chunk.type === 'complete') {
-            accumulatedResults = { ...accumulatedResults, ...chunk.data };
-            setAnalysisResults(prev => ({
-              ...prev,
-              ...accumulatedResults
-            }));
-            
-            // When complete, update status
-            if (chunk.type === 'complete') {
-              setAnalysisStatus('complete');
-            }
+          // Force a state update to ensure UI refreshes (if needed)
+          // This is a minimal change that might help if React is batching updates
+          setAnalysisStatus(prev => {
+            // Return same value but trigger a state update
+            return prev === 'analyzing' ? 'analyzing' : prev;
+          });
+        },
+        controller.signal // Add abort signal support (optional)
+        ).catch(error => {
+          // Only show errors that aren't from user cancellation
+          if (error.name !== 'AbortError') {
+            console.error("Analysis error:", error);
+            setAnalysisStatus('idle');
           }
-        }).catch(error => {
-          console.error("Analysis error:", error);
-          setAnalysisStatus('idle');
         });
       });
+    }
+  };
+
+  // Add these helper functions for formatting numbers and percentages
+  const formatNumber = (num?: number) => {
+    if (num === undefined) return "—";
+    if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`;
+    if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`;
+    return num.toString();
+  };
+
+  const formatPercent = (value?: number) => {
+    if (value === undefined) return "—";
+    return `${(value * 100).toFixed(1)}%`;
+  };
+
+  // Add this function to handle analysis chunks separately from search chunks
+  const handleAnalysisChunk = (chunk: any) => {
+    // Log the full chunk for debugging
+    console.log("Analysis chunk (full):", chunk);
+    
+    // Keep the existing type logging for quick reference
+    console.log("Analysis chunk received:", chunk.type);
+    
+    if (chunk.type === 'status') {
+      // Update status message during analysis
+      setStatusMessage(chunk.message);
+    }
+    else if (chunk.type === 'dataset_status') {
+      // Handle dataset-specific status updates
+      setStatusMessage(chunk.message);
+      
+      if (chunk.dataset_id) {
+        // Update the specific dataset's status in the datasets state
+        setDatasets(prev => prev.map(dataset => 
+          dataset.id === chunk.dataset_id ? 
+            { 
+              ...dataset, 
+              status: chunk.status || dataset.status,
+              // Add progress if available
+              ...(chunk.progress !== undefined ? { progress: chunk.progress } : {})
+            } 
+            : dataset
+        ));
+        
+        // Also update in the allDatasetsRef for consistency
+        const allDatasets = allDatasetsRef.current;
+        for (let i = 0; i < allDatasets.length; i++) {
+          if (allDatasets[i].id === chunk.dataset_id) {
+            allDatasetsRef.current[i] = { 
+              ...allDatasets[i], 
+              status: chunk.status || allDatasets[i].status,
+              ...(chunk.progress !== undefined ? { progress: chunk.progress } : {})
+            };
+            break;
+          }
+        }
+        
+        console.log(`Updated dataset ${chunk.dataset_id} status to: ${chunk.status}`);
+      }
+    }
+    else if (chunk.type === 'analysis_result' && chunk.data && chunk.data.dataset_info) {
+      const datasetInfo = chunk.data.dataset_info;
+      const datasetId = datasetInfo.id;
+      
+      console.log(`Received dimensions for ${datasetId}:`, datasetInfo.rows, 'x', datasetInfo.columns);
+      
+      // Update dataset with dimensions
+      const datasetUpdate = {
+        id: datasetId,
+        row_count: datasetInfo.rows,
+        column_count: datasetInfo.columns
+      };
+      
+      // Update in allDatasetsRef
+      const allDatasets = allDatasetsRef.current;
+      for (let i = 0; i < allDatasets.length; i++) {
+        if (allDatasets[i].id === datasetId) {
+          allDatasetsRef.current[i] = { ...allDatasets[i], ...datasetUpdate };
+          break;
+        }
+      }
+      
+      // Update in state
+      setDatasets(prev => prev.map(dataset => 
+        dataset.id === datasetId ? { ...dataset, ...datasetUpdate } : dataset
+      ));
+    }
+    else if (chunk.type === 'extracted_data' || chunk.type === 'formatted_data') {
+      // Handle other analysis data if needed
+      // This is where you'd process specific analysis results
+    }
+    else if (chunk.type === 'findings') {
+      // Handle the findings summary
+      setAnalysisResults({
+        summary: chunk.data.summary || '',
+        key_findings: chunk.data.key_data_points || [],
+        sources: chunk.data.sources || []
+      });
+    }
+    else if (chunk.type === 'complete') {
+      // Analysis complete
+      setAnalysisStatus('complete');
+      console.log("Analysis complete");
+    }
+    else if (chunk.type === 'error') {
+      console.error("Analysis error:", chunk.message);
+      setAnalysisStatus('idle');
+      
+      // If the error has a dataset_id, update that dataset's status
+      if (chunk.dataset_id) {
+        setDatasets(prev => prev.map(dataset => 
+          dataset.id === chunk.dataset_id ? 
+            { ...dataset, status: 'error' } : dataset
+        ));
+      }
     }
   };
 
@@ -2033,43 +2187,47 @@ export default function SearchPage() {
                       <TableRow className="hover:!bg-transparent border-b border-gray-200">
                         <TableHead className="w-[5%] h-10 text-gray-700"></TableHead>
                         <TableHead className="w-[10%] font-medium text-gray-700">Source</TableHead>
-                        <TableHead className="w-[20%] font-medium text-gray-700">Dataset</TableHead>
-                        <TableHead className="w-[55%] font-medium text-gray-700">Insights</TableHead>
+                        <TableHead className="w-[15%] font-medium text-gray-700">Dataset</TableHead>
+                        <TableHead className="w-[10%] text-center font-medium text-gray-700">Relevance</TableHead>
+                        <TableHead className="w-[10%] text-center font-medium text-gray-700">Time Range</TableHead>
+                        <TableHead className="w-[15%] font-medium text-gray-700">Granularity</TableHead>
+                        <TableHead className="w-[10%] text-center font-medium text-gray-700">Dimensions</TableHead>
+                        <TableHead className="w-[10%] text-center font-medium text-gray-700">Quality</TableHead>
                         <TableHead className="w-[10%] text-center font-medium text-gray-700">Resources</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {/* Always show real dataset rows if we have any */}
                       {datasets.map((dataset, index) => (
-                          <React.Fragment key={dataset.id}>
-                            <TableRow 
-                              className={`border-b border-gray-200 hover:bg-gray-50 transition-colors cursor-pointer ${
-                                expandedDataset === dataset.id ? 'bg-gray-50' : ''
-                              }`}
-                              onClick={() => toggleExpand(dataset.id)}
-                            >
-                              <TableCell className="py-8 px-4">
-                                <motion.div
-                                  initial={{ rotate: 0 }}
-                                  animate={{ rotate: expandedDataset === dataset.id ? 90 : 0 }}
-                                  transition={{ duration: 0.2 }}
-                                  className="flex items-center justify-center w-5 h-5"
-                                >
-                                  <ChevronRight className="h-4 w-4 text-gray-500" />
-                                </motion.div>
-                              </TableCell>
+                        <React.Fragment key={dataset.id}>
+                          <TableRow 
+                            className={`border-b border-gray-200 hover:bg-gray-50 transition-colors cursor-pointer ${
+                              expandedDataset === dataset.id ? 'bg-gray-50' : ''
+                            }`}
+                            onClick={() => toggleExpand(dataset.id)}
+                          >
+                            <TableCell className="py-8 px-4">
+                              <motion.div
+                                initial={{ rotate: 0 }}
+                                animate={{ rotate: expandedDataset === dataset.id ? 90 : 0 }}
+                                transition={{ duration: 0.2 }}
+                                className="flex items-center justify-center w-5 h-5"
+                              >
+                                <ChevronRight className="h-4 w-4 text-gray-500" />
+                              </motion.div>
+                            </TableCell>
                             <TableCell className="py-4 max-w-[200px]">
-                                <div className="flex items-center gap-2">
-                                  <Avatar className="h-6 w-6 rounded shrink-0">
-                                    {typeof getOrganizationImage(dataset) === 'string' && 
-                                     getOrganizationImage(dataset).length > 1 ? (
-                                      <AvatarImage src={getOrganizationImage(dataset) as string} />
-                                    ) : (
-                                      <AvatarFallback className="rounded bg-green-100 text-green-600 text-xs">
-                                        {getOrganizationImage(dataset)}
-                                      </AvatarFallback>
-                                    )}
-                                  </Avatar>
+                              <div className="flex items-center gap-2">
+                                <Avatar className="h-6 w-6 rounded shrink-0">
+                                  {typeof getOrganizationImage(dataset) === 'string' && 
+                                   getOrganizationImage(dataset).length > 1 ? (
+                                    <AvatarImage src={getOrganizationImage(dataset) as string} />
+                                  ) : (
+                                    <AvatarFallback className="rounded bg-green-100 text-green-600 text-xs">
+                                      {getOrganizationImage(dataset)}
+                                    </AvatarFallback>
+                                  )}
+                                </Avatar>
                                 <div className="min-w-0 flex-1">
                                   <span 
                                     className="text-xs block text-gray-800 leading-tight break-words whitespace-normal"
@@ -2078,240 +2236,396 @@ export default function SearchPage() {
                                     {getOrganizationName(dataset)}
                                   </span>
                                 </div>
-                                </div>
-                              </TableCell>
+                              </div>
+                            </TableCell>
                             <TableCell className="py-4">
                               <div>
                                 <h3 
                                   className="text-xs font-medium text-gray-900 break-words whitespace-normal" 
                                   title={dataset.title}
                                 >
-                                    {dataset.title}
-                                  </h3>
-                                </div>
-                              </TableCell>
-                              
-                              {/* New Insights column */}
-                              <TableCell className="py-4">
-                                <div>
-                                  {dataset.relevance && dataset.relevance.reasoning ? (
-                                    <p className="text-xs text-black break-words whitespace-normal" title={dataset.relevance.reasoning}>
-                                      {dataset.relevance.reasoning}
-                                    </p>
-                                  ) : (
-                                    <Skeleton className="h-8 w-full bg-gray-200" />
-                                  )}
-                                </div>
-                              </TableCell>
-                              
-                              <TableCell className="py-4 text-center">
-                                <Drawer>
-                                  <DrawerTrigger asChild>
-                                    <Badge 
-                                      variant="outline" 
-                                      className="font-medium text-white border border-gray-800 bg-black hover:bg-gray-800 cursor-pointer inline-flex items-center gap-1.5 transition-colors px-3 py-1"
-                                    >
-                                      <Download className="h-3 w-3" />
-                                      {(dataset.resources || []).length}
-                                    </Badge>
-                                  </DrawerTrigger>
-                                  <DrawerContent className="bg-white text-gray-900">
-                                    <DrawerHeader className="border-b border-gray-100">
-                                      <DrawerTitle className="text-xl font-semibold text-gray-900">Resources</DrawerTitle>
-                                      <DrawerDescription className="text-gray-600">
-                                        Available resources for &quot;{dataset.title}&quot;
-                                      </DrawerDescription>
-                                    </DrawerHeader>
-                                    
-                                    {/* Add max-height, custom scrollbar styling and overflow-y-auto for scrolling */}
-                                    <div className="p-4 max-h-[calc(80vh-120px)] overflow-y-auto 
-                                      scrollbar-thin scrollbar-thumb-rounded scrollbar-track-transparent 
-                                      hover:scrollbar-thumb-gray-300 scrollbar-thumb-gray-200">
-                                      {dataset.resources && dataset.resources.length > 0 ? (
-                                        <Table>
-                                          <TableHeader className="sticky top-0 bg-white z-10">
-                                            <TableRow className="border-b border-gray-200 hover:!bg-gray-50">
-                                              <TableHead className="w-[100px] text-gray-700">Type</TableHead>
-                                              <TableHead className="text-gray-700">Name</TableHead>
-                                              <TableHead className="text-right text-gray-700">Access</TableHead>
-                                            </TableRow>
-                                          </TableHeader>
-                                          <TableBody>
-                                            {dataset.resources.map((resource: any, resourceIndex: number) => (
-                                              <TableRow 
-                                                key={resource.id || resourceIndex}
-                                                className="border-b border-gray-100 hover:!bg-gray-50 hover:!text-gray-900"
-                                              >
-                                                <TableCell className="font-medium text-gray-900">
-                                                  {getFileType(resource)}
-                                                </TableCell>
-                                                <TableCell className="text-gray-800">
-                                                  {resource.name || 'Unnamed resource'}
-                                                </TableCell>
-                                                <TableCell className="text-right">
-                                                  <Button 
-                                                    size="sm" 
-                                                    variant="ghost"
-                                                    className="h-8 w-8 p-0 text-gray-700 hover:!bg-gray-100 hover:!text-gray-900"
-                                                    asChild
-                                                  >
-                                                    <a href={resource.url} target="_blank" rel="noopener noreferrer">
-                                                      <ExternalLink className="h-4 w-4" />
-                                                    </a>
-                                                  </Button>
-                                                </TableCell>
-                                              </TableRow>
-                                            ))}
-                                          </TableBody>
-                                        </Table>
+                                  {dataset.title}
+                                </h3>
+                              </div>
+                            </TableCell>
+                            
+                            {/* New Relevance column */}
+                            <TableCell className="py-4 text-center">
+                              {dataset.relevance?.relevance_score !== undefined ? (
+                                <TooltipProvider>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <Badge 
+                                        variant="outline" 
+                                        className={`font-medium text-xs ${
+                                          dataset.relevance?.relevance_score >= 0.7 
+                                            ? 'bg-green-50 text-green-700 border-green-200' 
+                                            : dataset.relevance?.relevance_score >= 0.5
+                                              ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                              : 'bg-gray-50 text-gray-700 border-gray-200'
+                                        }`}
+                                      >
+                                        {(dataset.relevance.relevance_score * 100).toFixed(0)}%
+                                      </Badge>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="bottom" className="p-2 max-w-xs">
+                                      <p className="text-xs">{dataset.relevance.reasoning?.split('.')[0] || "Relevance score based on query match"}</p>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
+                              ) : (
+                                <Skeleton className="h-6 w-16 mx-auto bg-gray-200" />
+                              )}
+                            </TableCell>
+                            
+                            {/* Time Range column */}
+                            <TableCell className="py-4 text-center">
+                              <div className="flex items-center justify-center text-xs">
+                                <Calendar className="h-3 w-3 mr-1 text-gray-500" />
+                                {dataset.time_range ? (
+                                  <span>{dataset.time_range}</span>
+                                ) : (
+                                  <span className="text-gray-400">—</span>
+                                )}
+                              </div>
+                            </TableCell>
+                            
+                            {/* Granularity column */}
+                            <TableCell className="py-4">
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <div className="text-xs">
+                                      {dataset.granularity ? (
+                                        <span>{dataset.granularity}</span>
                                       ) : (
-                                        <p className="text-sm text-gray-500 italic">No resources available</p>
+                                        <span className="text-gray-400">—</span>
                                       )}
                                     </div>
-                                    
-                                    {/* Add a hint about scrolling if there are many resources */}
-                                    {dataset.resources && dataset.resources.length > 5 && (
-                                      <div className="text-center py-2 text-sm text-gray-500 border-t border-gray-100">
-                                        <span className="inline-flex items-center">
-                                          Scroll to see all {dataset.resources.length} resources
-                                          <svg className="ml-1 h-4 w-4 animate-bounce" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
-                                          </svg>
-                                        </span>
-                                      </div>
-                                    )}
-                                  </DrawerContent>
-                                </Drawer>
-                              </TableCell>
-                            </TableRow>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="bottom" className="p-2">
+                                    <p className="text-xs">{dataset.granularity_description || "Level of data aggregation"}</p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            </TableCell>
                             
-                            {/* Expandable row for resources */}
-                            <AnimatePresence>
-                              {expandedDataset === dataset.id && (
-                                <motion.tr
-                                  initial={{ opacity: 0, height: 0 }}
-                                  animate={{ opacity: 1, height: 'auto' }}
-                                  exit={{ opacity: 0, height: 0 }}
-                                  transition={{ duration: 0.2 }}
-                                  className="bg-gray-50"
-                                >
-                                <td colSpan={5} className="p-0 border-b border-gray-200">
-                                    <motion.div
-                                      initial={{ opacity: 0 }}
-                                      animate={{ opacity: 1 }}
-                                      exit={{ opacity: 0 }}
-                                      transition={{ duration: 0.2, delay: 0.1 }}
-                                      className="px-4 py-4"
-                                    >
-                                      {/* Full description */}
-                                      <div className="mb-4">
-                                      <h4 className="text-sm font-medium mb-1 text-gray-800">Description</h4>
-                                        <p className="text-sm text-gray-600">
-                                          {dataset.description || 'No description available'}
-                                        </p>
-                                      </div>
-                                      
-                                      {/* Relevance reasoning */}
-                                      {dataset.relevance && dataset.relevance.reasoning && (
-                                      <div className="mb-4">
-                                          <div className="flex items-center mb-1">
-                                            <h4 className="text-sm font-medium text-gray-800">Relevance Assessment</h4>
-                                            <Badge 
-                                              variant="outline" 
-                                              className={`ml-2 font-medium text-xs ${
-                                                dataset.relevance?.relevance_score >= 0.7 
-                                                  ? 'bg-green-50 text-green-700 border-green-200' 
-                                                  : dataset.relevance?.relevance_score >= 0.5
-                                                    ? 'bg-blue-50 text-blue-700 border-blue-200'
-                                                    : 'bg-gray-50 text-gray-700 border-gray-200'
-                                              }`}
+                            {/* Rows column */}
+                            <TableCell className="py-4 text-center">
+                              <div className="flex items-center justify-center text-xs">
+                                <Hash className="h-3 w-3 mr-1 text-gray-500" />
+                                {dataset.row_count !== undefined && dataset.column_count !== undefined ? (
+                                  <span>{formatNumber(dataset.row_count)} × {formatNumber(dataset.column_count)}</span>
+                                ) : (
+                                  <span className="text-gray-400">—</span>
+                                )}
+                              </div>
+                            </TableCell>
+                            
+                            {/* Quality column */}
+                            <TableCell className="py-4 text-center">
+                              {dataset.missing_rate !== undefined ? (
+                                <TooltipProvider>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <Badge 
+                                        variant="outline" 
+                                        className={`text-xs ${
+                                          dataset.missing_rate <= 0.05 
+                                            ? 'bg-green-50 text-green-700 border-green-200' 
+                                            : dataset.missing_rate <= 0.2
+                                              ? 'bg-yellow-50 text-yellow-700 border-yellow-200'
+                                              : 'bg-red-50 text-red-700 border-red-200'
+                                        }`}
+                                      >
+                                        {formatPercent(dataset.missing_rate)}
+                                      </Badge>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="bottom" className="p-2">
+                                      <p className="text-xs">
+                                        {dataset.missing_rate <= 0.05 
+                                          ? "Low percentage of missing values" 
+                                          : dataset.missing_rate <= 0.2
+                                            ? "Moderate percentage of missing values"
+                                            : "High percentage of missing values"}
+                                      </p>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
+                              ) : (
+                                <Skeleton className="h-6 w-12 mx-auto bg-gray-200" />
+                              )}
+                            </TableCell>
+                            
+                            {/* Resources column */}
+                            <TableCell className="py-4 text-center">
+                              <Drawer>
+                                <DrawerTrigger asChild>
+                                  <Badge 
+                                    variant="outline" 
+                                    className="font-medium text-white border border-gray-800 bg-black hover:bg-gray-800 cursor-pointer inline-flex items-center gap-1.5 transition-colors px-3 py-1"
+                                  >
+                                    <Download className="h-3 w-3" />
+                                    {(dataset.resources || []).length}
+                                  </Badge>
+                                </DrawerTrigger>
+                                <DrawerContent className="bg-white text-gray-900">
+                                  <DrawerHeader className="border-b border-gray-100">
+                                    <DrawerTitle className="text-xl font-semibold text-gray-900">Resources</DrawerTitle>
+                                    <DrawerDescription className="text-gray-600">
+                                      Available resources for &quot;{dataset.title}&quot;
+                                    </DrawerDescription>
+                                  </DrawerHeader>
+                                  
+                                  {/* Add max-height, custom scrollbar styling and overflow-y-auto for scrolling */}
+                                  <div className="p-4 max-h-[calc(80vh-120px)] overflow-y-auto 
+                                    scrollbar-thin scrollbar-thumb-rounded scrollbar-track-transparent 
+                                    hover:scrollbar-thumb-gray-300 scrollbar-thumb-gray-200">
+                                    {dataset.resources && dataset.resources.length > 0 ? (
+                                      <Table>
+                                        <TableHeader className="sticky top-0 bg-white z-10">
+                                          <TableRow className="border-b border-gray-200 hover:!bg-gray-50">
+                                            <TableHead className="w-[100px] text-gray-700">Type</TableHead>
+                                            <TableHead className="text-gray-700">Name</TableHead>
+                                            <TableHead className="text-right text-gray-700">Access</TableHead>
+                                          </TableRow>
+                                        </TableHeader>
+                                        <TableBody>
+                                          {dataset.resources.map((resource: any, resourceIndex: number) => (
+                                            <TableRow 
+                                              key={resource.id || resourceIndex}
+                                              className="border-b border-gray-100 hover:!bg-gray-50 hover:!text-gray-900"
                                             >
-                                              {dataset.relevance?.relevance_score 
-                                                ? (dataset.relevance.relevance_score * 100).toFixed(0) + '%' 
-                                                : dataset.similarity
-                                                  ? (dataset.similarity * 100).toFixed(0) + '%'
-                                                  : 'N/A'}
-                                            </Badge>
-                                          </div>
+                                              <TableCell className="font-medium text-gray-900">
+                                                {getFileType(resource)}
+                                              </TableCell>
+                                              <TableCell className="text-gray-800">
+                                                {resource.name || 'Unnamed resource'}
+                                              </TableCell>
+                                              <TableCell className="text-right">
+                                                <Button 
+                                                  size="sm" 
+                                                  variant="ghost"
+                                                  className="h-8 w-8 p-0 text-gray-700 hover:!bg-gray-100 hover:!text-gray-900"
+                                                  asChild
+                                                >
+                                                  <a href={resource.url} target="_blank" rel="noopener noreferrer">
+                                                    <ExternalLink className="h-4 w-4" />
+                                                  </a>
+                                                </Button>
+                                              </TableCell>
+                                            </TableRow>
+                                          ))}
+                                        </TableBody>
+                                      </Table>
+                                    ) : (
+                                      <p className="text-sm text-gray-500 italic">No resources available</p>
+                                    )}
+                                  </div>
+                                  
+                                  {/* Add a hint about scrolling if there are many resources */}
+                                  {dataset.resources && dataset.resources.length > 5 && (
+                                    <div className="text-center py-2 text-sm text-gray-500 border-t border-gray-100">
+                                      <span className="inline-flex items-center">
+                                        Scroll to see all {dataset.resources.length} resources
+                                        <svg className="ml-1 h-4 w-4 animate-bounce" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                                        </svg>
+                                      </span>
+                                    </div>
+                                  )}
+                                </DrawerContent>
+                              </Drawer>
+                            </TableCell>
+                          </TableRow>
+                          
+                          {/* Expandable row for resources */}
+                          <AnimatePresence>
+                            {expandedDataset === dataset.id && (
+                              <motion.tr
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: 'auto' }}
+                                exit={{ opacity: 0, height: 0 }}
+                                transition={{ duration: 0.2 }}
+                                className="bg-gray-50"
+                              >
+                                <td colSpan={9} className="p-0 border-b border-gray-200">
+                                  <motion.div
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    exit={{ opacity: 0 }}
+                                    transition={{ duration: 0.2, delay: 0.1 }}
+                                    className="px-4 py-4"
+                                  >
+                                    {/* Two-column metadata grid */}
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                                      <div>
+                                        {/* Full description */}
+                                        <div className="mb-4">
+                                          <h4 className="text-sm font-medium mb-1 text-gray-800">Description</h4>
                                           <p className="text-sm text-gray-600">
-                                            {dataset.relevance.reasoning}
+                                            {dataset.description || 'No description available'}
                                           </p>
                                         </div>
-                                      )}
-                                    {/* Tags section */}
-                                    {dataset.tags && dataset.tags.length > 0 && (
-                                      <div>
-                                        <h4 className="text-sm font-medium mb-2 text-gray-800">Tags</h4>
-                                        <div className="flex flex-wrap gap-1.5">
-                                          {dataset.tags.map((tag: any, tagIndex: number) => {
-                                            const tagText = typeof tag === 'string' 
-                                              ? tag 
-                                              : (tag.display_name || tag.name || '');
-                                              
-                                            return (
-                                              <Badge 
-                                                key={tagIndex} 
-                                                variant="secondary"
-                                                className="text-xs text-gray-700 bg-gray-100 hover:bg-gray-200"
-                                              >
-                                                {tagText}
-                                              </Badge>
-                                            );
-                                          })}
+                                        
+                                        {/* Enhanced metadata (left column) */}
+                                        <div className="space-y-2">
+                                          {dataset.column_count && (
+                                            <div>
+                                              <span className="text-xs font-medium text-gray-700">Columns: </span>
+                                              <span className="text-xs text-gray-600">{dataset.column_count}</span>
+                                            </div>
+                                          )}
+                                          
+                                          {dataset.file_size && (
+                                            <div>
+                                              <span className="text-xs font-medium text-gray-700">File Size: </span>
+                                              <span className="text-xs text-gray-600">{dataset.file_size}</span>
+                                            </div>
+                                          )}
+                                          
+                                          {dataset.data_types && (
+                                            <div>
+                                              <span className="text-xs font-medium text-gray-700">Data Types: </span>
+                                              <span className="text-xs text-gray-600">{dataset.data_types}</span>
+                                            </div>
+                                          )}
                                         </div>
                                       </div>
-                                    )}
+                                      
+                                      <div>
+                                        {/* Relevance reasoning */}
+                                        {dataset.relevance && dataset.relevance.reasoning && (
+                                          <div className="mb-4">
+                                            <div className="flex items-center mb-1">
+                                              <h4 className="text-sm font-medium text-gray-800">Relevance Assessment</h4>
+                                            </div>
+                                            <p className="text-sm text-gray-600">
+                                              {dataset.relevance.reasoning}
+                                            </p>
+                                          </div>
+                                        )}
+                                        
+                                        {/* Enhanced metadata (right column) */}
+                                        <div className="space-y-2">
+                                          {dataset.key_variables && dataset.key_variables.length > 0 && (
+                                            <div>
+                                              <span className="text-xs font-medium text-gray-700">Key Variables: </span>
+                                              <div className="flex flex-wrap gap-1 mt-1">
+                                                {dataset.key_variables.map((variable: string, idx: number) => (
+                                                  <Badge 
+                                                    key={idx}
+                                                    variant="outline" 
+                                                    className="text-xs bg-blue-50 text-blue-700 border-blue-200"
+                                                  >
+                                                    {variable}
+                                                  </Badge>
+                                                ))}
+                                              </div>
+                                            </div>
+                                          )}
+                                          
+                                          {dataset.duplicate_rate !== undefined && (
+                                            <div>
+                                              <span className="text-xs font-medium text-gray-700">Duplicate Rows: </span>
+                                              <span className="text-xs text-gray-600">{formatPercent(dataset.duplicate_rate)}</span>
+                                            </div>
+                                          )}
+                                          
+                                          {dataset.license && (
+                                            <div>
+                                              <span className="text-xs font-medium text-gray-700">License: </span>
+                                              <span className="text-xs text-gray-600">{dataset.license}</span>
+                                            </div>
+                                          )}
+                                        </div>
+                                        
+                                        {/* Tags section */}
+                                        {dataset.tags && dataset.tags.length > 0 && (
+                                          <div className="mt-4">
+                                            <h4 className="text-sm font-medium mb-2 text-gray-800">Tags</h4>
+                                            <div className="flex flex-wrap gap-1.5">
+                                              {dataset.tags.map((tag: any, tagIndex: number) => {
+                                                const tagText = typeof tag === 'string' 
+                                                  ? tag 
+                                                  : (tag.display_name || tag.name || '');
+                                                  
+                                                return (
+                                                  <Badge 
+                                                    key={tagIndex} 
+                                                    variant="secondary"
+                                                    className="text-xs text-gray-700 bg-gray-100 hover:bg-gray-200"
+                                                  >
+                                                    {tagText}
+                                                  </Badge>
+                                                );
+                                              })}
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
                                   </motion.div>
                                 </td>
                               </motion.tr>
                             )}
                           </AnimatePresence>
                         </React.Fragment>
-                    ))}
-                    
-                    {/* Show skeleton rows only when searching and no datasets are available yet */}
-                    {searchStatus === SearchStatus.SEARCHING && datasets.length === 0 && (
-                      // Skeleton rows when searching and no datasets loaded yet
-                      Array(6).fill(0).map((_, index) => (
-                        <TableRow 
-                          key={`skeleton-${index}`}
-                          className="border-b border-gray-200 hover:!bg-transparent"
-                        >
-                          <TableCell className="py-8 px-4">
-                            <div className="flex items-center justify-center w-5 h-5">
-                              <Skeleton className="h-4 w-4 bg-gray-200 rounded-sm" />
-                            </div>
-                          </TableCell>
-                          <TableCell className="py-4 max-w-[200px]">
-                            <div className="flex items-center gap-2">
-                              <Skeleton className="h-6 w-6 rounded-full bg-gray-200 shrink-0" />
-                              <div className="min-w-0 flex-1">
-                                <Skeleton className="h-4 w-full bg-gray-200" />
+                      ))}
+                      
+                      {/* Show skeleton rows only when searching and no datasets are available yet */}
+                      {searchStatus === SearchStatus.SEARCHING && datasets.length === 0 && (
+                        // Skeleton rows when searching and no datasets loaded yet
+                        Array(6).fill(0).map((_, index) => (
+                          <TableRow 
+                            key={`skeleton-${index}`}
+                            className="border-b border-gray-200 hover:!bg-transparent"
+                          >
+                            <TableCell className="py-8 px-4">
+                              <div className="flex items-center justify-center w-5 h-5">
+                                <Skeleton className="h-4 w-4 bg-gray-200 rounded-sm" />
                               </div>
-                            </div>
-                          </TableCell>
-                          <TableCell className="py-4">
-                            <div>
-                              <Skeleton className="h-5 w-full bg-gray-200" />
-                            </div>
-                          </TableCell>
-                          {/* New skeleton for Insights column */}
-                          <TableCell className="py-4">
-                            <div>
-                              <Skeleton className="h-8 w-full bg-gray-200" />
-                            </div>
-                          </TableCell>
-                          <TableCell className="py-4 text-center">
-                            <div className="flex justify-center">
-                              <Skeleton className="h-7 w-20 bg-gray-200 rounded-full" />
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
+                            </TableCell>
+                            <TableCell className="py-4 max-w-[200px]">
+                              <div className="flex items-center gap-2">
+                                <Skeleton className="h-6 w-6 rounded-full bg-gray-200 shrink-0" />
+                                <div className="min-w-0 flex-1">
+                                  <Skeleton className="h-4 w-full bg-gray-200" />
+                                </div>
+                              </div>
+                            </TableCell>
+                            <TableCell className="py-4">
+                              <div>
+                                <Skeleton className="h-5 w-full bg-gray-200" />
+                              </div>
+                            </TableCell>
+                            {/* Skeletons for new metadata columns */}
+                            <TableCell className="py-4 text-center">
+                              <Skeleton className="h-4 w-20 mx-auto bg-gray-200" />
+                            </TableCell>
+                            <TableCell className="py-4 text-center">
+                              <Skeleton className="h-4 w-16 mx-auto bg-gray-200" />
+                            </TableCell>
+                            <TableCell className="py-4">
+                              <Skeleton className="h-4 w-full bg-gray-200" />
+                            </TableCell>
+                            <TableCell className="py-4 text-center">
+                              <Skeleton className="h-4 w-12 mx-auto bg-gray-200" />
+                            </TableCell>
+                            <TableCell className="py-4 text-center">
+                              <Skeleton className="h-6 w-12 mx-auto bg-gray-200" />
+                            </TableCell>
+                            <TableCell className="py-4 text-center">
+                              <div className="flex justify-center">
+                                <Skeleton className="h-7 w-20 bg-gray-200 rounded-full" />
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
               )}
             </motion.div>
             

@@ -491,10 +491,11 @@ export const warmFunctions = async () => {
 export const streamAnalyzeDatasets = async (
   data: {
     query: string;
-    datasets?: Dataset[];     // Support datasets array
-    dataset_ids?: string[];   // Support dataset_ids array
+    datasets?: Dataset[];
+    dataset_ids?: string[];
   },
-  onChunk?: (chunk: any) => void
+  onChunk?: (chunk: any) => void,
+  signal?: AbortSignal // Add abort signal support like streamSearchDatasets has
 ) => {
   // Create a default onChunk function if none is provided
   const processChunk = typeof onChunk === 'function' 
@@ -564,26 +565,36 @@ export const streamAnalyzeDatasets = async (
     let buffer = '';
     const chunks = [];
     
+    // Key change: process chunks immediately as they come in
     while (true) {
+      // Check for abort before each read (like in streamSearchDatasets)
+      if (signal?.aborted) {
+        throw new DOMException('The operation was aborted', 'AbortError');
+      }
+      
       const { done, value } = await reader.read();
       if (done) break;
       
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
+      
       for (let i = 0; i < lines.length - 1; i++) {
         const line = lines[i].trim();
         if (line) {
           try {
-            // Extract the JSON part if the line starts with 'data:'
             const jsonStr = line.startsWith('data:') 
               ? line.substring(5).trim() 
               : line;
             
-            // Replace NaN with null before parsing
             const sanitizedJsonStr = jsonStr.replace(/:\s*NaN\s*([,}])/g, ': null$1');
             const parsed = JSON.parse(sanitizedJsonStr);
+            
+            // Process each chunk immediately 
             processChunk(parsed);
             chunks.push(parsed);
+            
+            // Add a small delay to allow UI updates (optional)
+            // await new Promise(resolve => setTimeout(resolve, 0));
           } catch (e) {
             console.error('Error parsing JSON:', e, 'Line:', line);
           }
