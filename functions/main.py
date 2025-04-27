@@ -288,8 +288,8 @@ def stream_search_datasets(request):
             similarity_threshold=similarity_threshold,
             search_method=search_method,
             max_results=max_results,
-            census_max_results=census_max_results,
-            relevance_threshold=relevance_threshold
+            relevance_threshold=relevance_threshold,
+            mode="search_and_download"
         ):
             # If this is a JSON object and it's the 'complete' type, store it as the final result
             try:
