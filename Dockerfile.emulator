@@ -1,22 +1,27 @@
-FROM python:3.12
+# FROM python:3.12
+FROM python:3.12 as base
 
-# Install Node.js, Java JRE (for Firestore emulator), and other dependencies
+# Install prerequisites
 RUN apt-get update && \
-    apt-get install -y curl default-jre && \
-    curl -fsSL https://deb.nodesource.com/setup_18.x | bash - && \
+    apt-get install -y curl default-jre libmagic-dev && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Node.js v18 using NodeSource and npm
+RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - && \
+    apt-get update && \
     apt-get install -y nodejs && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Install Firebase CLI
+# Now npm should be available
 RUN npm install -g firebase-tools
 
 # Set working directory
 WORKDIR /app
 
-# Copy package files
-COPY firebase.json ./
-COPY functions/requirements.txt ./functions/
+# Copy ONLY requirements first to leverage Docker cache
+COPY functions/requirements.txt /app/functions/requirements.txt
 
 # Install Python dependencies
 WORKDIR /app/functions
@@ -26,13 +31,17 @@ RUN python -m venv venv && \
 
 # Back to app directory
 WORKDIR /app
+COPY functions /app/functions
+
+# Copy other necessary files
+COPY firebase.json ./
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
-ENV PYTHONMALLOC=malloc
 ENV NODE_OPTIONS="--max-old-space-size=8192"
 ENV FIREBASE_DEBUG=true
-# Prevent OpenAI embeddings from using too much cache memory
 ENV OPENAI_API_DISABLE_EMBEDDING_CACHE=true
 
 # Expose ports
@@ -41,8 +50,6 @@ EXPOSE 4000 4400 5001 8080 9150
 # Mount volumes at runtime
 VOLUME ["/app/functions"]
 
-# Copy entrypoint script
-COPY docker-entrypoint.sh /app/docker-entrypoint.sh
-
+RUN chmod +x /app/docker-entrypoint.sh
 # Set entrypoint
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
