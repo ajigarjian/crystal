@@ -12,7 +12,6 @@ test_data = {
     "similarity_threshold": 0.3,
     "search_method": None,  # Use hybrid search (default)
     "max_results": 20,
-    "census_max_results": 3,
     "relevance_threshold": 0.4
 }
 
@@ -85,7 +84,7 @@ for chunk in response.iter_lines():
             elif chunk_data['type'] == 'complete':
                 print(f"[COMPLETE] {chunk_data['message']}")
                 print(f"Total execution time: {chunk_data['data']['execution_time']:.2f} seconds")
-                print(f"Total datasets found: {chunk_data['data']['total_count']}")
+                print(f"Total datasets found: {chunk_data['data'].get('total_count', 0)}")
             
             elif chunk_data['type'] == 'error':
                 print(f"[ERROR] {chunk_data['message']}")
