@@ -2804,9 +2804,9 @@ export default function SearchPage() {
                             <TableCell className="py-4 text-center">
                                 <Skeleton className="h-6 w-12 mx-auto bg-gray-200 rounded-full" />
                             </TableCell>
-                             {/* Resources Skeleton */}
-                             <TableCell className="py-4 text-center">
-                                <Skeleton className="h-7 w-20 bg-gray-200 rounded-full" />
+                             {/* Resources Skeleton - Updated */}
+                             <TableCell className="py-4 text-center"> {/* Keep text-center */}
+                                <Skeleton className="h-7 w-20 bg-gray-200 rounded-full mx-auto" /> {/* Add mx-auto for horizontal centering */}
                              </TableCell>
                           </TableRow>
                         ))
