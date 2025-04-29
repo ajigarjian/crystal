@@ -2319,7 +2319,7 @@ export default function SearchPage() {
                         <TableHead className="w-[10%] text-center font-medium text-gray-700">Time Range</TableHead>
                         <TableHead className="w-[15%] font-medium text-gray-700">Granularity</TableHead>
                         <TableHead className="w-[10%] text-center font-medium text-gray-700">Dimensions</TableHead>
-                        <TableHead className="w-[10%] text-center font-medium text-gray-700">Quality</TableHead>
+                        <TableHead className="w-[10%] text-center font-medium text-gray-700">Completeness</TableHead>
                         <TableHead className="w-[10%] text-center font-medium text-gray-700">Resources</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -2444,9 +2444,10 @@ export default function SearchPage() {
                                     <TooltipProvider>
                                         <Tooltip>
                                             <TooltipTrigger asChild>
-                                                <div className="text-xs">
+                                                <div className="text-xs"> {/* Container div */}
                                                     {dataset.granularity ? (
-                                                        <span>{dataset.granularity}</span>
+                                                        /* Add line-clamp here */
+                                                        <span className="line-clamp-3">{dataset.granularity}</span> 
                                                     ) : (
                                                         <span className="text-gray-400">—</span>
                                                     )}
@@ -2481,45 +2482,44 @@ export default function SearchPage() {
                               )}
                             </TableCell>
                             
-                            {/* Quality column - Updated */}
+                            {/* Completeness column - Updated */}
                             <TableCell className="py-4 text-center">
-                              {dataset.is_enriched ? (
+                              {dataset.is_enriched && typeof dataset.quality_score === 'number' ? ( // Check enrichment and score type
                                 <TooltipProvider>
                                   <Tooltip>
                                     <TooltipTrigger asChild>
                                       <Badge 
                                         variant="outline" 
                                         className={`text-xs ${
-                                          dataset.quality_label === 'high' 
+                                          // Color coding based on percentage value
+                                          dataset.quality_score >= 0.75 
                                             ? 'bg-green-50 text-green-700 border-green-200' 
-                                            : dataset.quality_label === 'medium'
+                                            : dataset.quality_score >= 0.50
                                               ? 'bg-yellow-50 text-yellow-700 border-yellow-200'
-                                              : dataset.quality_label === 'low'
-                                                ? 'bg-red-50 text-red-700 border-red-200'
-                                                : 'bg-gray-100 text-gray-600 border-gray-300' // Default/Unknown
+                                              : 'bg-red-50 text-red-700 border-red-200'
                                         }`}
                                       >
-                                        {/* Show label or score */}
-                                        {dataset.quality_label ? dataset.quality_label.charAt(0).toUpperCase() + dataset.quality_label.slice(1) : 
-                                         (typeof dataset.quality_score === 'number' ? `${dataset.quality_score.toFixed(0)}%` : 'N/A') 
-                                        }
+                                        {/* Display the percentage */}
+                                        {`${(dataset.quality_score).toFixed(0)}%`} 
                                       </Badge>
                                     </TooltipTrigger>
+                                    {/* Tooltip still shows full details */}
                                     <TooltipContent side="bottom" className="p-2 max-w-xs">
                                        <div className="text-xs space-y-1">
-                                           {typeof dataset.quality_score === 'number' && (
-                                               <p>Completeness: {dataset.quality_score.toFixed(1)}%</p>
+                                           <p>Completeness: {(dataset.quality_score * 100).toFixed(1)}%</p> {/* Show score */}
+                                           {typeof dataset.duplicate_percentage === 'number' && dataset.duplicate_percentage > 0 && (
+                                               <p>Duplicates: {(dataset.duplicate_percentage * 100).toFixed(1)}%</p>
                                            )}
-                                            {typeof dataset.duplicate_percentage === 'number' && dataset.duplicate_percentage > 0 && (
-                                               <p>Duplicates: {dataset.duplicate_percentage.toFixed(1)}%</p>
-                                           )}
-                                            {dataset.quality_label === 'low' && <p className="text-red-600">Low data quality observed.</p>}
+                                            {/* Add qualitative note based on score */}
+                                            {dataset.quality_score < 0.50 && <p className="text-red-600">Low data completeness observed.</p>}
                                             {dataset.enrichment_error && <p className="text-red-600">Error: {dataset.enrichment_error}</p>}
-                                            {!dataset.enrichment_error && dataset.quality_label !== 'low' && <p>Data quality assessment.</p> }
+                                            {!dataset.enrichment_error && dataset.quality_score >= 0.50 && <p>Data completeness assessment.</p> }
                                        </div>
                                     </TooltipContent>
                                   </Tooltip>
                                 </TooltipProvider>
+                              ) : dataset.is_enriched ? (
+                                  <span className="text-xs text-gray-400">N/A</span> // Handle case where score isn't a number but is enriched
                               ) : (
                                 <Skeleton className="h-6 w-12 mx-auto bg-gray-200 rounded-full" /> // Loading state
                               )}
@@ -2617,7 +2617,7 @@ export default function SearchPage() {
                                 transition={{ duration: 0.2 }}
                                 className="bg-gray-50"
                               >
-                                <td colSpan={9} className="p-0 border-b border-gray-200">
+                                <td colSpan={8} className="p-0 border-b border-gray-200">
                                   <motion.div
                                     initial={{ opacity: 0 }}
                                     animate={{ opacity: 1 }}
@@ -2800,7 +2800,7 @@ export default function SearchPage() {
                             <TableCell className="py-4 text-center">
                                 <Skeleton className="h-4 w-16 mx-auto bg-gray-200" />
                             </TableCell>
-                            {/* Quality Skeleton */}
+                            {/* Completeness Skeleton */}
                             <TableCell className="py-4 text-center">
                                 <Skeleton className="h-6 w-12 mx-auto bg-gray-200 rounded-full" />
                             </TableCell>
