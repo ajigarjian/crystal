@@ -1926,7 +1926,7 @@ export default function SearchPage() {
             >
               {/* Keep your existing search icon or stop button code */}
               {searchStatus === SearchStatus.SEARCHING ? (
-                <TooltipProvider delayDuration={150}>
+                <TooltipProvider delayDuration={50}>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <motion.div
@@ -2319,7 +2319,7 @@ export default function SearchPage() {
                         <TableHead className="w-[10%] font-medium text-gray-700 px-1">
                           <span className="flex items-center justify-center">
                             Source
-                            <TooltipProvider delayDuration={150}>
+                            <TooltipProvider delayDuration={50}>
                               <Tooltip>
                                 <TooltipTrigger className="ml-1 cursor-help align-middle leading-none"> {/* Removed asChild */}
                                   <Info className="h-3.5 w-3.5 text-gray-400 hover:text-gray-600" />
@@ -2336,7 +2336,7 @@ export default function SearchPage() {
                         <TableHead className="w-[15%] font-medium text-gray-700 px-1">
                           <span className="flex items-center justify-center">
                             Dataset
-                            <TooltipProvider delayDuration={150}>
+                            <TooltipProvider delayDuration={50}>
                               <Tooltip>
                                 <TooltipTrigger className="ml-1 cursor-help align-middle leading-none"> {/* Removed asChild */}
                                   <Info className="h-3.5 w-3.5 text-gray-400 hover:text-gray-600" />
@@ -2353,7 +2353,7 @@ export default function SearchPage() {
                         <TableHead className="w-[10%] text-center font-medium text-gray-700 px-1">
                           <span className="flex items-center justify-center">
                             Relevance
-                            <TooltipProvider delayDuration={150}>
+                            <TooltipProvider delayDuration={50}>
                               <Tooltip>
                                 <TooltipTrigger className="ml-1 cursor-help align-middle leading-none"> {/* Removed asChild */}
                                   <Info className="h-3.5 w-3.5 text-gray-400 hover:text-gray-600" />
@@ -2370,7 +2370,7 @@ export default function SearchPage() {
                         <TableHead className="w-[10%] text-center font-medium text-gray-700 px-1">
                           <span className="flex items-center justify-center">
                             Time Range
-                            <TooltipProvider delayDuration={150}>
+                            <TooltipProvider delayDuration={50}>
                               <Tooltip>
                                 <TooltipTrigger className="ml-1 cursor-help align-middle leading-none"> {/* Removed asChild */}
                                   <Info className="h-3.5 w-3.5 text-gray-400 hover:text-gray-600" />
@@ -2384,16 +2384,16 @@ export default function SearchPage() {
                         </TableHead>
 
                         {/* Granularity Header */}
-                        <TableHead className="w-[15%] font-medium text-gray-700 px-1">
+                        <TableHead className="w-[10%] font-medium text-gray-700 px-1">
                           <span className="flex items-center justify-center">
                             Granularity
-                            <TooltipProvider delayDuration={150}>
+                            <TooltipProvider delayDuration={50}>
                               <Tooltip>
                                 <TooltipTrigger className="ml-1 cursor-help align-middle leading-none"> {/* Removed asChild */}
                                   <Info className="h-3.5 w-3.5 text-gray-400 hover:text-gray-600" />
                                 </TooltipTrigger>
                                 <TooltipContent side="top">
-                                  <p className="text-xs max-w-xs">The level of detail or unit of observation in the data (e.g., daily, county-level).</p>
+                                  <p className="text-xs max-w-xs">Represents a record or row, indicating the unit of observation in the data (e.g., daily, county-level).</p>
                                 </TooltipContent>
                               </Tooltip>
                             </TooltipProvider>
@@ -2404,7 +2404,7 @@ export default function SearchPage() {
                         <TableHead className="w-[10%] text-center font-medium text-gray-700 px-1">
                            <span className="flex items-center justify-center">
                             Dimensions
-                            <TooltipProvider delayDuration={150}>
+                            <TooltipProvider delayDuration={50}>
                               <Tooltip>
                                 <TooltipTrigger className="ml-1 cursor-help align-middle leading-none"> {/* Removed asChild */}
                                   <Info className="h-3.5 w-3.5 text-gray-400 hover:text-gray-600" />
@@ -2421,7 +2421,7 @@ export default function SearchPage() {
                         <TableHead className="w-[10%] text-center font-medium text-gray-700 px-1">
                           <span className="flex items-center justify-center">
                             Completeness
-                            <TooltipProvider delayDuration={150}>
+                            <TooltipProvider delayDuration={50}>
                               <Tooltip>
                                 <TooltipTrigger className="ml-1 cursor-help align-middle leading-none"> {/* Removed asChild */}
                                   <Info className="h-3.5 w-3.5 text-gray-400 hover:text-gray-600" />
@@ -2438,13 +2438,13 @@ export default function SearchPage() {
                         <TableHead className="w-[10%] text-center font-medium text-gray-700 px-1">
                           <span className="flex items-center justify-center">
                             Resources
-                             <TooltipProvider delayDuration={150}>
+                             <TooltipProvider delayDuration={50}>
                               <Tooltip>
                                 <TooltipTrigger className="ml-1 cursor-help align-middle leading-none"> {/* Removed asChild */}
                                   <Info className="h-3.5 w-3.5 text-gray-400 hover:text-gray-600" />
                                 </TooltipTrigger>
                                 <TooltipContent side="top">
-                                  <p className="text-xs max-w-xs">Number of downloadable files or accessible API endpoints associated with the dataset.</p>
+                                  <p className="text-xs max-w-xs">Number of downloadable files, accessible API endpoints, or other resources associated with the dataset.</p>
                                 </TooltipContent>
                               </Tooltip>
                             </TooltipProvider>
@@ -2497,7 +2497,7 @@ export default function SearchPage() {
                             <TableCell className="py-4">
                               <div>
                                 <h3 
-                                  className="text-xs font-medium text-gray-900 break-words whitespace-normal" 
+                                  className="text-xs font-medium text-gray-900 block max-w-[250px] line-clamp-2 break-words whitespace-normal" /* Added block, max-w, line-clamp */
                                   title={dataset.title}
                                 >
                                   {dataset.title}
@@ -2568,22 +2568,21 @@ export default function SearchPage() {
                             </TableCell>
                             
                             {/* Granularity column - Updated */}
-                            <TableCell className="py-4">
+                            <TableCell className="py-4"> {/* Removed max-width from TableCell */}
                                 {dataset.is_enriched ? (
                                     <TooltipProvider>
                                         <Tooltip>
                                             <TooltipTrigger asChild>
-                                                <div className="text-xs"> {/* Container div */}
-                                                    {dataset.granularity ? (
-                                                        /* Add line-clamp here */
-                                                        <span className="line-clamp-3">{dataset.granularity}</span> 
-                                                    ) : (
-                                                        <span className="text-gray-400">—</span>
-                                                    )}
+                                                {/* Apply block, max-width, line-clamp, break-words, and title like Dataset title */}
+                                                <div 
+                                                    className="text-xs block max-w-[250px] line-clamp-2 break-words whitespace-normal" 
+                                                    title={dataset.granularity}
+                                                > 
+                                                    {dataset.granularity || <span className="text-gray-400">—</span>}
                                                 </div>
                                             </TooltipTrigger>
                                             {dataset.granularity_reasoning && (
-                                              <TooltipContent side="bottom" className="p-2 max-w-xs">
+                                              <TooltipContent side="bottom" className="p-2 max-w-sm">
                                                   <p className="text-xs">{dataset.granularity_reasoning}</p>
                                               </TooltipContent>
                                             )}
@@ -2614,42 +2613,22 @@ export default function SearchPage() {
                             {/* Completeness column - Updated */}
                             <TableCell className="py-4 text-center">
                               {dataset.is_enriched && typeof dataset.quality_score === 'number' ? ( // Check enrichment and score type
-                                <TooltipProvider>
-                                  <Tooltip>
-                                    <TooltipTrigger asChild>
-                                      <Badge 
-                                        variant="outline" 
-                                        className={`text-xs ${
-                                          // Divide score by 100 before comparison
-                                          (dataset.quality_score / 100) >= 0.75 
-                                            ? 'bg-green-50 text-green-700 border-green-200' 
-                                            : (dataset.quality_score / 100) >= 0.50
-                                              ? 'bg-yellow-50 text-yellow-700 border-yellow-200'
-                                              // Handle potential very large invalid numbers or scores below 0.50
-                                              : 'bg-red-50 text-red-700 border-red-200'
-                                        }`}
-                                      >
-                                        {/* Display the percentage (assuming score might need dividing by 100) */}
-                                        {/* Clamp value between 0 and 100 for display */}
-                                        {`${Math.max(0, Math.min(100, dataset.quality_score)).toFixed(0)}%`} 
-                                      </Badge>
-                                    </TooltipTrigger>
-                                    {/* Tooltip still shows full details */}
-                                    <TooltipContent side="bottom" className="p-2 max-w-xs">
-                                       <div className="text-xs space-y-1">
-                                           {/* Show original score value in tooltip for clarity */}
-                                           <p>Completeness Score: {dataset.quality_score.toFixed(1)}%</p> 
-                                           {typeof dataset.duplicate_percentage === 'number' && dataset.duplicate_percentage > 0 && (
-                                               <p>Duplicates: {(dataset.duplicate_percentage * 100).toFixed(1)}%</p>
-                                           )}
-                                            {/* Add qualitative note based on corrected score comparison */}
-                                            {(dataset.quality_score / 100) < 0.50 && <p className="text-red-600">Low data completeness observed.</p>}
-                                            {dataset.enrichment_error && <p className="text-red-600">Error: {dataset.enrichment_error}</p>}
-                                            {!dataset.enrichment_error && dataset.quality_score >= 0.50 && <p>Data completeness assessment.</p> }
-                                       </div>
-                                    </TooltipContent>
-                                  </Tooltip>
-                                </TooltipProvider>
+                                // Removed TooltipProvider, Tooltip, TooltipTrigger, TooltipContent wrapper
+                                <Badge 
+                                  variant="outline" 
+                                  className={`text-xs ${
+                                    // Divide score by 100 before comparison
+                                    (dataset.quality_score / 100) >= 0.75 
+                                      ? 'bg-green-50 text-green-700 border-green-200' 
+                                      : (dataset.quality_score / 100) >= 0.50
+                                        ? 'bg-yellow-50 text-yellow-700 border-yellow-200'
+                                        // Handle potential very large invalid numbers or scores below 0.50
+                                        : 'bg-red-50 text-red-700 border-red-200'
+                                  }`}
+                                >
+                                  {/* Display the percentage */}
+                                  {`${Math.max(0, Math.min(100, dataset.quality_score)).toFixed(0)}%`} 
+                                </Badge>
                               ) : dataset.is_enriched ? (
                                   <span className="text-xs text-gray-400">N/A</span> // Handle case where score isn't a number but is enriched
                               ) : (
@@ -2769,7 +2748,7 @@ export default function SearchPage() {
                                         </div>
                                         
                                         {/* Enhanced metadata (left column) */}
-                                        <div className="space-y-2">
+                                        {/* <div className="space-y-2">
                                           {dataset.column_count && (
                                             <div>
                                               <span className="text-xs font-medium text-gray-700">Columns: </span>
@@ -2790,7 +2769,7 @@ export default function SearchPage() {
                                               <span className="text-xs text-gray-600">{dataset.data_types}</span>
                                             </div>
                                           )}
-                                        </div>
+                                        </div> */}
                                       </div>
                                       
                                       <div>
@@ -2807,7 +2786,7 @@ export default function SearchPage() {
                                         )}
                                         
                                         {/* Enhanced metadata (right column) */}
-                                        <div className="space-y-2">
+                                        {/* <div className="space-y-2">
                                           {dataset.key_variables && dataset.key_variables.length > 0 && (
                                             <div>
                                               <span className="text-xs font-medium text-gray-700">Key Variables: </span>
@@ -2838,7 +2817,7 @@ export default function SearchPage() {
                                               <span className="text-xs text-gray-600">{dataset.license}</span>
                                             </div>
                                           )}
-                                        </div>
+                                        </div> */}
                                         
                                         {/* Tags section */}
                                         {dataset.tags && dataset.tags.length > 0 && (

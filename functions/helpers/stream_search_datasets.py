@@ -941,28 +941,21 @@ def store_resource_metadata(resource_id: str, df: pd.DataFrame, enriched_metadat
     head_preview = df.head(5).to_dict(orient='records')
     quality = enriched_metadata.get('quality', {})
     granularity = enriched_metadata.get('granularity', {})
+    time_range = enriched_metadata.get('time_range', {})
 
     resource = DatasetResource.objects.filter(resource_id=resource_id).first()
     if resource:
-        import json
         resource.resource_shape = json.dumps(shape_array)
         resource.resource_head = json.dumps(head_preview)
         resource.resource_quality = json.dumps(quality)
         resource.resource_granularity = json.dumps(granularity)
+        resource.resource_time_range = json.dumps(time_range)
         resource.save()
 
 def enrich_dataset_after_relevance_check(dataset, query, start_time):
     """
     Enrich a dataset that has passed the pre-download relevance check by downloading
-    and loading the best resource.
-    
-    Args:
-        dataset: The dataset object that passed relevance check (contains title, description, org, etc.)
-        query: The user query
-        start_time: Start time for timing calculations
-        
-    Returns:
-        Updated dataset object with download and loading information
+    and loading the best resource. Checks cache first.
     """
     dataset_id = dataset.get('id', 'unknown')
     dataset_title = dataset.get('title', 'Unnamed Dataset')
@@ -970,22 +963,81 @@ def enrich_dataset_after_relevance_check(dataset, query, start_time):
     try:
         # Step 1: Find the best resource
         best_resource = get_best_resource(query, dataset)
-        
-        # Add the best resource to the dataset object
         dataset['best_resource'] = best_resource
         
-        # Step 2: Download the resource
+        # Initialize flags/defaults
+        file_path = None
+        skip_enrichment = False
+        cached_content_info = None
+
+        # Step 2: Check cache before download attempt
+        resource_id = best_resource.get('resource_id')
+        if resource_id:
+            from factchecker.models import DatasetResource
+            cached_resource = DatasetResource.objects.filter(resource_id=resource_id).first()
+            
+            # Check if essential metadata AND time_range are cached
+            if (cached_resource and 
+                cached_resource.resource_shape and 
+                cached_resource.resource_time_range): # Check for shape AND time_range
+                
+                try:
+                    # Attempt to load all cached data
+                    shape_array = json.loads(cached_resource.resource_shape)
+                    rows = shape_array[0] if len(shape_array) > 0 else 0
+                    cols = shape_array[1] if len(shape_array) > 1 else 0
+                    head_preview = json.loads(cached_resource.resource_head) if cached_resource.resource_head else []
+                    quality = json.loads(cached_resource.resource_quality) if cached_resource.resource_quality else {}
+                    granularity = json.loads(cached_resource.resource_granularity) if cached_resource.resource_granularity else {}
+                    time_range = json.loads(cached_resource.resource_time_range) # Load cached time_range
+                    
+                    # Ensure time_range is not empty before skipping
+                    if time_range: 
+                        logger.info(f"Using fully cached metadata for resource {resource_id}.")
+                        cached_content_info = {
+                            'loaded': True, # Indicate data structure is known
+                            'dimensions': {'rows': rows, 'columns': cols},
+                            'column_names': list(head_preview[0].keys()) if head_preview else [],
+                            'head_preview': head_preview,
+                            'quality': quality,
+                            'granularity': granularity,
+                            'time_range': time_range, # Use loaded time_range
+                            'cache_hit': True # Indicate cache was used
+                        }
+                        skip_enrichment = True
+                    else:
+                        logger.info(f"Cached time_range for {resource_id} is empty. Proceeding with enrichment.")
+                except json.JSONDecodeError as json_err:
+                    logger.warning(f"Failed to parse cached JSON for resource {resource_id}: {json_err}. Re-enriching.")
+                    skip_enrichment = False # Force re-enrichment if cache is corrupted
+                except Exception as cache_load_err:
+                     logger.warning(f"Error loading cached data for resource {resource_id}: {cache_load_err}. Re-enriching.")
+                     skip_enrichment = False # Force re-enrichment on other cache load errors
+
+            else:
+                 logger.info(f"Cache miss or incomplete cache for resource {resource_id}. Proceeding with enrichment.")
+
+        # If cache hit with valid time_range, use it and return early
+        if skip_enrichment and cached_content_info:
+            dataset['content_info'] = cached_content_info
+            # Set a default download status as we skipped actual download/load
+            dataset['download_status'] = { 
+                'success': True, 
+                'message': 'Skipped download/load due to cache hit.',
+                'file_path': None 
+            }
+            return dataset
+
+        # --- If cache miss or incomplete cache, continue with download/load/enrich ---
+        logger.info(f"Proceeding with download/load/enrich for {dataset_id}...")
+
+        # Step 3: Download the resource (if not cached or cache incomplete)
         file_path = download_resource_helper(dataset_id, best_resource)
         
         if not file_path:
-            dataset['download_status'] = {
-                'success': False,
-                'error': 'Failed to download dataset file'
-            }
-            # Add placeholder content_info for consistency if download fails
-            dataset['content_info'] = {
-                'loaded': False,
-                'error': 'Download failed',
+            dataset['download_status'] = {'success': False, 'error': 'Failed to download dataset file'}
+            dataset['content_info'] = { # Default structure on download failure
+                'loaded': False, 'error': 'Download failed',
                 'dimensions': {'rows': 0, 'columns': 0}, 'column_names': [],
                 'quality': {'quality_score': 0, 'quality_label': 'unknown', 'error': 'Download failed'},
                 'granularity': {'granularity': 'unknown', 'confidence': 0, 'reasoning': 'Download failed'},
@@ -993,79 +1045,38 @@ def enrich_dataset_after_relevance_check(dataset, query, start_time):
             }
             return dataset
         
-        # Add download information to the dataset
-        dataset['download_status'] = {
-            'success': True,
-            'file_path': file_path
-        }
-        
-        # Check if we already have resource metadata cached in DB
-        resource_id = best_resource.get('resource_id')
-        if resource_id:
-            from factchecker.models import DatasetResource
-            cached_resource = DatasetResource.objects.filter(resource_id=resource_id).first()
-            if cached_resource and cached_resource.resource_shape:
-                logger.info(f"Skipping reload, found metadata for resource {resource_id}.")
-                import json
+        dataset['download_status'] = {'success': True, 'file_path': file_path}
 
-                shape_array = json.loads(cached_resource.resource_shape)
-                rows = shape_array[0] if len(shape_array) > 0 else 0
-                cols = shape_array[1] if len(shape_array) > 1 else 0
-
-                head_preview = json.loads(cached_resource.resource_head) if cached_resource.resource_head else []
-                quality = json.loads(cached_resource.resource_quality) if cached_resource.resource_quality else {}
-                granularity = json.loads(cached_resource.resource_granularity) if cached_resource.resource_granularity else {}
-
-                dataset['content_info'] = {
-                    'loaded': True,
-                    'dimensions': {
-                        'rows': rows,
-                        'columns': cols
-                    },
-                    'column_names': list(head_preview[0].keys()) if head_preview else [],
-                    'head_preview': head_preview,
-                    'quality': quality,
-                    'granularity': granularity,
-                    'time_range': {},
-                    'cache_skip': True
-                }
-                return dataset
-
-        # Proceed with loading the dataset
+        # Step 4: Handle Parquet Conversion (if necessary)
         if ".parquet" in file_path:
             csv_file_path = parquet_to_csv(file_path)
-            os.remove(file_path)
+            try:
+                os.remove(file_path) # Clean up original parquet
+            except OSError as e:
+                 logger.warning(f"Could not remove original parquet file {file_path}: {e}")
             file_path = csv_file_path
-            dataset['download_status']['file_path'] = file_path
-        
-        # Step 4: Load the dataset
+            dataset['download_status']['file_path'] = file_path # Update path
+
+        # Step 5: Load and Enrich the dataset
         try:
             file_format = best_resource.get('resource_format')
             dataset_content = load_datafile(file_path, file_format=file_format)
             
-            # Step 5: Enrich dataset metadata using the loaded content AND the original dataset metadata
             if isinstance(dataset_content, pd.DataFrame):
-                # Pass the original dataset dictionary as dataset_metadata
                 enriched_metadata = enrich_dataset_metadata(dataset_content, query, dataset)
+                dataset['content_info'] = {'loaded': True, **enriched_metadata}
                 
-                # Add enriched metadata to the dataset object
-                dataset['content_info'] = {
-                    'loaded': True,
-                    **enriched_metadata # Unpack the enriched results
-                }
-
-                # Store resource metadata in DB for future caching
+                # Store newly enriched metadata (including time_range) in cache
                 if resource_id:
                     store_resource_metadata(resource_id, dataset_content, enriched_metadata)
             else:
-                # Handle non-DataFrame content (e.g., PDF or load error)
+                # Handle non-DataFrame content
                 dataset['content_info'] = {
-                    'loaded': True, # Indicates loading was attempted
+                    'loaded': True, 'load_error': 'Content is not tabular data' if dataset_content else 'Loading failed',
                     'dimensions': {'rows': 0, 'columns': 0}, 'column_names': [],
                     'quality': {'quality_score': 0, 'quality_label': 'unknown', 'error': 'Not a DataFrame'},
                     'granularity': {'granularity': 'unknown', 'confidence': 0, 'reasoning': 'Not a DataFrame'},
-                    'time_range': {'has_time_data': False, 'reason': 'Not a DataFrame'},
-                    'load_error': 'Content is not tabular data' if dataset_content else 'Loading failed'
+                    'time_range': {'has_time_data': False, 'reason': 'Not a DataFrame'}
                 }
             
             logger.info(f"Successfully loaded and enriched dataset {dataset_id}")
@@ -1073,15 +1084,22 @@ def enrich_dataset_after_relevance_check(dataset, query, start_time):
         except Exception as e:
             logger.error(f"Error loading or enriching dataset {dataset_id}: {str(e)}")
             dataset['content_info'] = {
-                'loaded': False,
-                'error': str(e),
-                 # Add placeholders even if loading fails
+                'loaded': False, 'error': str(e),
                 'dimensions': {'rows': 0, 'columns': 0}, 'column_names': [],
-                'quality': {'quality_score': 0, 'quality_label': 'unknown', 'error': f'Load error: {str(e)}'},
-                'granularity': {'granularity': 'unknown', 'confidence': 0, 'reasoning': f'Load error'},
-                'time_range': {'has_time_data': False, 'reason': f'Load error: {str(e)}'}
+                'quality': {'quality_score': 0, 'quality_label': 'unknown', 'error': f'Load/Enrich error: {str(e)}'},
+                'granularity': {'granularity': 'unknown', 'confidence': 0, 'reasoning': 'Load/Enrich error'},
+                'time_range': {'has_time_data': False, 'reason': f'Load/Enrich error: {str(e)}'}
             }
-        
+        finally:
+             # Clean up the downloaded file after processing
+             if file_path and os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                    logger.info(f"Cleaned up temporary file: {file_path}")
+                except OSError as e:
+                    logger.warning(f"Could not remove temporary file {file_path}: {e}")
+
+
         return dataset
         
     except Exception as e:
@@ -1096,4 +1114,11 @@ def enrich_dataset_after_relevance_check(dataset, query, start_time):
                 'granularity': {'granularity': 'unknown', 'confidence': 0, 'reasoning': str(e)},
                 'time_range': {'has_time_data': False, 'error': str(e)}
             }
+        # Clean up file if download happened before the error
+        if file_path and os.path.exists(file_path):
+             try:
+                 os.remove(file_path)
+                 logger.info(f"Cleaned up temporary file after error: {file_path}")
+             except OSError as e_clean:
+                 logger.warning(f"Could not remove temporary file {file_path} after error: {e_clean}")
         return dataset
