@@ -752,13 +752,26 @@ export default function SearchPage() {
       
       // Small progress boost for each dataset found
       setSearchProgress(prev => Math.min(prev + 1, 90));
+      // Add enrichment placeholders
+      setDatasets(prev => {
+        const newDataset = { ...chunk.data, is_enriched: false }; // Add enrichment flag
+        // Avoid duplicates
+        if (!prev.some(d => d.id === newDataset.id)) {
+            return [...prev, newDataset];
+        }
+        return prev;
+      });
+      // Also add to ref with placeholder
+      if (!allDatasetsRef.current.some(d => d.id === chunk.data.id)) {
+        allDatasetsRef.current.push({ ...chunk.data, is_enriched: false });
+      }
     }
     else if (chunk.type === 'dataset_update') {
       // Update dataset in our ref - more efficiently
-      const allDatasets = allDatasetsRef.current;
-      for (let i = 0; i < allDatasets.length; i++) {
-        if (allDatasets[i].id === chunk.data.id) {
-          allDatasetsRef.current[i] = { ...allDatasets[i], ...chunk.data };
+      const datasetsArray = allDatasetsRef.current;
+      for (let i = 0; i < datasetsArray.length; i++) {
+        if (datasetsArray[i].id === chunk.data.id) {
+          allDatasetsRef.current[i] = { ...datasetsArray[i], ...chunk.data };
           break;
         }
       }
@@ -779,8 +792,25 @@ export default function SearchPage() {
           !dataset.relevance || dataset.relevance.is_relevant !== false
         );
       });
+      // Make sure to preserve enrichment status if already present
+      setDatasets(prev => {
+          return prev.map(dataset => {
+            if (dataset.id === chunk.data.id) {
+              return { ...dataset, ...chunk.data }; // Merge update, keep is_enriched etc.
+            }
+            return dataset;
+          });
+      });
+      
+      // Update ref
+       const allDatasets = allDatasetsRef.current;
+        for (let i = 0; i < allDatasets.length; i++) {
+            if (allDatasets[i].id === chunk.data.id) {
+                allDatasetsRef.current[i] = { ...allDatasets[i], ...chunk.data };
+                break;
+            }
+        }
     }
-    // Add a new handler for analysis_result chunks 
     else if (chunk.type === 'analysis_result' && chunk.data && chunk.data.dataset_info) {
       // Add this log
       console.log('Received analysis_result:', chunk.data.dataset_info);
@@ -788,45 +818,121 @@ export default function SearchPage() {
       const datasetInfo = chunk.data.dataset_info;
       const datasetId = datasetInfo.id;
       
+      console.log(`Received analysis_result dimensions for ${datasetId}:`, datasetInfo.rows, 'x', datasetInfo.columns);
+      
       // Create a dataset update with the row and column counts
       const datasetUpdate = {
         id: datasetId,
-        row_count: datasetInfo.rows,
-        column_count: datasetInfo.columns,
-        // We can also add relevance data if it's not already set
+        // Only update if not already enriched
+        ...(datasetInfo.rows !== undefined && allDatasetsRef.current.find(d => d.id === datasetId)?.is_enriched !== true ? { row_count: datasetInfo.rows } : {}),
+        ...(datasetInfo.columns !== undefined && allDatasetsRef.current.find(d => d.id === datasetId)?.is_enriched !== true ? { column_count: datasetInfo.columns } : {}),
+        // Still update relevance from analysis if available
         relevance: {
-          ...allDatasetsRef.current.find(d => d.id === datasetId)?.relevance,
-          relevance_score: datasetInfo.relevance_score,
-          reasoning: datasetInfo.relevance_reasoning
+          ...(allDatasetsRef.current.find(d => d.id === datasetId)?.relevance || {}), // Keep existing relevance
+          ...(datasetInfo.relevance_score !== undefined ? { relevance_score: datasetInfo.relevance_score } : {}),
+          ...(datasetInfo.relevance_reasoning ? { reasoning: datasetInfo.relevance_reasoning } : {}),
         }
       };
-      
-      // Update datasets in allDatasetsRef and state
-      const allDatasets = allDatasetsRef.current;
-      for (let i = 0; i < allDatasets.length; i++) {
-        if (allDatasets[i].id === datasetId) {
-          allDatasetsRef.current[i] = { ...allDatasets[i], ...datasetUpdate };
-          break;
+
+       // Update in allDatasetsRef if necessary
+       const analysisRefDatasets = allDatasetsRef.current;
+        let updated = false;
+        for (let i = 0; i < analysisRefDatasets.length; i++) {
+            if (analysisRefDatasets[i].id === datasetId) {
+                // Only apply dimension updates if not enriched
+                if (analysisRefDatasets[i].is_enriched !== true) {
+                   allDatasetsRef.current[i] = { ...analysisRefDatasets[i], ...datasetUpdate };
+                   updated = true;
+                } else {
+                    // Still update relevance if needed
+                     allDatasetsRef.current[i].relevance = datasetUpdate.relevance;
+                     updated = true; // Mark as updated even if only relevance changed
+                }
+                break;
+            }
         }
-      }
-      
-      setDatasets(prev => {
-        const updated = prev.map(dataset => 
-          dataset.id === datasetId ? { ...dataset, ...datasetUpdate } : dataset
-        );
         
-        // Add this log
-        console.log('Updated datasets with dimensions:', 
-          updated.find(d => d.id === datasetId)?.row_count,
-          updated.find(d => d.id === datasetId)?.column_count
-        );
-        
-        return updated;
-      });
+        // Update state if changes were made
+        if (updated) {
+             setDatasets(prev => prev.map(dataset => 
+                dataset.id === datasetId ? { ...dataset, ...datasetUpdate } : dataset
+             ));
+        }
       
       // Small progress boost for receiving analysis
       setSearchProgress(prev => Math.min(prev + 1, 90));
     }
+    else if (chunk.type === 'dataset_enrichment') { // <<< New Handler
+        const enrichedData = chunk.data;
+        const datasetId = enrichedData.id;
+
+        setDatasets(prev => {
+          return prev.map(dataset => {
+            if (dataset.id === datasetId) {
+              // Merge the content_info into the dataset
+              const contentInfo = enrichedData.content_info || {};
+              const qualityInfo = contentInfo.quality || {};
+              const granularityInfo = contentInfo.granularity || {};
+              const timeRangeInfo = contentInfo.time_range || {};
+              const dimensionsInfo = contentInfo.dimensions || {};
+
+              return {
+                ...dataset,
+                // Add enriched fields
+                row_count: dimensionsInfo.rows,
+                column_count: dimensionsInfo.columns,
+                column_names: dimensionsInfo.column_names || [],
+                quality_score: qualityInfo.quality_score, // Raw score
+                quality_label: qualityInfo.quality_label, // High/Medium/Low label
+                missing_percentage: qualityInfo.missing_percentage, // Specific metric
+                duplicate_percentage: qualityInfo.duplicate_percentage, // Specific metric
+                granularity: granularityInfo.granularity, // Description
+                granularity_reasoning: granularityInfo.reasoning, // LLM reasoning
+                has_time_data: timeRangeInfo.has_time_data,
+                time_range_min: timeRangeInfo.min,
+                time_range_max: timeRangeInfo.max,
+                time_range_column: timeRangeInfo.column, // Which column was used
+                is_enriched: true, // Mark as enriched
+                enrichment_error: contentInfo.enrichment_error || enrichedData.enrichment_error, // Capture potential errors
+              };
+            }
+            return dataset;
+          });
+        });
+
+        // Update ref as well
+        const currentRefDatasets = allDatasetsRef.current;
+        for (let i = 0; i < currentRefDatasets.length; i++) {
+            if (currentRefDatasets[i].id === datasetId) {
+                const contentInfo = enrichedData.content_info || {};
+                const qualityInfo = contentInfo.quality || {};
+                const granularityInfo = contentInfo.granularity || {};
+                const timeRangeInfo = contentInfo.time_range || {};
+                const dimensionsInfo = contentInfo.dimensions || {};
+
+                allDatasetsRef.current[i] = {
+                    ...currentRefDatasets[i],
+                     row_count: dimensionsInfo.rows,
+                    column_count: dimensionsInfo.columns,
+                    column_names: dimensionsInfo.column_names || [],
+                    quality_score: qualityInfo.quality_score,
+                    quality_label: qualityInfo.quality_label,
+                    missing_percentage: qualityInfo.missing_percentage,
+                    duplicate_percentage: qualityInfo.duplicate_percentage,
+                    granularity: granularityInfo.granularity,
+                    granularity_reasoning: granularityInfo.reasoning,
+                    has_time_data: timeRangeInfo.has_time_data,
+                    time_range_min: timeRangeInfo.min,
+                    time_range_max: timeRangeInfo.max,
+                    time_range_column: timeRangeInfo.column,
+                    is_enriched: true,
+                    enrichment_error: contentInfo.enrichment_error || enrichedData.enrichment_error,
+                };
+                break;
+            }
+        }
+         console.log(`Enriched dataset ${datasetId}`); // Add log
+      }
     else if (chunk.type === 'complete') {
       // Search complete
       setSearchProgress(100); // Set to 100% before transitioning to complete
@@ -1572,28 +1678,49 @@ export default function SearchPage() {
       const datasetInfo = chunk.data.dataset_info;
       const datasetId = datasetInfo.id;
       
-      console.log(`Received dimensions for ${datasetId}:`, datasetInfo.rows, 'x', datasetInfo.columns);
+      console.log(`Received analysis_result dimensions for ${datasetId}:`, datasetInfo.rows, 'x', datasetInfo.columns);
       
-      // Update dataset with dimensions
+      // Update dataset with dimensions if not already set by enrichment
       const datasetUpdate = {
         id: datasetId,
-        row_count: datasetInfo.rows,
-        column_count: datasetInfo.columns
-      };
-      
-      // Update in allDatasetsRef
-      const allDatasets = allDatasetsRef.current;
-      for (let i = 0; i < allDatasets.length; i++) {
-        if (allDatasets[i].id === datasetId) {
-          allDatasetsRef.current[i] = { ...allDatasets[i], ...datasetUpdate };
-          break;
+        // Only update if not already enriched
+        ...(datasetInfo.rows !== undefined && allDatasetsRef.current.find(d => d.id === datasetId)?.is_enriched !== true ? { row_count: datasetInfo.rows } : {}),
+        ...(datasetInfo.columns !== undefined && allDatasetsRef.current.find(d => d.id === datasetId)?.is_enriched !== true ? { column_count: datasetInfo.columns } : {}),
+        // Still update relevance from analysis if available
+        relevance: {
+          ...(allDatasetsRef.current.find(d => d.id === datasetId)?.relevance || {}), // Keep existing relevance
+          ...(datasetInfo.relevance_score !== undefined ? { relevance_score: datasetInfo.relevance_score } : {}),
+          ...(datasetInfo.relevance_reasoning ? { reasoning: datasetInfo.relevance_reasoning } : {}),
         }
-      }
+      };
+
+       // Update in allDatasetsRef if necessary
+       const analysisRefDatasets = allDatasetsRef.current;
+        let updated = false;
+        for (let i = 0; i < analysisRefDatasets.length; i++) {
+            if (analysisRefDatasets[i].id === datasetId) {
+                // Only apply dimension updates if not enriched
+                if (analysisRefDatasets[i].is_enriched !== true) {
+                   allDatasetsRef.current[i] = { ...analysisRefDatasets[i], ...datasetUpdate };
+                   updated = true;
+                } else {
+                    // Still update relevance if needed
+                     allDatasetsRef.current[i].relevance = datasetUpdate.relevance;
+                     updated = true; // Mark as updated even if only relevance changed
+                }
+                break;
+            }
+        }
+        
+        // Update state if changes were made
+        if (updated) {
+             setDatasets(prev => prev.map(dataset => 
+                dataset.id === datasetId ? { ...dataset, ...datasetUpdate } : dataset
+             ));
+        }
       
-      // Update in state
-      setDatasets(prev => prev.map(dataset => 
-        dataset.id === datasetId ? { ...dataset, ...datasetUpdate } : dataset
-      ));
+      // Small progress boost for receiving analysis
+      setSearchProgress(prev => Math.min(prev + 1, 90));
     }
     else if (chunk.type === 'extracted_data' || chunk.type === 'formatted_data') {
       // Handle other analysis data if needed
@@ -2278,82 +2405,123 @@ export default function SearchPage() {
                               )}
                             </TableCell>
                             
-                            {/* Time Range column */}
+                            {/* Time Range column - Updated */}
                             <TableCell className="py-4 text-center">
-                              <div className="flex items-center justify-center text-xs">
-                                <Calendar className="h-3 w-3 mr-1 text-gray-500" />
-                                {dataset.time_range ? (
-                                  <span>{dataset.time_range}</span>
-                                ) : (
-                                  <span className="text-gray-400">—</span>
-                                )}
-                              </div>
+                              {dataset.is_enriched ? ( // Check if enrichment data is available
+                                <div className="flex items-center justify-center text-xs">
+                                  <Calendar className="h-3 w-3 mr-1 text-gray-500" />
+                                  {dataset.has_time_data ? (
+                                    <TooltipProvider>
+                                      <Tooltip>
+                                        <TooltipTrigger asChild>
+                                           <span>
+                                              {/* Format based on type */}
+                                              {dataset.time_range_type === 'year' 
+                                                  ? `${dataset.time_range_min} - ${dataset.time_range_max}`
+                                                  : `${dataset.time_range_min || '?'} - ${dataset.time_range_max || '?'}`
+                                              }
+                                           </span>
+                                        </TooltipTrigger>
+                                        {dataset.time_range_column && (
+                                          <TooltipContent side="bottom" className="p-2">
+                                              <p className="text-xs">Extracted from column: {dataset.time_range_column}</p>
+                                          </TooltipContent>
+                                        )}
+                                      </Tooltip>
+                                    </TooltipProvider>
+                                  ) : (
+                                    <span className="text-gray-400">—</span>
+                                  )}
+                                </div>
+                              ) : (
+                                <Skeleton className="h-4 w-20 mx-auto bg-gray-200" /> // Loading state
+                              )}
                             </TableCell>
                             
-                            {/* Granularity column */}
+                            {/* Granularity column - Updated */}
                             <TableCell className="py-4">
-                              <TooltipProvider>
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <div className="text-xs">
-                                      {dataset.granularity ? (
-                                        <span>{dataset.granularity}</span>
-                                      ) : (
-                                        <span className="text-gray-400">—</span>
-                                      )}
-                                    </div>
-                                  </TooltipTrigger>
-                                  <TooltipContent side="bottom" className="p-2">
-                                    <p className="text-xs">{dataset.granularity_description || "Level of data aggregation"}</p>
-                                  </TooltipContent>
-                                </Tooltip>
-                              </TooltipProvider>
-                            </TableCell>
-                            
-                            {/* Rows column */}
-                            <TableCell className="py-4 text-center">
-                              <div className="flex items-center justify-center text-xs">
-                                <Hash className="h-3 w-3 mr-1 text-gray-500" />
-                                {dataset.row_count !== undefined && dataset.column_count !== undefined ? (
-                                  <span>{formatNumber(dataset.row_count)} × {formatNumber(dataset.column_count)}</span>
+                                {dataset.is_enriched ? (
+                                    <TooltipProvider>
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <div className="text-xs">
+                                                    {dataset.granularity ? (
+                                                        <span>{dataset.granularity}</span>
+                                                    ) : (
+                                                        <span className="text-gray-400">—</span>
+                                                    )}
+                                                </div>
+                                            </TooltipTrigger>
+                                            {dataset.granularity_reasoning && (
+                                              <TooltipContent side="bottom" className="p-2 max-w-xs">
+                                                  <p className="text-xs">{dataset.granularity_reasoning}</p>
+                                              </TooltipContent>
+                                            )}
+                                        </Tooltip>
+                                    </TooltipProvider>
                                 ) : (
-                                  <span className="text-gray-400">—</span>
+                                    <Skeleton className="h-4 w-24 bg-gray-200" /> // Loading state
                                 )}
-                              </div>
                             </TableCell>
                             
-                            {/* Quality column */}
+                            {/* Dimensions column - Updated */}
                             <TableCell className="py-4 text-center">
-                              {dataset.missing_rate !== undefined ? (
+                              {dataset.is_enriched ? ( // Check enrichment status
+                                  <div className="flex items-center justify-center text-xs">
+                                      <Hash className="h-3 w-3 mr-1 text-gray-500" />
+                                      {/* Check if row_count and column_count are valid numbers */}
+                                      {(typeof dataset.row_count === 'number' && typeof dataset.column_count === 'number') ? (
+                                          <span>{formatNumber(dataset.row_count)} × {formatNumber(dataset.column_count)}</span>
+                                      ) : (
+                                          <span className="text-gray-400">—</span>
+                                      )}
+                                  </div>
+                              ) : (
+                                  <Skeleton className="h-4 w-16 mx-auto bg-gray-200" /> // Loading state
+                              )}
+                            </TableCell>
+                            
+                            {/* Quality column - Updated */}
+                            <TableCell className="py-4 text-center">
+                              {dataset.is_enriched ? (
                                 <TooltipProvider>
                                   <Tooltip>
                                     <TooltipTrigger asChild>
                                       <Badge 
                                         variant="outline" 
                                         className={`text-xs ${
-                                          dataset.missing_rate <= 0.05 
+                                          dataset.quality_label === 'high' 
                                             ? 'bg-green-50 text-green-700 border-green-200' 
-                                            : dataset.missing_rate <= 0.2
+                                            : dataset.quality_label === 'medium'
                                               ? 'bg-yellow-50 text-yellow-700 border-yellow-200'
-                                              : 'bg-red-50 text-red-700 border-red-200'
+                                              : dataset.quality_label === 'low'
+                                                ? 'bg-red-50 text-red-700 border-red-200'
+                                                : 'bg-gray-100 text-gray-600 border-gray-300' // Default/Unknown
                                         }`}
                                       >
-                                        {formatPercent(dataset.missing_rate)}
+                                        {/* Show label or score */}
+                                        {dataset.quality_label ? dataset.quality_label.charAt(0).toUpperCase() + dataset.quality_label.slice(1) : 
+                                         (typeof dataset.quality_score === 'number' ? `${dataset.quality_score.toFixed(0)}%` : 'N/A') 
+                                        }
                                       </Badge>
                                     </TooltipTrigger>
-                                    <TooltipContent side="bottom" className="p-2">
-                                      <p className="text-xs">
-                                        {dataset.missing_rate <= 0.05 
-                                          ? "Low percentage of missing values" 
-                                          : dataset.missing_rate <= 0.2
-                                            ? "Moderate percentage of missing values"
-                                            : "High percentage of missing values"}
-                                      </p>
+                                    <TooltipContent side="bottom" className="p-2 max-w-xs">
+                                       <div className="text-xs space-y-1">
+                                           {typeof dataset.quality_score === 'number' && (
+                                               <p>Completeness: {dataset.quality_score.toFixed(1)}%</p>
+                                           )}
+                                            {typeof dataset.duplicate_percentage === 'number' && dataset.duplicate_percentage > 0 && (
+                                               <p>Duplicates: {dataset.duplicate_percentage.toFixed(1)}%</p>
+                                           )}
+                                            {dataset.quality_label === 'low' && <p className="text-red-600">Low data quality observed.</p>}
+                                            {dataset.enrichment_error && <p className="text-red-600">Error: {dataset.enrichment_error}</p>}
+                                            {!dataset.enrichment_error && dataset.quality_label !== 'low' && <p>Data quality assessment.</p> }
+                                       </div>
                                     </TooltipContent>
                                   </Tooltip>
                                 </TooltipProvider>
                               ) : (
-                                <Skeleton className="h-6 w-12 mx-auto bg-gray-200" />
+                                <Skeleton className="h-6 w-12 mx-auto bg-gray-200 rounded-full" /> // Loading state
                               )}
                             </TableCell>
                             
@@ -2565,6 +2733,25 @@ export default function SearchPage() {
                                         )}
                                       </div>
                                     </div>
+                                    {/* Add Column Names List */}
+                                    {dataset.column_names && dataset.column_names.length > 0 && (
+                                        <div className="mt-4">
+                                            <h4 className="text-sm font-medium mb-2 text-gray-800">Columns ({dataset.column_names.length})</h4>
+                                            <ScrollArea className="h-24"> {/* Limit height and add scroll */}
+                                                <div className="flex flex-wrap gap-1.5">
+                                                    {dataset.column_names.map((colName: string, idx: number) => (
+                                                        <Badge 
+                                                            key={idx}
+                                                            variant="outline" 
+                                                            className="text-xs bg-blue-50 text-blue-700 border-blue-200 font-mono"
+                                                        >
+                                                            {colName}
+                                                        </Badge>
+                                                    ))}
+                                                </div>
+                                            </ScrollArea>
+                                        </div>
+                                    )}
                                   </motion.div>
                                 </td>
                               </motion.tr>
@@ -2586,40 +2773,41 @@ export default function SearchPage() {
                                 <Skeleton className="h-4 w-4 bg-gray-200 rounded-sm" />
                               </div>
                             </TableCell>
-                            <TableCell className="py-4 max-w-[200px]">
-                              <div className="flex items-center gap-2">
-                                <Skeleton className="h-6 w-6 rounded-full bg-gray-200 shrink-0" />
-                                <div className="min-w-0 flex-1">
-                                  <Skeleton className="h-4 w-full bg-gray-200" />
+                            {/* Source Skeleton */}
+                            <TableCell className="py-4 max-w-[200px]"> 
+                                <div className="flex items-center gap-2">
+                                    <Skeleton className="h-6 w-6 rounded-full bg-gray-200 shrink-0" />
+                                    <Skeleton className="h-4 w-20 bg-gray-200" />
                                 </div>
-                              </div>
                             </TableCell>
+                            {/* Dataset Skeleton */}
                             <TableCell className="py-4">
-                              <div>
                                 <Skeleton className="h-5 w-full bg-gray-200" />
-                              </div>
                             </TableCell>
-                            {/* Skeletons for new metadata columns */}
+                            {/* Relevance Skeleton */}
                             <TableCell className="py-4 text-center">
-                              <Skeleton className="h-4 w-20 mx-auto bg-gray-200" />
+                                <Skeleton className="h-6 w-16 mx-auto bg-gray-200 rounded-full" />
                             </TableCell>
+                            {/* Time Range Skeleton */}
                             <TableCell className="py-4 text-center">
-                              <Skeleton className="h-4 w-16 mx-auto bg-gray-200" />
+                                <Skeleton className="h-4 w-20 mx-auto bg-gray-200" />
                             </TableCell>
+                            {/* Granularity Skeleton */}
                             <TableCell className="py-4">
-                              <Skeleton className="h-4 w-full bg-gray-200" />
+                                <Skeleton className="h-4 w-24 bg-gray-200" />
                             </TableCell>
+                            {/* Dimensions Skeleton */}
                             <TableCell className="py-4 text-center">
-                              <Skeleton className="h-4 w-12 mx-auto bg-gray-200" />
+                                <Skeleton className="h-4 w-16 mx-auto bg-gray-200" />
                             </TableCell>
+                            {/* Quality Skeleton */}
                             <TableCell className="py-4 text-center">
-                              <Skeleton className="h-6 w-12 mx-auto bg-gray-200" />
+                                <Skeleton className="h-6 w-12 mx-auto bg-gray-200 rounded-full" />
                             </TableCell>
-                            <TableCell className="py-4 text-center">
-                              <div className="flex justify-center">
+                             {/* Resources Skeleton */}
+                             <TableCell className="py-4 text-center">
                                 <Skeleton className="h-7 w-20 bg-gray-200 rounded-full" />
-                              </div>
-                            </TableCell>
+                             </TableCell>
                           </TableRow>
                         ))
                       )}
