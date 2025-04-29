@@ -1829,7 +1829,7 @@ export default function SearchPage() {
                     {/* Simplified rendering - always show the first 3 suggestions */}
                     {initialSuggestions.slice(0, 3).map((suggestion) => (
                       <TooltipProvider key={suggestion.topic}>
-                        <Tooltip delayDuration={300}>
+                        <Tooltip delayDuration={50}>
                           <TooltipTrigger asChild>
                             <Badge 
                               variant="outline" 
@@ -2612,8 +2612,9 @@ export default function SearchPage() {
                             
                             {/* Completeness column - Updated */}
                             <TableCell className="py-4 text-center">
-                              {dataset.is_enriched && typeof dataset.quality_score === 'number' ? ( // Check enrichment and score type
-                                // Removed TooltipProvider, Tooltip, TooltipTrigger, TooltipContent wrapper
+                              {dataset.is_enriched ? ( // Check if enriched first
+                                (typeof dataset.quality_score === 'number' && dataset.quality_score > 0) ? ( // Check if score is a positive number
+                                  // Display colored badge
                                 <Badge 
                                   variant="outline" 
                                   className={`text-xs ${
@@ -2629,10 +2630,15 @@ export default function SearchPage() {
                                   {/* Display the percentage */}
                                   {`${Math.max(0, Math.min(100, dataset.quality_score)).toFixed(0)}%`} 
                                 </Badge>
-                              ) : dataset.is_enriched ? (
-                                  <span className="text-xs text-gray-400">N/A</span> // Handle case where score isn't a number but is enriched
+                                ) : (
+                                  // Display gray N/A badge if score is 0, undefined, or not a number
+                                  <Badge variant="outline" className="text-xs bg-gray-100 text-gray-500 border-gray-200">
+                                    N/A
+                                  </Badge>
+                                )
                               ) : (
-                                <Skeleton className="h-6 w-12 mx-auto bg-gray-200 rounded-full" /> // Loading state
+                                // Display skeleton if not enriched
+                                <Skeleton className="h-6 w-12 mx-auto bg-gray-200 rounded-full" /> 
                               )}
                             </TableCell>
                             

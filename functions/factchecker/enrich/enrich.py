@@ -110,7 +110,7 @@ def determine_granularity(dataset_content: pd.DataFrame, query: str, dataset_met
     """
     if not isinstance(dataset_content, pd.DataFrame):
         return {
-            "granularity": "unknown",
+            "granularity": "Unknown",
             "confidence": 0,
             "reasoning": "Not a valid DataFrame"
         }
@@ -236,7 +236,7 @@ REASONING: [2-3 sentence explanation of your determination]
         confidence_match = re.search(r'CONFIDENCE:\s*(.*?)(?:\nREASONING:|$)', response, re.DOTALL)
         reasoning_match = re.search(r'REASONING:\s*(.*)', response, re.DOTALL)
         
-        granularity = granularity_match.group(1).strip() if granularity_match else "unknown"
+        granularity = granularity_match.group(1).strip() if granularity_match else "Unknown"
         
         # Parse confidence as a number
         confidence_str = confidence_match.group(1).strip() if confidence_match else "0"
@@ -260,7 +260,7 @@ REASONING: [2-3 sentence explanation of your determination]
     except Exception as e:
         logger.error(f"Error determining granularity: {str(e)}")
         return {
-            "granularity": "unknown",
+            "granularity": "Unknown",
             "confidence": 0,
             "reasoning": f"Error in determination: {str(e)}"
         }
