@@ -8,7 +8,6 @@ import os
 import re
 import json
 from factchecker.models import DatasetCatalog, CensusDataset, CensusVariable, CensusGeography, CensusFIPSCode, CensusTag
-from factchecker.search.search_utils import get_usable_resources
 from typing import Dict, List, Union, Optional
 from factchecker.utils.openai_client import create_embeddings, chat_completion, get_cached_openai_client
 from datetime import datetime

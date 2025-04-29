@@ -21,7 +21,7 @@ import time
 
 # Import database utilities from shared helper module
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from helpers.db_utils import execute_query, get_usable_resources, get_usable_resources_batch
+from helpers.db_utils import execute_query, get_usable_resources, get_usable_resources_batch, get_dataset_info
 
 # Import pinecone
 from pinecone import Pinecone, Index, ServerlessSpec  # Updated import
@@ -320,13 +320,17 @@ def vector_search_datasets_pinecone(
             print(f"Fetching dataset info for {len(dataset_ids)} datasets...")
             start_time = time.time()
 
-        # Fetch dataset info via direct SQL (no SQLAlchemy)
-        query_sql = """
-            SELECT dataset_id, title, notes, organization_title, image_url
-            FROM factchecker_datasetcatalog
-            WHERE dataset_id = ANY(%s)
-        """
-        ds_rows = execute_query(query_sql, params=(dataset_ids,))
+        ds_rows = []
+        for ds_id in dataset_ids:
+            ds_dict = get_dataset_info(ds_id)
+            if ds_dict:
+                ds_rows.append({
+                    'dataset_id': ds_dict.get('dataset_id'),
+                    'title': ds_dict.get('title'),
+                    'notes': ds_dict.get('notes'),
+                    'organization_title': ds_dict.get('organization_title'),
+                    'image_url': ds_dict.get('image_url')
+                })
 
         if verbose:
             print(f"Database query for datasets completed in {time.time() - start_time:.2f} seconds")
