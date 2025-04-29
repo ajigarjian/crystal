@@ -2312,15 +2312,144 @@ export default function SearchPage() {
                   <Table className="w-full">
                     <TableHeader>
                       <TableRow className="hover:!bg-transparent border-b border-gray-200">
+                        {/* Expansion Cell Header */}
                         <TableHead className="w-[5%] h-10 text-gray-700"></TableHead>
-                        <TableHead className="w-[10%] font-medium text-gray-700">Source</TableHead>
-                        <TableHead className="w-[15%] font-medium text-gray-700">Dataset</TableHead>
-                        <TableHead className="w-[10%] text-center font-medium text-gray-700">Relevance</TableHead>
-                        <TableHead className="w-[10%] text-center font-medium text-gray-700">Time Range</TableHead>
-                        <TableHead className="w-[15%] font-medium text-gray-700">Granularity</TableHead>
-                        <TableHead className="w-[10%] text-center font-medium text-gray-700">Dimensions</TableHead>
-                        <TableHead className="w-[10%] text-center font-medium text-gray-700">Completeness</TableHead>
-                        <TableHead className="w-[10%] text-center font-medium text-gray-700">Resources</TableHead>
+
+                        {/* Source Header */}
+                        <TableHead className="w-[10%] font-medium text-gray-700 px-1">
+                          <span className="flex items-center justify-center">
+                            Source
+                            <TooltipProvider delayDuration={150}>
+                              <Tooltip>
+                                <TooltipTrigger className="ml-1 cursor-help align-middle leading-none"> {/* Removed asChild */}
+                                  <Info className="h-3.5 w-3.5 text-gray-400 hover:text-gray-600" />
+                                </TooltipTrigger>
+                                <TooltipContent side="top">
+                                  <p className="text-xs max-w-xs">The organization or agency that published the dataset.</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </span>
+                        </TableHead>
+
+                        {/* Dataset Header */}
+                        <TableHead className="w-[15%] font-medium text-gray-700 px-1">
+                          <span className="flex items-center justify-center">
+                            Dataset
+                            <TooltipProvider delayDuration={150}>
+                              <Tooltip>
+                                <TooltipTrigger className="ml-1 cursor-help align-middle leading-none"> {/* Removed asChild */}
+                                  <Info className="h-3.5 w-3.5 text-gray-400 hover:text-gray-600" />
+                                </TooltipTrigger>
+                                <TooltipContent side="top">
+                                  <p className="text-xs max-w-xs">The name or title of the dataset.</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </span>
+                        </TableHead>
+
+                        {/* Relevance Header */}
+                        <TableHead className="w-[10%] text-center font-medium text-gray-700 px-1">
+                          <span className="flex items-center justify-center">
+                            Relevance
+                            <TooltipProvider delayDuration={150}>
+                              <Tooltip>
+                                <TooltipTrigger className="ml-1 cursor-help align-middle leading-none"> {/* Removed asChild */}
+                                  <Info className="h-3.5 w-3.5 text-gray-400 hover:text-gray-600" />
+                                </TooltipTrigger>
+                                <TooltipContent side="top">
+                                  <p className="text-xs max-w-xs">Estimated relevance score (0-100%) based on your search query.</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </span>
+                        </TableHead>
+
+                        {/* Time Range Header */}
+                        <TableHead className="w-[10%] text-center font-medium text-gray-700 px-1">
+                          <span className="flex items-center justify-center">
+                            Time Range
+                            <TooltipProvider delayDuration={150}>
+                              <Tooltip>
+                                <TooltipTrigger className="ml-1 cursor-help align-middle leading-none"> {/* Removed asChild */}
+                                  <Info className="h-3.5 w-3.5 text-gray-400 hover:text-gray-600" />
+                                </TooltipTrigger>
+                                <TooltipContent side="top">
+                                  <p className="text-xs max-w-xs">The earliest and latest time points covered by the data, if detected.</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </span>
+                        </TableHead>
+
+                        {/* Granularity Header */}
+                        <TableHead className="w-[15%] font-medium text-gray-700 px-1">
+                          <span className="flex items-center justify-center">
+                            Granularity
+                            <TooltipProvider delayDuration={150}>
+                              <Tooltip>
+                                <TooltipTrigger className="ml-1 cursor-help align-middle leading-none"> {/* Removed asChild */}
+                                  <Info className="h-3.5 w-3.5 text-gray-400 hover:text-gray-600" />
+                                </TooltipTrigger>
+                                <TooltipContent side="top">
+                                  <p className="text-xs max-w-xs">The level of detail or unit of observation in the data (e.g., daily, county-level).</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </span>
+                        </TableHead>
+
+                        {/* Dimensions Header */}
+                        <TableHead className="w-[10%] text-center font-medium text-gray-700 px-1">
+                           <span className="flex items-center justify-center">
+                            Dimensions
+                            <TooltipProvider delayDuration={150}>
+                              <Tooltip>
+                                <TooltipTrigger className="ml-1 cursor-help align-middle leading-none"> {/* Removed asChild */}
+                                  <Info className="h-3.5 w-3.5 text-gray-400 hover:text-gray-600" />
+                                </TooltipTrigger>
+                                <TooltipContent side="top">
+                                  <p className="text-xs max-w-xs">The number of rows and columns detected in the primary data resource.</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </span>
+                        </TableHead>
+
+                        {/* Completeness Header */}
+                        <TableHead className="w-[10%] text-center font-medium text-gray-700 px-1">
+                          <span className="flex items-center justify-center">
+                            Completeness
+                            <TooltipProvider delayDuration={150}>
+                              <Tooltip>
+                                <TooltipTrigger className="ml-1 cursor-help align-middle leading-none"> {/* Removed asChild */}
+                                  <Info className="h-3.5 w-3.5 text-gray-400 hover:text-gray-600" />
+                                </TooltipTrigger>
+                                <TooltipContent side="top">
+                                  <p className="text-xs max-w-xs">Estimated percentage of non-missing values. Higher is generally better.</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </span>
+                        </TableHead>
+
+                        {/* Resources Header */}
+                        <TableHead className="w-[10%] text-center font-medium text-gray-700 px-1">
+                          <span className="flex items-center justify-center">
+                            Resources
+                             <TooltipProvider delayDuration={150}>
+                              <Tooltip>
+                                <TooltipTrigger className="ml-1 cursor-help align-middle leading-none"> {/* Removed asChild */}
+                                  <Info className="h-3.5 w-3.5 text-gray-400 hover:text-gray-600" />
+                                </TooltipTrigger>
+                                <TooltipContent side="top">
+                                  <p className="text-xs max-w-xs">Number of downloadable files or accessible API endpoints associated with the dataset.</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </span>
+                        </TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -2491,27 +2620,30 @@ export default function SearchPage() {
                                       <Badge 
                                         variant="outline" 
                                         className={`text-xs ${
-                                          // Color coding based on percentage value
-                                          dataset.quality_score >= 0.75 
+                                          // Divide score by 100 before comparison
+                                          (dataset.quality_score / 100) >= 0.75 
                                             ? 'bg-green-50 text-green-700 border-green-200' 
-                                            : dataset.quality_score >= 0.50
+                                            : (dataset.quality_score / 100) >= 0.50
                                               ? 'bg-yellow-50 text-yellow-700 border-yellow-200'
+                                              // Handle potential very large invalid numbers or scores below 0.50
                                               : 'bg-red-50 text-red-700 border-red-200'
                                         }`}
                                       >
-                                        {/* Display the percentage */}
-                                        {`${(dataset.quality_score).toFixed(0)}%`} 
+                                        {/* Display the percentage (assuming score might need dividing by 100) */}
+                                        {/* Clamp value between 0 and 100 for display */}
+                                        {`${Math.max(0, Math.min(100, dataset.quality_score)).toFixed(0)}%`} 
                                       </Badge>
                                     </TooltipTrigger>
                                     {/* Tooltip still shows full details */}
                                     <TooltipContent side="bottom" className="p-2 max-w-xs">
                                        <div className="text-xs space-y-1">
-                                           <p>Completeness: {(dataset.quality_score * 100).toFixed(1)}%</p> {/* Show score */}
+                                           {/* Show original score value in tooltip for clarity */}
+                                           <p>Completeness Score: {dataset.quality_score.toFixed(1)}%</p> 
                                            {typeof dataset.duplicate_percentage === 'number' && dataset.duplicate_percentage > 0 && (
                                                <p>Duplicates: {(dataset.duplicate_percentage * 100).toFixed(1)}%</p>
                                            )}
-                                            {/* Add qualitative note based on score */}
-                                            {dataset.quality_score < 0.50 && <p className="text-red-600">Low data completeness observed.</p>}
+                                            {/* Add qualitative note based on corrected score comparison */}
+                                            {(dataset.quality_score / 100) < 0.50 && <p className="text-red-600">Low data completeness observed.</p>}
                                             {dataset.enrichment_error && <p className="text-red-600">Error: {dataset.enrichment_error}</p>}
                                             {!dataset.enrichment_error && dataset.quality_score >= 0.50 && <p>Data completeness assessment.</p> }
                                        </div>
@@ -2793,8 +2925,8 @@ export default function SearchPage() {
                                 <Skeleton className="h-4 w-20 mx-auto bg-gray-200" />
                             </TableCell>
                             {/* Granularity Skeleton */}
-                            <TableCell className="py-4">
-                                <Skeleton className="h-4 w-24 bg-gray-200" />
+                            <TableCell className="py-4 text-center"> 
+                                <Skeleton className="h-4 w-24 bg-gray-200 mx-auto" /> 
                             </TableCell>
                             {/* Dimensions Skeleton */}
                             <TableCell className="py-4 text-center">
@@ -2804,9 +2936,9 @@ export default function SearchPage() {
                             <TableCell className="py-4 text-center">
                                 <Skeleton className="h-6 w-12 mx-auto bg-gray-200 rounded-full" />
                             </TableCell>
-                             {/* Resources Skeleton - Updated */}
-                             <TableCell className="py-4 text-center"> {/* Keep text-center */}
-                                <Skeleton className="h-7 w-20 bg-gray-200 rounded-full mx-auto" /> {/* Add mx-auto for horizontal centering */}
+                             {/* Resources Skeleton */}
+                             <TableCell className="py-4 text-center"> 
+                                <Skeleton className="h-7 w-20 bg-gray-200 rounded-full mx-auto" /> 
                              </TableCell>
                           </TableRow>
                         ))
