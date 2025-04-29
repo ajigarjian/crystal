@@ -1753,6 +1753,31 @@ export default function SearchPage() {
     }
   };
 
+  // Add the date formatting helper function HERE
+  const formatDateToMonthYear = (dateString?: string): string => {
+    if (!dateString) {
+      return '?';
+    }
+    try {
+      // Append time and timezone to ensure consistent parsing, treating input as UTC
+      const date = new Date(`${dateString}T00:00:00Z`);
+      if (isNaN(date.getTime())) {
+        // Handle invalid date strings
+        return '?';
+      }
+      // Use toLocaleDateString for formatting (e.g., "Jul 2023")
+      // Specify UTC timezone to avoid local timezone shifts affecting the output
+      return date.toLocaleDateString('en-US', { 
+        month: 'short', 
+        year: 'numeric', 
+        timeZone: 'UTC' 
+      });
+    } catch (error) {
+      console.error("Error formatting date:", dateString, error);
+      return '?'; // Return '?' in case of any unexpected error
+    }
+  };
+
   return (
     <div className="flex flex-col min-h-screen bg-gray-50 text-gray-900">
       {/* Header with logo */}
@@ -2310,8 +2335,8 @@ export default function SearchPage() {
                 /* Desktop table view - Ensure table takes full width */
                 <div className="rounded-md rounded-t-none border border-gray-200 bg-white overflow-auto scrollbar-fix w-full">
                   <Table className="w-full">
-                    <TableHeader>
-                      <TableRow className="hover:!bg-transparent border-b border-gray-200">
+                    <TableHeader className="sticky top-0 bg-white z-10">
+                      <TableRow className="border-b border-gray-200 hover:!bg-gray-50">
                         {/* Expansion Cell Header */}
                         <TableHead className="w-[5%] h-10 text-gray-700"></TableHead>
 
@@ -2544,11 +2569,8 @@ export default function SearchPage() {
                                       <Tooltip>
                                         <TooltipTrigger asChild>
                                            <span>
-                                              {/* Format based on type */}
-                                              {dataset.time_range_type === 'year' 
-                                                  ? `${dataset.time_range_min} - ${dataset.time_range_max}`
-                                                  : `${dataset.time_range_min || '?'} - ${dataset.time_range_max || '?'}`
-                                              }
+                                              {/* Format min and max dates using the helper function */}
+                                              {formatDateToMonthYear(dataset.time_range_min)} - {formatDateToMonthYear(dataset.time_range_max)}
                                            </span>
                                         </TooltipTrigger>
                                         {dataset.time_range_column && (
