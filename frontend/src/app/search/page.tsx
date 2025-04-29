@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Input } from "@/components/ui/input";
-import { Search, Loader2, ChevronDown, ChevronUp, FileText, ExternalLink, Info, ChevronRight, Download, X, Lock, AlertCircle, Lightbulb, MessageSquare, ThumbsUp, Bug, ArrowRight, Calendar, Hash } from "lucide-react";
+import { Search, Loader2, ChevronDown, ChevronUp, FileText, ExternalLink, Info, ChevronRight, Download, X, Lock, AlertCircle, Lightbulb, MessageSquare, ThumbsUp, Bug, ArrowRight, Calendar, Hash, Eye } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { trackDwellTimeEnd, trackDwellTimeStart, warmFunctions, streamSearchDatasets } from "@/lib/firebase";
 import { Badge } from "@/components/ui/badge";
@@ -2262,54 +2262,87 @@ export default function SearchPage() {
 
                   {/* Updated button rendering logic with new CSS classes */}
                   {(searchStatus === SearchStatus.COMPLETE && datasets.length > 0) && (
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button 
-                            onClick={() => {
-                              if (analysisStatus === 'complete') {
-                                // If analysis is complete, show the results modal
-                                setAnalysisModalOpen(true);
-                              } else if (analysisStatus !== 'analyzing') {
-                                // If not currently analyzing, start a new analysis
-                                handleAnalyzeDatasets();
-                              }
-                              // If analyzing, clicking does nothing (button will be disabled anyway)
-                            }}
-                            className={`${
-                              analysisStatus === 'complete'
-                                ? 'bg-gray-800 hover:bg-gray-900' // Different style for "View Analysis"
-                                : 'bg-green-600 hover:bg-green-700' // Original style for "Analyze"
-                            } text-white transition-all duration-200 border border-gray-200 border-b-0 rounded-b-none rounded-md rounded-bl-none rounded-br-none h-[38px]`}
-                            disabled={datasets.length === 0 || !query.trim() || searchStatus === SearchStatus.SEARCHING || analysisStatus === 'analyzing'}
-                          >
-                            {analysisStatus === 'analyzing' ? (
-                              <>
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Analyzing...
-                              </>
-                            ) : analysisStatus === 'complete' ? (
-                              <>
-                                <FileText className="mr-2 h-4 w-4" />
-                                View Analysis
-                              </>
-                            ) : (
-                              <>
-                                <Lightbulb className="mr-2 h-4 w-4" />
-                                Analyze these datasets (~1 min)
-                              </>
-                            )}
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>{
-                            analysisStatus === 'analyzing' ? 'Analysis in progress...' :
-                            analysisStatus === 'complete' ? 'View your analysis results' :
-                            'Run deep analysis on the selected datasets with your query'
-                          }</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
+                    <>
+                      {analysisStatus === 'idle' ? ( // <<< NEW: Conditional rendering for idle state
+                        <TooltipProvider delayDuration={0}>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              {/* Wrap the disabled button in a div for TooltipTrigger */}
+                              <div className="cursor-not-allowed touch-manipulation"> 
+                              <Button
+                                className="opacity-60 text-gray-400 hover:!bg-transparent hover:!text-gray-400 data-[state=active]:bg-transparent bg-white transition-all duration-200 border border-gray-200 border-b-0 rounded-b-none rounded-md rounded-bl-none rounded-br-none h-[38px]"
+                                disabled
+                              >
+                                  <div className="flex items-center gap-1.5"> {/* Flex container for icon and text */}
+                                    Summarize these datasets
+                                    <Lock className="h-3.5 w-3.5 text-gray-400" /> {/* Add Lock icon */}
+                                  </div>
+                                </Button>
+                              </div>
+                            </TooltipTrigger>
+                            <TooltipContent side="bottom" className="bg-white p-3 shadow-lg border border-gray-200 z-50">
+                              <div className="text-sm">
+                                <Link 
+                                  href="/waitlist" 
+                                  target="_blank"
+                                  className="text-gray-900 hover:text-green-700 font-medium inline-flex items-center gap-1.5 transition-colors"
+                                >
+                                  Join beta waitlist for early access <ExternalLink className="h-3 w-3" />
+                                </Link>
+                              </div>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      ) : (
+                        // Existing logic for 'analyzing' and 'complete' states
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button 
+                                onClick={() => {
+                                  if (analysisStatus === 'complete') {
+                                    setAnalysisModalOpen(true);
+                                  } else if (analysisStatus !== 'analyzing') {
+                                    handleAnalyzeDatasets();
+                                  }
+                                }}
+                                className={`${
+                                  analysisStatus === 'complete'
+                                    ? 'bg-gray-800 hover:bg-gray-900' 
+                                    : 'bg-green-600 hover:bg-green-700' 
+                                } text-white transition-all duration-200 border border-gray-200 border-b-0 rounded-b-none rounded-md rounded-bl-none rounded-br-none h-[38px]`}
+                                disabled={analysisStatus === 'analyzing'} // Only disable when analyzing
+                              >
+                                {analysisStatus === 'analyzing' ? (
+                                  <>
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    Analyzing...
+                                  </>
+                                ) : analysisStatus === 'complete' ? (
+                                  <>
+                                    <FileText className="mr-2 h-4 w-4" />
+                                    View Analysis
+                                  </>
+                                ) : (
+                                  // Should not reach here if idle state is handled above, but keep for safety
+                                  <>
+                                    <Lightbulb className="mr-2 h-4 w-4" />
+                                    Analyze these datasets (~1 min)
+                                  </>
+                                )}
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>{
+                                analysisStatus === 'analyzing' ? 'Analysis in progress...' :
+                                analysisStatus === 'complete' ? 'View your analysis results' :
+                                'Run deep analysis on the selected datasets with your query' // Default fallback
+                              }</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      )}
+                    </>
                   )}
                 </div>
               </Tabs>
@@ -2666,83 +2699,109 @@ export default function SearchPage() {
                             
                             {/* Resources column */}
                             <TableCell className="py-4 text-center">
-                              <Drawer>
-                                <DrawerTrigger asChild>
-                                  <Badge 
-                                    variant="outline" 
-                                    className="font-medium text-white border border-gray-800 bg-black hover:bg-gray-800 cursor-pointer inline-flex items-center gap-1.5 transition-colors px-3 py-1"
-                                  >
-                                    <Download className="h-3 w-3" />
-                                    {(dataset.resources || []).length}
-                                  </Badge>
-                                </DrawerTrigger>
-                                <DrawerContent className="bg-white text-gray-900">
-                                  <DrawerHeader className="border-b border-gray-100">
-                                    <DrawerTitle className="text-xl font-semibold text-gray-900">Resources</DrawerTitle>
-                                    <DrawerDescription className="text-gray-600">
-                                      Available resources for &quot;{dataset.title}&quot;
-                                    </DrawerDescription>
-                                  </DrawerHeader>
-                                  
-                                  {/* Add max-height, custom scrollbar styling and overflow-y-auto for scrolling */}
-                                  <div className="p-4 max-h-[calc(80vh-120px)] overflow-y-auto 
-                                    scrollbar-thin scrollbar-thumb-rounded scrollbar-track-transparent 
-                                    hover:scrollbar-thumb-gray-300 scrollbar-thumb-gray-200">
-                                    {dataset.resources && dataset.resources.length > 0 ? (
-                                      <Table>
-                                        <TableHeader className="sticky top-0 bg-white z-10">
-                                          <TableRow className="border-b border-gray-200 hover:!bg-gray-50">
-                                            <TableHead className="w-[100px] text-gray-700">Type</TableHead>
-                                            <TableHead className="text-gray-700">Name</TableHead>
-                                            <TableHead className="text-right text-gray-700">Access</TableHead>
-                                          </TableRow>
-                                        </TableHeader>
-                                        <TableBody>
-                                          {dataset.resources.map((resource: any, resourceIndex: number) => (
-                                            <TableRow 
-                                              key={resource.id || resourceIndex}
-                                              className="border-b border-gray-100 hover:!bg-gray-50 hover:!text-gray-900"
-                                            >
-                                              <TableCell className="font-medium text-gray-900">
-                                                {getFileType(resource)}
-                                              </TableCell>
-                                              <TableCell className="text-gray-800">
-                                                {resource.name || 'Unnamed resource'}
-                                              </TableCell>
-                                              <TableCell className="text-right">
-                                                <Button 
-                                                  size="sm" 
-                                                  variant="ghost"
-                                                  className="h-8 w-8 p-0 text-gray-700 hover:!bg-gray-100 hover:!text-gray-900"
-                                                  asChild
-                                                >
-                                                  <a href={resource.url} target="_blank" rel="noopener noreferrer">
-                                                    <ExternalLink className="h-4 w-4" />
-                                                  </a>
-                                                </Button>
-                                              </TableCell>
+                              {/* Wrap buttons in a flex container for alignment and spacing */}
+                              <div className="flex items-center justify-center gap-1.5"> 
+                                <Drawer>
+                                  <DrawerTrigger asChild>
+                                    <Badge 
+                                      variant="outline" 
+                                      className="font-medium text-white border border-gray-800 bg-black hover:bg-gray-800 cursor-pointer inline-flex items-center gap-1.5 transition-colors px-3 py-1"
+                                    >
+                                      <Download className="h-3 w-3" />
+                                      {(dataset.resources || []).length}
+                                    </Badge>
+                                  </DrawerTrigger>
+                                  <DrawerContent className="bg-white text-gray-900">
+                                    <DrawerHeader className="border-b border-gray-100">
+                                      <DrawerTitle className="text-xl font-semibold text-gray-900">Resources</DrawerTitle>
+                                      <DrawerDescription className="text-gray-600">
+                                        Available resources for &quot;{dataset.title}&quot;
+                                      </DrawerDescription>
+                                    </DrawerHeader>
+                                    
+                                    {/* Add max-height, custom scrollbar styling and overflow-y-auto for scrolling */}
+                                    <div className="p-4 max-h-[calc(80vh-120px)] overflow-y-auto 
+                                      scrollbar-thin scrollbar-thumb-rounded scrollbar-track-transparent 
+                                      hover:scrollbar-thumb-gray-300 scrollbar-thumb-gray-200">
+                                      {dataset.resources && dataset.resources.length > 0 ? (
+                                        <Table>
+                                          <TableHeader className="sticky top-0 bg-white z-10">
+                                            <TableRow className="border-b border-gray-200 hover:!bg-gray-50">
+                                              <TableHead className="w-[100px] text-gray-700">Type</TableHead>
+                                              <TableHead className="text-gray-700">Name</TableHead>
+                                              <TableHead className="text-right text-gray-700">Access</TableHead>
                                             </TableRow>
-                                          ))}
-                                        </TableBody>
-                                      </Table>
-                                    ) : (
-                                      <p className="text-sm text-gray-500 italic">No resources available</p>
-                                    )}
-                                  </div>
-                                  
-                                  {/* Add a hint about scrolling if there are many resources */}
-                                  {dataset.resources && dataset.resources.length > 5 && (
-                                    <div className="text-center py-2 text-sm text-gray-500 border-t border-gray-100">
-                                      <span className="inline-flex items-center">
-                                        Scroll to see all {dataset.resources.length} resources
-                                        <svg className="ml-1 h-4 w-4 animate-bounce" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
-                                        </svg>
-                                      </span>
+                                          </TableHeader>
+                                          <TableBody>
+                                            {dataset.resources.map((resource: any, resourceIndex: number) => (
+                                              <TableRow 
+                                                key={resource.id || resourceIndex}
+                                                className="border-b border-gray-100 hover:!bg-gray-50 hover:!text-gray-900"
+                                              >
+                                                <TableCell className="font-medium text-gray-900">
+                                                  {getFileType(resource)}
+                                                </TableCell>
+                                                <TableCell className="text-gray-800">
+                                                  {resource.name || 'Unnamed resource'}
+                                                </TableCell>
+                                                <TableCell className="text-right">
+                                                  <Button 
+                                                    size="sm" 
+                                                    variant="ghost"
+                                                    className="h-8 w-8 p-0 text-gray-700 hover:!bg-gray-100 hover:!text-gray-900"
+                                                    asChild
+                                                  >
+                                                    <a href={resource.url} target="_blank" rel="noopener noreferrer">
+                                                      <ExternalLink className="h-4 w-4" />
+                                                    </a>
+                                                  </Button>
+                                                </TableCell>
+                                              </TableRow>
+                                            ))}
+                                          </TableBody>
+                                        </Table>
+                                      ) : (
+                                        <p className="text-sm text-gray-500 italic">No resources available</p>
+                                      )}
                                     </div>
-                                  )}
-                                </DrawerContent>
-                              </Drawer>
+                                    
+                                    {/* Add a hint about scrolling if there are many resources */}
+                                    {dataset.resources && dataset.resources.length > 5 && (
+                                      <div className="text-center py-2 text-sm text-gray-500 border-t border-gray-100">
+                                        <span className="inline-flex items-center">
+                                          Scroll to see all {dataset.resources.length} resources
+                                          <svg className="ml-1 h-4 w-4 animate-bounce" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                                          </svg>
+                                        </span>
+                                      </div>
+                                    )}
+                                  </DrawerContent>
+                                </Drawer>
+
+                                {/* Conditionally render the Preview button */}
+                                {dataset.has_preview && ( 
+                                  <TooltipProvider>
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        {/* New Preview Button */}
+                                        <Button
+                                          variant="outline"
+                                          size="icon" // Use size="icon" for a smaller square button
+                                          className="h-7 w-7 p-1 font-medium text-white border border-gray-800 bg-black hover:bg-gray-800 cursor-pointer inline-flex items-center justify-center transition-colors"
+                                          // Add onClick handler later when functionality is defined
+                                          // onClick={() => handlePreviewClick(dataset)} 
+                                        >
+                                          <Eye className="h-3.5 w-3.5" /> {/* Eye Icon */}
+                                        </Button>
+                                      </TooltipTrigger>
+                                      <TooltipContent side="bottom">
+                                        <p className="text-xs">Preview dataset head</p>
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  </TooltipProvider>
+                                )}
+                              </div>
                             </TableCell>
                           </TableRow>
                           

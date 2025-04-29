@@ -1040,7 +1040,7 @@ def enrich_dataset_after_relevance_check(dataset, query, start_time):
                 'loaded': False, 'error': 'Download failed',
                 'dimensions': {'rows': 0, 'columns': 0}, 'column_names': [],
                 'quality': {'quality_score': 0, 'quality_label': 'unknown', 'error': 'Download failed'},
-                'granularity': {'granularity': 'unknown', 'confidence': 0, 'reasoning': 'Download failed'},
+                'granularity': {'granularity': 'Unknown', 'confidence': 0, 'reasoning': 'Download failed'},
                 'time_range': {'has_time_data': False, 'reason': 'Download failed'}
             }
             return dataset
@@ -1075,7 +1075,7 @@ def enrich_dataset_after_relevance_check(dataset, query, start_time):
                     'loaded': True, 'load_error': 'Content is not tabular data' if dataset_content else 'Loading failed',
                     'dimensions': {'rows': 0, 'columns': 0}, 'column_names': [],
                     'quality': {'quality_score': 0, 'quality_label': 'unknown', 'error': 'Not a DataFrame'},
-                    'granularity': {'granularity': 'unknown', 'confidence': 0, 'reasoning': 'Not a DataFrame'},
+                    'granularity': {'granularity': 'Unknown', 'confidence': 0, 'reasoning': 'Not a DataFrame'},
                     'time_range': {'has_time_data': False, 'reason': 'Not a DataFrame'}
                 }
             
@@ -1087,7 +1087,7 @@ def enrich_dataset_after_relevance_check(dataset, query, start_time):
                 'loaded': False, 'error': str(e),
                 'dimensions': {'rows': 0, 'columns': 0}, 'column_names': [],
                 'quality': {'quality_score': 0, 'quality_label': 'unknown', 'error': f'Load/Enrich error: {str(e)}'},
-                'granularity': {'granularity': 'unknown', 'confidence': 0, 'reasoning': 'Load/Enrich error'},
+                'granularity': {'granularity': 'Unknown', 'confidence': 0, 'reasoning': 'Load/Enrich error'},
                 'time_range': {'has_time_data': False, 'reason': f'Load/Enrich error: {str(e)}'}
             }
         finally:
@@ -1111,7 +1111,7 @@ def enrich_dataset_after_relevance_check(dataset, query, start_time):
                 'loaded': False, 'error': str(e),
                 'dimensions': {'rows': 0, 'columns': 0}, 'column_names': [],
                 'quality': {'quality_score': 0, 'quality_label': 'unknown', 'error': str(e)},
-                'granularity': {'granularity': 'unknown', 'confidence': 0, 'reasoning': str(e)},
+                'granularity': {'granularity': 'Unknown', 'confidence': 0, 'reasoning': str(e)},
                 'time_range': {'has_time_data': False, 'error': str(e)}
             }
         # Clean up file if download happened before the error
