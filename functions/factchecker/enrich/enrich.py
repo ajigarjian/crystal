@@ -429,3 +429,158 @@ def enrich_dataset_metadata(dataset_content: pd.DataFrame, query: str, dataset_m
         return {
             "enrichment_error": str(e)
         }
+
+
+# --- Download and Preview Helper (for search_and_download mode) ---
+
+# def preview_dataset(dataset, start_time):
+#     """
+#     Downloads, loads, and generates preview messages for a single dataset.
+#     Yields JSON string messages.
+#     """
+#     ds_id = dataset.get('id', 'unknown_preview_' + str(time.time()))
+#     title = dataset.get('title', 'Untitled Dataset')
+#     resource_url = dataset.get('resource_url') # Assumes assessment added this
+#     resources = dataset.get('resources', [])
+
+#     # If resource_url wasn't determined by assessment, try finding the best one now
+#     if not resource_url and resources:
+#          logger.info(f"No pre-determined resource_url for {ds_id}, finding best resource...")
+#          try:
+#              # We need the original query to find the best resource if not pre-selected
+#              # This is a limitation here; ideally, the query context should be available.
+#              # For now, we'll just pick the first resource if URL is missing.
+#              # A better approach would be to ensure assessment *always* sets resource_url if relevant.
+#              if resources and isinstance(resources, list) and len(resources) > 0:
+#                   best_resource = resources[0] # Fallback: use the first resource
+#                   resource_url = best_resource.get('url')
+#                   logger.warning(f"Falling back to first resource URL for {ds_id}: {resource_url}")
+#              else:
+#                   logger.error(f"No resources found for dataset {ds_id} to determine download URL.")
+
+#          except Exception as e:
+#               logger.error(f"Error getting best resource for {ds_id}: {e}")
+#               yield create_error_message(f"Could not determine resource to download for {title}.", start_time=start_time, dataset_id=ds_id)
+#               return # Stop processing this dataset
+
+#     if not resource_url:
+#         logger.warning(f"No resource URL available for dataset {ds_id} ('{title}'). Cannot download.")
+#         yield create_error_message(f'No download URL found for dataset {title}.', start_time=start_time, dataset_id=ds_id)
+#         return # Stop processing this dataset
+
+#     # Attempt download
+#     yield create_status_message(f'Downloading: {title}...', start_time, dataset_id=ds_id, status='downloading')
+#     local_file = None
+#     download_dir = '/tmp/dataset_downloads' # Use specific temp subdir
+#     os.makedirs(download_dir, exist_ok=True)
+
+#     try:
+#         # Construct a filename - use dataset ID and try to get extension
+#         file_ext = os.path.splitext(resource_url.split('?')[0])[1] # Basic extension extraction
+#         if not file_ext and resources: # Fallback to format if no extension in URL
+#              file_ext = "." + resources[0].get('format','').lower() if resources[0].get('format') else ".data"
+
+#         filename = f"{ds_id}{file_ext}"
+#         logger.info(f"Attempting download of {resource_url} to {os.path.join(download_dir, filename)}")
+#         local_file = download_resource(resource_url, download_dir, filename=filename, max_download_time=30) # Increased timeout
+
+#     except Exception as e:
+#         logger.error(f"Download failed for {ds_id} ('{title}') from {resource_url}: {str(e)}")
+#         yield create_error_message(f'Download failed for {title}: {str(e)}', start_time=start_time, dataset_id=ds_id)
+#         return
+
+#     if not local_file or not os.path.exists(local_file):
+#         logger.error(f"Download function returned no valid file path for {ds_id} ('{title}').")
+#         yield create_error_message(f'Download did not produce a file for {title}.', start_time=start_time, dataset_id=ds_id)
+#         return
+
+#     yield create_status_message(f'Downloaded: {title}. Loading...', start_time, dataset_id=ds_id, status='loading')
+
+#     # Attempt to load via load_datafile
+#     df = None
+#     load_error = None
+#     try:
+#         # Determine format if possible (useful for load_datafile)
+#         file_format = None
+#         if resources and isinstance(resources, list) and len(resources) > 0:
+#             file_format = resources[0].get('format') # Use format from metadata if available
+
+#         df = load_datafile(local_file, file_format=file_format) # Pass format hint
+
+#         if df is None:
+#              raise ValueError("load_datafile returned None.")
+
+#         # Successfully loaded
+#         yield create_status_message(f'Loaded: {title}. Preparing preview...', start_time, dataset_id=ds_id, status='previewing')
+
+#         # Check if it's a DataFrame for shape/head preview
+#         if hasattr(df, 'shape') and hasattr(df, 'head'):
+#             row_count, col_count = df.shape
+#             # Send shape info
+#             shape_msg = json.dumps({
+#                 'type': 'dataset_download', # Reusing type for simplicity
+#                 'data': {
+#                     'id': ds_id,
+#                     'downloaded': True,
+#                     'loaded': True,
+#                     'rows': row_count,
+#                     'cols': col_count,
+#                     'preview_available': True,
+#                 },
+#                 'timestamp': time.time() - start_time
+#             }, cls=NumpyEncoder) + "\n"
+#             yield shape_msg
+
+#             # Send first 5 rows preview
+#             head_rows = df.head(5) # Keep as DataFrame for NumpyEncoder
+#             head_msg = json.dumps({
+#                 'type': 'dataset_preview',
+#                 'data': {
+#                     'id': ds_id,
+#                     'head': head_rows # Let NumpyEncoder handle DataFrame serialization
+#                 },
+#                 'timestamp': time.time() - start_time
+#             }, cls=NumpyEncoder) + "\n"
+#             yield head_msg
+#         else:
+#             # Loaded, but not a standard DataFrame (e.g., could be text, JSON dict)
+#             yield create_status_message(f'Loaded {title} (non-tabular data).', start_time, dataset_id=ds_id, status='complete')
+#             yield json.dumps({
+#                 'type': 'dataset_download',
+#                 'data': {
+#                     'id': ds_id,
+#                     'downloaded': True,
+#                     'loaded': True,
+#                     'message': 'Loaded non-tabular data.',
+#                     'preview_available': False
+#                  },
+#                 'timestamp': time.time() - start_time
+#             }, cls=NumpyEncoder) + "\n"
+
+#     except Exception as e:
+#         logger.error(f"Error loading or previewing dataset {ds_id} ('{title}') from {local_file}: {str(e)}")
+#         logger.error(traceback.format_exc())
+#         load_error = str(e)
+#         # Send error message related to loading/previewing
+#         yield create_error_message(f'Error loading/previewing {title}: {load_error}', start_time=start_time, dataset_id=ds_id)
+#         # Send status update that download happened but loading failed
+#         yield json.dumps({
+#                 'type': 'dataset_download',
+#                 'data': {
+#                     'id': ds_id,
+#                     'downloaded': True,
+#                     'loaded': False,
+#                     'error': f'Loading/Preview Error: {load_error}',
+#                     'preview_available': False
+#                  },
+#                 'timestamp': time.time() - start_time
+#             }, cls=NumpyEncoder) + "\n"
+
+#     finally:
+#         # Clean up downloaded file
+#         if local_file and os.path.exists(local_file):
+#             try:
+#                 os.remove(local_file)
+#                 logger.info(f"Cleaned up temporary file: {local_file}")
+#             except OSError as e:
+#                 logger.warning(f"Could not remove temporary file {local_file}: {e}")

@@ -24,6 +24,7 @@ from factchecker.download.download_gov_data import download_resource
 import pandas as pd
 import queue
 from factchecker.enrich.enrich import enrich_dataset_metadata
+from factchecker.models import DatasetResource
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -935,6 +936,21 @@ def download_resource_helper(dataset_id, best_resource, output_dir="./downloads"
         logger.error(f"Error downloading resource: {str(e)}")
         return None
 
+def store_resource_metadata(resource_id: str, df: pd.DataFrame, enriched_metadata: dict):
+    shape_array = [df.shape[0], df.shape[1]]
+    head_preview = df.head(5).to_dict(orient='records')
+    quality = enriched_metadata.get('quality', {})
+    granularity = enriched_metadata.get('granularity', {})
+
+    resource = DatasetResource.objects.filter(resource_id=resource_id).first()
+    if resource:
+        import json
+        resource.resource_shape = json.dumps(shape_array)
+        resource.resource_head = json.dumps(head_preview)
+        resource.resource_quality = json.dumps(quality)
+        resource.resource_granularity = json.dumps(granularity)
+        resource.save()
+
 def enrich_dataset_after_relevance_check(dataset, query, start_time):
     """
     Enrich a dataset that has passed the pre-download relevance check by downloading
@@ -983,10 +999,42 @@ def enrich_dataset_after_relevance_check(dataset, query, start_time):
             'file_path': file_path
         }
         
-        # Step 3: Convert Parquet to CSV if needed
+        # Check if we already have resource metadata cached in DB
+        resource_id = best_resource.get('resource_id')
+        if resource_id:
+            from factchecker.models import DatasetResource
+            cached_resource = DatasetResource.objects.filter(resource_id=resource_id).first()
+            if cached_resource and cached_resource.resource_shape:
+                logger.info(f"Skipping reload, found metadata for resource {resource_id}.")
+                import json
+
+                shape_array = json.loads(cached_resource.resource_shape)
+                rows = shape_array[0] if len(shape_array) > 0 else 0
+                cols = shape_array[1] if len(shape_array) > 1 else 0
+
+                head_preview = json.loads(cached_resource.resource_head) if cached_resource.resource_head else []
+                quality = json.loads(cached_resource.resource_quality) if cached_resource.resource_quality else {}
+                granularity = json.loads(cached_resource.resource_granularity) if cached_resource.resource_granularity else {}
+
+                dataset['content_info'] = {
+                    'loaded': True,
+                    'dimensions': {
+                        'rows': rows,
+                        'columns': cols
+                    },
+                    'column_names': list(head_preview[0].keys()) if head_preview else [],
+                    'head_preview': head_preview,
+                    'quality': quality,
+                    'granularity': granularity,
+                    'time_range': {},
+                    'cache_skip': True
+                }
+                return dataset
+
+        # Proceed with loading the dataset
         if ".parquet" in file_path:
             csv_file_path = parquet_to_csv(file_path)
-            os.remove(file_path)  # Remove original parquet file
+            os.remove(file_path)
             file_path = csv_file_path
             dataset['download_status']['file_path'] = file_path
         
@@ -1005,6 +1053,10 @@ def enrich_dataset_after_relevance_check(dataset, query, start_time):
                     'loaded': True,
                     **enriched_metadata # Unpack the enriched results
                 }
+
+                # Store resource metadata in DB for future caching
+                if resource_id:
+                    store_resource_metadata(resource_id, dataset_content, enriched_metadata)
             else:
                 # Handle non-DataFrame content (e.g., PDF or load error)
                 dataset['content_info'] = {
@@ -1026,7 +1078,7 @@ def enrich_dataset_after_relevance_check(dataset, query, start_time):
                  # Add placeholders even if loading fails
                 'dimensions': {'rows': 0, 'columns': 0}, 'column_names': [],
                 'quality': {'quality_score': 0, 'quality_label': 'unknown', 'error': f'Load error: {str(e)}'},
-                'granularity': {'granularity': 'unknown', 'confidence': 0, 'reasoning': f'Load error: {str(e)}'},
+                'granularity': {'granularity': 'unknown', 'confidence': 0, 'reasoning': f'Load error'},
                 'time_range': {'has_time_data': False, 'reason': f'Load error: {str(e)}'}
             }
         
