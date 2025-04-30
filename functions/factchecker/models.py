@@ -173,6 +173,12 @@ class DatasetResource(models.Model):
     content_hash = models.CharField(blank=True, max_length=64, null=True)
     content_size_bytes = models.BigIntegerField(blank=True, null=True)
     
+    resource_shape = models.TextField(blank=True, null=True)
+    resource_head = models.TextField(blank=True, null=True)
+    resource_quality = models.TextField(blank=True, null=True)
+    resource_granularity = models.TextField(blank=True, null=True)
+    resource_time_range = models.TextField(blank=True, null=True)
+    
     class Meta:
         app_label = 'factchecker'
         db_table = 'factchecker_datasetresource'

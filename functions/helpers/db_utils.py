@@ -153,34 +153,26 @@ def execute_query(query, params=None, fetch_all=True):
 
 def get_usable_resources(dataset_id):
     """
-    Get usable resources for a dataset from the database.
-    
+    Get usable resources for a dataset from the database using Django ORM.
+
     Args:
         dataset_id: The ID of the dataset
-        
+
     Returns:
         List of resource dictionaries
     """
+    from factchecker.models import DatasetResource
     try:
-        # Query the database for resources
-        query = """
-        SELECT resource_id, name, url, description, format
-        FROM factchecker_datasetresource
-        WHERE dataset_id = %s AND url IS NOT NULL
-        """
-        resources = execute_query(query, (dataset_id,))
-        
-        # Convert to the expected format
+        resources_qs = DatasetResource.objects.filter(dataset__dataset_id=dataset_id, url__isnull=False)
         formatted_resources = []
-        for resource in resources:
+        for resource in resources_qs:
             formatted_resources.append({
-                "id": resource["resource_id"],
-                "name": resource["name"],
-                "url": resource["url"],
-                "description": resource["description"],
-                "format": resource["format"]
+                "id": resource.resource_id,
+                "name": resource.name,
+                "url": resource.url,
+                "description": resource.description,
+                "format": resource.format
             })
-        
         return formatted_resources
     except Exception as e:
         logger.error(f"Error getting resources for dataset {dataset_id}: {e}")
@@ -315,3 +307,26 @@ def check_usage_limit(ip_address, function_name):
         # If there's an error, log it but don't block the request
         logger.error(f"Error checking usage limit: {e}")
         return False, None
+
+def get_dataset_info(dataset_id):
+    """
+    Retrieve dataset information from the DatasetCatalog model.
+
+    Args:
+        dataset_id: The ID of the dataset
+
+    Returns:
+        Dictionary of dataset fields, or None if not found.
+    """
+    from factchecker.models import DatasetCatalog
+    try:
+        dataset = DatasetCatalog.objects.get(pk=dataset_id)
+        dataset_dict = {}
+        for field in dataset._meta.fields:
+            dataset_dict[field.name] = getattr(dataset, field.name)
+        return dataset_dict
+    except DatasetCatalog.DoesNotExist:
+        return None
+    except Exception as e:
+        logger.error(f"Error retrieving dataset info for dataset {dataset_id}: {e}")
+        return None

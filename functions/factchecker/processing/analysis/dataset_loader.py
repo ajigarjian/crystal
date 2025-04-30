@@ -1,3 +1,4 @@
+import traceback
 import pandas as pd
 import os
 import openai
@@ -12,6 +13,38 @@ import xml.etree.ElementTree as ET
 import mimetypes
 from collections import defaultdict
 from pandas import json_normalize
+import zipfile
+import tarfile
+import gzip
+import bz2
+import io # For handling in-memory streams
+import tempfile # For temporary extraction if needed
+import zipfile
+import tarfile
+import gzip
+import bz2
+import io # For handling in-memory streams
+import tempfile # For temporary extraction if needed
+
+logger = logging.getLogger("data_loading")
+
+# Import magic library, handling potential ImportError
+try:
+    import magic
+    magic_available = True
+    # Create one instance for reuse if available
+    magic_checker = magic.Magic(mime=True, uncompress=False) # mime=True gets MIME type, uncompress=False prevents magic from decompressing internally
+    logger.info("python-magic library found and initialized.")
+except ImportError:
+    magic = None
+    magic_available = False
+    magic_checker = None
+    logger.warning("python-magic library not found. Archive type detection will rely on standard library trials.")
+except Exception as magic_init_e: # Catch other potential init errors
+    magic = None
+    magic_available = False
+    magic_checker = None
+    logger.error(f"Failed to initialize python-magic: {magic_init_e}. Archive type detection will rely on standard library trials.")
 
 from factchecker.utils.openai_client import chat_completion
 
@@ -21,7 +54,152 @@ It provides utilities for loading datasets from various file formats, assessing 
 relevance to user queries, and preparing them for further analysis.
 """
 
-logger = logging.getLogger("data_loading")
+
+# --- Archive Handling Helper Functions ---
+
+SUPPORTED_DATA_EXTENSIONS = ['.csv', '.xlsx', '.xls', '.json', '.xml']
+
+def _find_first_data_file_in_archive(member_list: List[str]) -> Optional[str]:
+    """Finds the first file in a list of archive members with a supported data extension."""
+    for member_name in member_list:
+        # Ignore directory entries and hidden files/metadata (simple heuristic)
+        if not member_name.endswith('/') and not os.path.basename(member_name).startswith('.'):
+            ext = os.path.splitext(member_name)[1].lower()
+            if ext in SUPPORTED_DATA_EXTENSIONS:
+                logger.info(f"Found potential data file in archive: {member_name}")
+                return member_name
+    logger.info("No file with a directly supported data extension found in archive member list.")
+    return None
+
+def _load_archived_file(
+    archive_type: str,
+    file_path: str,
+    member_to_extract: Optional[str] = None
+) -> Union[pd.DataFrame, Dict[str, Any], None]:
+    """
+    Loads data from a specific member within an archive (ZIP, TAR)
+    or decompresses a single file archive (GZIP, BZ2) and attempts to load it.
+
+    Args:
+        archive_type: 'zip', 'tar', 'gzip', 'bz2'
+        file_path: Path to the original archive file.
+        member_to_extract: Name of the member file inside ZIP/TAR to load (optional).
+                           If None for GZIP/BZ2, assumes the whole decompressed stream is the data.
+
+    Returns: Loaded DataFrame/Dict or None if loading fails.
+    """
+    logger.info(f"Handling archive type '{archive_type}' for file: {file_path}")
+    temp_dir = None
+    extracted_path = None
+    content_stream = None
+
+    try:
+        if archive_type == 'zip':
+            with zipfile.ZipFile(file_path, 'r') as zip_ref:
+                members = zip_ref.namelist()
+                if member_to_extract is None:
+                    member_to_extract = _find_first_data_file_in_archive(members)
+
+                if member_to_extract:
+                    logger.info(f"Attempting to load member '{member_to_extract}' from ZIP.")
+                    # Extract to memory or temp file (using stream is often better)
+                    with zip_ref.open(member_to_extract, 'r') as member_file:
+                        # We need load_datafile to handle streams, or save temporarily
+                        # Option 1: Save to temp file (simpler integration for now)
+                        temp_dir = tempfile.TemporaryDirectory()
+                        extracted_path = os.path.join(temp_dir.name, os.path.basename(member_to_extract))
+                        with open(extracted_path, 'wb') as temp_f:
+                            temp_f.write(member_file.read())
+                        logger.info(f"Extracted ZIP member to temporary file: {extracted_path}")
+                        # Recursively call load_datafile on the extracted file
+                        return load_datafile(extracted_path)
+                else:
+                    logger.warning(f"Could not find a supported data file within ZIP: {file_path}")
+                    return None
+
+        elif archive_type == 'tar':
+             # TarFile needs careful handling (e.g., tar bombs). Only extract known good extensions.
+             # Determine compression type (gz, bz2, xz, or none)
+             try:
+                  tar_mode = 'r:*' # Auto-detect compression
+                  with tarfile.open(file_path, mode=tar_mode) as tar_ref:
+                       members = tar_ref.getnames()
+                       if member_to_extract is None:
+                           member_to_extract = _find_first_data_file_in_archive(members)
+
+                       if member_to_extract:
+                           logger.info(f"Attempting to load member '{member_to_extract}' from TAR.")
+                           member_info = tar_ref.getmember(member_to_extract)
+                           if member_info.isfile(): # Ensure it's a file
+                                extracted_fileobj = tar_ref.extractfile(member_to_extract)
+                                if extracted_fileobj:
+                                     # Option 1: Save to temp file
+                                     temp_dir = tempfile.TemporaryDirectory()
+                                     extracted_path = os.path.join(temp_dir.name, os.path.basename(member_to_extract))
+                                     with open(extracted_path, 'wb') as temp_f:
+                                         temp_f.write(extracted_fileobj.read())
+                                     logger.info(f"Extracted TAR member to temporary file: {extracted_path}")
+                                     return load_datafile(extracted_path)
+                                else:
+                                     logger.error(f"Could not extract file object for member '{member_to_extract}' from TAR.")
+                                     return None
+                           else:
+                                logger.warning(f"Selected member '{member_to_extract}' in TAR is not a file.")
+                                return None
+                       else:
+                           logger.warning(f"Could not find a supported data file within TAR: {file_path}")
+                           return None
+             except tarfile.ReadError as tar_err:
+                  logger.error(f"Failed to read TAR file {file_path}: {tar_err}")
+                  return None
+
+        elif archive_type in ['gzip', 'bz2']:
+            open_func = gzip.open if archive_type == 'gzip' else bz2.open
+            # Assume the decompressed stream *is* the data file. Need to guess its type.
+            # Best guess is often based on the original filename before compression (if available).
+            # Let's try saving to a temp file *without* the compression extension.
+            original_filename_base = os.path.splitext(os.path.basename(file_path))[0] # e.g., 'data.csv' from 'data.csv.gz'
+            # Ensure the base doesn't still end in .gz or .bz2 if double compressed? Maybe not needed.
+            temp_dir = tempfile.TemporaryDirectory()
+            # Use the base name for the temp file to help load_datafile infer type
+            extracted_path = os.path.join(temp_dir.name, original_filename_base)
+
+            logger.info(f"Decompressing {archive_type} file to temporary path: {extracted_path}")
+            try:
+                with open_func(file_path, 'rb') as compressed_file, open(extracted_path, 'wb') as temp_f:
+                    # Read and write in chunks for large files
+                    chunk_size = 8192
+                    while True:
+                        chunk = compressed_file.read(chunk_size)
+                        if not chunk:
+                            break
+                        temp_f.write(chunk)
+
+                # Now load the decompressed temp file
+                logger.info(f"Attempting to load decompressed temporary file: {extracted_path}")
+                return load_datafile(extracted_path) # Recursive call
+
+            except (gzip.BadGzipFile, EOFError, OSError) as decomp_err: # Add relevant errors for bz2?
+                 logger.error(f"Failed to decompress {archive_type} file {file_path}: {decomp_err}")
+                 return None
+
+        else:
+            logger.error(f"Unsupported archive type '{archive_type}' passed to _load_archived_file.")
+            return None
+
+    except Exception as e:
+        logger.error(f"Error handling archive '{file_path}' (type: {archive_type}): {str(e)}")
+        logger.error(traceback.format_exc()) # Log full traceback for archive errors
+        return None
+    finally:
+        # Clean up temporary directory if created
+        if temp_dir:
+            try:
+                temp_dir.cleanup()
+                logger.debug(f"Cleaned up temporary directory: {temp_dir.name}")
+            except Exception as cleanup_e:
+                logger.warning(f"Failed to clean up temporary directory {temp_dir.name}: {cleanup_e}")
+
 
 # --- Helper Functions for Loading Specific File Types ---
 
@@ -610,12 +788,14 @@ def _load_json(file_path: str) -> pd.DataFrame:
         raise ValueError(f"Error processing JSON file {os.path.basename(file_path)}: {e}")
 
 # --- Main Loading Function ---
-
 def load_datafile(file_path: str, file_format: Optional[str] = None) -> Union[pd.DataFrame, Dict[str, Any]]:
     """
-    Load a data file (CSV, Excel, PDF, XML, or JSON) using appropriate helpers.
-    Prioritizes the explicitly provided file_format if available, otherwise uses extension/inference.
-    Returns a DataFrame for tabular data or a Dict for PDF/failed XML.
+    Load a data file (CSV, Excel, PDF, XML, JSON, or supported archives)
+    using appropriate helpers. Prioritizes explicit format, then extension,
+    then content-based type detection (magic or trial-and-error for archives).
+
+    Returns a DataFrame for tabular data or a Dict for PDF/unparseable XML.
+
     Raises FileNotFoundError if file doesn't exist, or ValueError/other exceptions on loading errors.
     """
     logger.info(f"Initiating loading for: {file_path}. Explicit format provided: {file_format}")
@@ -626,6 +806,8 @@ def load_datafile(file_path: str, file_format: Optional[str] = None) -> Union[pd
 
     result: Union[pd.DataFrame, Dict[str, Any]] = None
     final_log_type = None # To store the type used for final logging
+    loading_attempted = False # Track if any specific loading function was called
+    load_error_message = None # Store specific load error
 
     try:
         # 1. Prioritize explicit format if provided
@@ -633,6 +815,8 @@ def load_datafile(file_path: str, file_format: Optional[str] = None) -> Union[pd
             format_lower = file_format.lower().strip()
             logger.info(f"Attempting to load using explicit format: '{format_lower}'")
             load_function = None
+            archive_type = None
+
             if format_lower == 'csv':
                 load_function = _load_csv
                 final_log_type = 'CSV (explicit)'
@@ -648,102 +832,278 @@ def load_datafile(file_path: str, file_format: Optional[str] = None) -> Union[pd
             elif format_lower == 'json':
                 load_function = _load_json
                 final_log_type = 'JSON (explicit)'
+            elif format_lower == 'html':
+                # Explicitly handle HTML - currently unsupported for tabular data
+                loading_attempted = True # Mark as attempted
+                final_log_type = 'HTML (explicit)'
+                logger.warning("Explicit format 'HTML' provided. HTML table parsing is not yet supported. Treating as non-tabular.")
+                # We might load basic text later if needed, but not a DataFrame here.
+                # For now, let it proceed to the final error if no other loader works.
+                load_error_message = "HTML format specified, but tabular data extraction from HTML is not supported."
+                # Do not set load_function, let it potentially fall through or error out cleanly.
+            elif format_lower == 'zip':
+                 archive_type = 'zip'
+                 final_log_type = 'ZIP Archive (explicit)'
+            elif format_lower == 'tar':
+                 archive_type = 'tar'
+                 final_log_type = 'TAR Archive (explicit)'
+            elif format_lower == 'gzip':
+                 archive_type = 'gzip'
+                 final_log_type = 'GZIP Archive (explicit)'
+            elif format_lower == 'bz2':
+                 archive_type = 'bz2'
+                 final_log_type = 'BZ2 Archive (explicit)'
             else:
                 logger.warning(f"Explicit format '{file_format}' provided but not recognized or supported. Falling back to extension/inference.")
 
             if load_function:
                 try:
                     result = load_function(file_path)
+                    loading_attempted = True
                     logger.info(f"Successfully loaded using explicit format '{file_format}'.")
                 except Exception as e:
-                    logger.error(f"Error loading file using explicit format '{file_format}': {e}. Falling back to extension/inference.")
-                    # Reset result and log type to allow fallback
+                    loading_attempted = True # Mark attempt even on failure
+                    load_error_message = f"Error loading file using explicit format '{file_format}': {e}"
+                    logger.error(f"{load_error_message}. Falling back.")
                     result = None
-                    final_log_type = None
+                    final_log_type = None # Reset log type for fallback
+            elif archive_type:
+                 try:
+                     result = _load_archived_file(archive_type, file_path)
+                     loading_attempted = True
+                     # _load_archived_file logs success/failure internally
+                 except Exception as e:
+                     loading_attempted = True
+                     load_error_message = f"Error handling archive using explicit format '{file_format}': {e}"
+                     logger.error(f"{load_error_message}. Falling back.")
+                     result = None
+                     final_log_type = None
 
-        # 2. If explicit format wasn't provided, failed, or wasn't recognized, use extension/inference
-        if result is None:
-            logger.info("Using file extension or inference for loading.")
+
+        # 2. If explicit format wasn't provided, failed, or wasn't recognized, use extension
+        if result is None and not loading_attempted:
+            logger.info("Using file extension for loading.")
             file_extension = os.path.splitext(file_path)[1].lower()
-            inferred_type = None
+            load_function = None
+            archive_type = None
 
-            # Try loading based on extension first
             if file_extension == '.csv':
-                result = _load_csv(file_path)
+                load_function = _load_csv
                 final_log_type = 'CSV (extension)'
             elif file_extension in ['.xlsx', '.xls']:
-                result = _load_excel(file_path)
+                load_function = _load_excel
                 final_log_type = 'Excel (extension)'
             elif file_extension == '.pdf':
-                result = _load_pdf(file_path) # Returns Dict
+                load_function = _load_pdf # Returns Dict
                 final_log_type = 'PDF (extension)'
             elif file_extension == '.xml':
-                result = _load_xml(file_path) # Returns DataFrame or Dict
+                load_function = _load_xml # Returns DataFrame or Dict
                 final_log_type = 'XML (extension)'
             elif file_extension == '.json':
-                 result = _load_json(file_path)
+                 load_function = _load_json
                  final_log_type = 'JSON (extension)'
-            # If extension unknown/missing or loading failed, try inferring type
-            elif not file_extension or file_extension not in ['.csv', '.xlsx', '.xls', '.pdf', '.xml', '.json']:
-                logger.info(f"Unknown or missing extension ('{file_extension}'). Attempting type inference.")
+            elif file_extension == '.html':
+                 loading_attempted = True # Mark as attempted
+                 final_log_type = 'HTML (extension)'
+                 logger.warning("Detected '.html' extension. HTML table parsing is not yet supported. Treating as non-tabular.")
+                 load_error_message = "Detected HTML extension, but tabular data extraction from HTML is not supported."
+                 # Do not set load_function
+            elif file_extension == '.zip':
+                archive_type = 'zip'
+                final_log_type = 'ZIP Archive (extension)'
+            elif file_extension in ['.tar', '.tgz', '.tar.gz', '.tar.bz2', '.tar.xz']: # More TAR extensions
+                archive_type = 'tar'
+                final_log_type = 'TAR Archive (extension)'
+            elif file_extension == '.gz':
+                 archive_type = 'gzip'
+                 final_log_type = 'GZIP Archive (extension)'
+            elif file_extension == '.bz2':
+                 archive_type = 'bz2'
+                 final_log_type = 'BZ2 Archive (extension)'
+            # else: Fall through to content detection if extension is unknown/unsupported
+
+            if load_function:
                 try:
-                    mime_type, encoding = mimetypes.guess_type(file_path)
-                    if not mime_type:
-                        raise ValueError(f"Could not infer file type for {os.path.basename(file_path)}")
+                    result = load_function(file_path)
+                    loading_attempted = True
+                    logger.info(f"Successfully loaded using extension '{file_extension}'.")
+                except Exception as e:
+                    loading_attempted = True
+                    load_error_message = f"Error loading file using extension '{file_extension}': {e}"
+                    logger.error(f"{load_error_message}. Proceeding to content detection.")
+                    result = None
+                    final_log_type = None
+            elif archive_type:
+                try:
+                    result = _load_archived_file(archive_type, file_path)
+                    loading_attempted = True
+                    # Internal logging in helper
+                except Exception as e:
+                     loading_attempted = True
+                     load_error_message = f"Error handling archive using extension '{file_extension}': {e}"
+                     logger.error(f"{load_error_message}. Proceeding to content detection.")
+                     result = None
+                     final_log_type = None
 
-                    logger.info(f"Inferred MIME type: {mime_type}")
-                    load_function = None
-                    if 'csv' in mime_type or 'text/plain' in mime_type:
-                        inferred_type = 'csv'
-                        load_function = _load_csv
-                    elif 'excel' in mime_type or 'spreadsheet' in mime_type or 'application/vnd.ms-excel' in mime_type or 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' in mime_type:
-                        inferred_type = 'excel'
-                        load_function = _load_excel
+
+        # 3. If result is still None, try content-based detection (Magic or Trial-and-Error)
+        if result is None and not loading_attempted:
+            logger.info("Using content-based type detection.")
+            detected_archive_type = None
+            load_function = None
+            final_log_type_base = "inferred" # Base for logging type
+            mime_type = "unknown" # Default
+
+            # Strategy 3a: Use python-magic if available
+            if magic_available and magic_checker:
+                try:
+                    mime_type = magic_checker.from_file(file_path)
+                    logger.info(f"Detected MIME type using libmagic: {mime_type}")
+
+                    # Map MIME type to loader or archive handler
+                    # PRIORITIZE specific known types over generic text/html
+                    if 'zip' in mime_type: detected_archive_type = 'zip'
+                    elif 'tar' in mime_type: detected_archive_type = 'tar'
+                    elif 'gzip' in mime_type: detected_archive_type = 'gzip'
+                    elif 'bzip2' in mime_type: detected_archive_type = 'bz2'
+                    elif 'csv' in mime_type: # Explicit CSV type
+                         load_function = _load_csv
+                         final_log_type_base = "CSV"
+                    elif 'excel' in mime_type or 'spreadsheet' in mime_type or 'ms-excel' in mime_type or 'openxmlformats-officedocument.spreadsheetml.sheet' in mime_type:
+                         load_function = _load_excel
+                         final_log_type_base = "Excel"
                     elif 'pdf' in mime_type:
-                        inferred_type = 'pdf'
-                        load_function = _load_pdf
-                    elif 'xml' in mime_type:
-                        inferred_type = 'xml'
-                        load_function = _load_xml
+                         load_function = _load_pdf
+                         final_log_type_base = "PDF"
+                    elif 'xml' in mime_type and 'html' not in mime_type: # Make sure it's not XHTML identified as XML
+                         load_function = _load_xml
+                         final_log_type_base = "XML"
                     elif 'json' in mime_type:
-                        inferred_type = 'json'
-                        load_function = _load_json
+                         load_function = _load_json
+                         final_log_type_base = "JSON"
+                    elif 'html' in mime_type:
+                         # *** Explicitly handle HTML detected by magic ***
+                         loading_attempted = True # Mark as attempted
+                         final_log_type = 'HTML (magic inferred)'
+                         logger.warning("Detected 'text/html' via magic. HTML table parsing is not yet supported. Treating as non-tabular.")
+                         load_error_message = "Detected HTML content, but tabular data extraction from HTML is not supported."
+                         # Do not set load_function or detected_archive_type
+                    elif 'text/plain' in mime_type:
+                        # Treat plain text cautiously - might be CSV, might be something else.
+                        # Allow fallback CSV attempt but log warning.
+                        logger.warning("Detected 'text/plain' via magic. Will attempt CSV loading, but format may not be suitable.")
+                        load_function = _load_csv
+                        final_log_type_base = "CSV (from text/plain)"
                     else:
-                        raise ValueError(f"Unsupported inferred MIME type '{mime_type}'")
+                         logger.warning(f"Unsupported MIME type detected by libmagic: {mime_type}")
 
-                    if load_function:
-                         logger.info(f"Loading based on inferred type: {inferred_type}")
-                         result = load_function(file_path)
-                         final_log_type = f"{inferred_type.upper()} (inferred)"
-
-                except Exception as infer_err:
-                    error_message = f"File type inference/loading failed: {infer_err}"
-                    logger.error(error_message)
-                    # Let the final check handle the error reporting / raising
-            # else: -> This handles the case where the extension was recognized but is not one we support
-            elif file_extension not in ['.csv', '.xlsx', '.xls', '.pdf', '.xml', '.json']:
-                 error_message = f"Unsupported file extension: {file_extension}"
-                 logger.error(error_message)
-                 raise ValueError(error_message)
+                    # Update final_log_type based on detection
+                    if final_log_type is None: # Avoid overwriting if already set (e.g., by HTML check)
+                        if detected_archive_type:
+                             final_log_type = f"{detected_archive_type.upper()} Archive (magic inferred)"
+                        elif load_function:
+                             final_log_type = f"{final_log_type_base.upper()} (magic inferred)"
+                        else:
+                             final_log_type = f"Unknown ({mime_type} via magic)"
 
 
-        # 3. Final check: If result is still None after all attempts
+                except Exception as magic_e:
+                    logger.error(f"python-magic failed to analyze file {file_path}: {magic_e}. Falling back to trial-and-error if applicable.")
+                    final_log_type = None # Reset log type
+
+            # Strategy 3b: Trial-and-error archive loading (if magic unavailable or failed AND not identified as loadable type yet)
+            if detected_archive_type is None and load_function is None and final_log_type != 'HTML (magic inferred)':
+                 # (Keep existing trial-and-error logic for zip, tar, gzip, bz2) ...
+                logger.info("Attempting trial-and-error archive loading.")
+                # Tentative log type, might be overwritten if specific type found
+                final_log_type = "Archive (trial inferred)"
+                archive_handlers = [
+                    ('zip', zipfile.is_zipfile),
+                    ('tar', tarfile.is_tarfile),
+                ]
+                for arc_type, check_func in archive_handlers:
+                    try:
+                        if check_func(file_path):
+                            logger.info(f"Trial-and-error: Detected possible '{arc_type}' archive.")
+                            detected_archive_type = arc_type
+                            final_log_type = f"{arc_type.upper()} Archive (trial inferred)" # More specific
+                            break
+                    except Exception as check_e:
+                         logger.debug(f"Trial-and-error check for {arc_type} failed: {check_e}")
+
+                if detected_archive_type is None:
+                     try:
+                          with gzip.open(file_path, 'rb') as f_gz: f_gz.read(1)
+                          logger.info("Trial-and-error: Detected possible 'gzip' archive.")
+                          detected_archive_type = 'gzip'
+                          final_log_type = "GZIP Archive (trial inferred)"
+                     except (gzip.BadGzipFile, EOFError, OSError):
+                          try:
+                               with bz2.open(file_path, 'rb') as f_bz2: f_bz2.read(1)
+                               logger.info("Trial-and-error: Detected possible 'bz2' archive.")
+                               detected_archive_type = 'bz2'
+                               final_log_type = "BZ2 Archive (trial inferred)"
+                          except (EOFError, OSError) as bz_err:
+                               logger.info(f"Trial-and-error: File does not appear to be Gzip or Bzip2. Final check error: {bz_err}")
+                               if final_log_type == "Archive (trial inferred)": final_log_type = "Unknown (trial failed)" # Update log type if no archive found
+                          except Exception as gz_bz_e:
+                               logger.warning(f"Unexpected error during Gzip/Bz2 trial open: {gz_bz_e}")
+                               if final_log_type == "Archive (trial inferred)": final_log_type = "Unknown (trial error)"
+                     except Exception as gz_bz_e:
+                          logger.warning(f"Unexpected error during Gzip trial open: {gz_bz_e}")
+                          if final_log_type == "Archive (trial inferred)": final_log_type = "Unknown (trial error)"
+
+
+            # --- Execute loading based on content detection ---
+            # This part runs if Step 1/2 failed OR if Step 3 detected something loadable
+            if detected_archive_type:
+                try:
+                    result = _load_archived_file(detected_archive_type, file_path)
+                    loading_attempted = True
+                except Exception as e:
+                     loading_attempted = True
+                     load_error_message = f"Error handling detected archive type '{detected_archive_type}': {e}"
+                     logger.error(load_error_message)
+                     result = None
+                     # Keep final_log_type as detected archive type for error reporting
+            elif load_function:
+                 try:
+                      result = load_function(file_path)
+                      loading_attempted = True
+                 except Exception as e:
+                      loading_attempted = True
+                      load_error_message = f"Error loading file using inferred type '{final_log_type_base}': {e}"
+                      logger.error(load_error_message)
+                      result = None
+                      # Keep final_log_type as inferred type for error reporting
+
+
+        # 4. Final check and error raising
         if result is None:
-             # This implies loading failed within a specific _load_* function (which should have raised)
-             # or inference failed, or the extension was known but loading returned None unexpectedly.
-             error_message = f"Failed to load file {os.path.basename(file_path)} after all attempts. Explicit format: {file_format}, Extension: {file_extension}."
-             logger.error(error_message)
-             # We rely on the _load_* functions or inference logic to raise specific errors.
-             # If we reach here, it's an unexpected state.
-             raise RuntimeError(error_message + " Ensure loader functions raise exceptions on failure.")
+            final_error_message = f"Failed to load file {os.path.basename(file_path)} after all attempts."
+            if final_log_type:
+                final_error_message += f" Last detected/attempted type: {final_log_type}."
+            if load_error_message:
+                 final_error_message += f" Specific load error: {load_error_message}"
+            else:
+                 # If loading_attempted is False here, it means no format/extension/type matched anything known
+                 if not loading_attempted:
+                      final_error_message = f"Could not determine loadable file type for {os.path.basename(file_path)}. Extension: {file_extension}, Detected MIME: {mime_type}."
+                 else:
+                      # A loader was attempted but returned None without raising, or was skipped (like HTML)
+                      final_error_message += " Loading function failed or format is unsupported for tabular data."
+
+            logger.error(final_error_message)
+            # Raise a specific error type
+            raise ValueError(final_error_message)
 
 
         # Log success and return result
-        log_type_str = final_log_type or "UnknownType" # Use the determined type for logging
+        log_type_str = final_log_type or "UnknownType"
         if isinstance(result, pd.DataFrame):
             logger.info(f"Successfully loaded {log_type_str} into DataFrame. Shape: {result.shape}")
-            # logger.info(f"DataFrame sample:\\n{result.head(3).to_string()}") # Keep commented for brevity
         elif isinstance(result, dict):
+             # ... (existing dict logging) ...
              data_type = result.get('type', 'dictionary')
              if data_type == 'pdf':
                  logger.info(f"Successfully processed PDF ({log_type_str}). Pages: {result.get('num_pages', 0)}")
@@ -752,19 +1112,19 @@ def load_datafile(file_path: str, file_format: Optional[str] = None) -> Union[pd
              else:
                   logger.info(f"Successfully loaded data as dictionary ({log_type_str}). Keys: {list(result.keys())}")
         else:
-             # Should not happen with current loaders, but for safety
              logger.info(f"Successfully loaded data ({log_type_str}). Type: {type(result).__name__}")
 
         return result
 
     except (FileNotFoundError, ValueError, pd.errors.EmptyDataError, RuntimeError, Exception) as e:
         # Log the final error before re-raising
-        logger.error(f"Failed to load file {file_path}. Error: {type(e).__name__} - {str(e)}")
-        # Re-raise the exception to be handled by the caller.
-        raise
+        # Adding traceback here can be helpful for debugging loading errors
+        logger.error(f"Failed to load file {file_path}. Final Error: {type(e).__name__} - {str(e)}")
+        logger.debug(traceback.format_exc()) # Add traceback to debug log
+        raise # Re-raise the exception
 
-
-# --- Helper functions for XML/JSON parsing (used by _load_xml, _load_json) ---
+# --- Make sure helper XML functions exist ---
+# Add these if they weren't included in the original code block
 
 def find_repeating_elements(root: ET.Element) -> Dict[str, int]:
     """
@@ -787,49 +1147,81 @@ def flatten_element(element: ET.Element, prefix: str = '') -> Dict[str, Any]:
     Returns: Dictionary with flattened data
     """
     result = {}
-    element_tag = element.tag.split('}')[-1] # Remove namespace if present
+    # Use regex to remove potential namespace like {http://some.namespace/blah}tagname -> tagname
+    element_tag_match = re.match(r'(\{.*\})?(.*)', element.tag)
+    element_tag = element_tag_match.group(2) if element_tag_match else element.tag # Fallback if regex fails
+
     current_prefix = f"{prefix}{element_tag}_" if prefix else f"{element_tag}_"
 
     # Add attributes with prefix
     for key, value in element.attrib.items():
-        attr_key = f"{current_prefix}attr_{key}"
+        attr_key_match = re.match(r'(\{.*\})?(.*)', key) # Remove namespace from attribute key too
+        attr_key_base = attr_key_match.group(2) if attr_key_match else key
+        attr_key = f"{current_prefix}attr_{attr_key_base}"
         result[attr_key] = value
 
     # Add text content if present
     if element.text and element.text.strip():
         text_key = f"{prefix}{element_tag}" if prefix else element_tag
         # If key already exists (e.g., from attribute), append '_text'
-        if text_key in result:
+        # Avoid appending _text if the element only has text and no attributes/children
+        has_attrs_or_children = bool(element.attrib or list(element))
+        if text_key in result and has_attrs_or_children:
              text_key += "_text"
-        result[text_key] = element.text.strip()
+        elif text_key in result and not has_attrs_or_children:
+             # If key exists and no attrs/children, likely a simple repeated tag handled below
+             pass # Let list handling take care of it
+        else:
+             result[text_key] = element.text.strip()
 
-    # Recursively process child elements
-    child_counts = defaultdict(int)
+    # Recursively process child elements, grouping tags
+    child_data_grouped = defaultdict(list)
     for child in element:
-        child_tag = child.tag.split('}')[-1]
-        child_counts[child_tag] += 1
+        child_tag_match = re.match(r'(\{.*\})?(.*)', child.tag)
+        child_tag = child_tag_match.group(2) if child_tag_match else child.tag
+        flattened_child = flatten_element(child) # Flatten child without prefix initially
 
-    processed_children = defaultdict(list)
-    for child in element:
-         child_tag = child.tag.split('}')[-1]
-         child_data = flatten_element(child, prefix=current_prefix if child_counts[child_tag] == 1 else f"{current_prefix}{child_tag}{processed_children[child_tag].count(child_tag)+1}_")
+        # If the flattened child is just simple text (a single key matching its tag)
+        if len(flattened_child) == 1 and list(flattened_child.keys())[0] == child_tag:
+            child_data_grouped[child_tag].append(list(flattened_child.values())[0])
+        else:
+            child_data_grouped[child_tag].append(flattened_child)
 
-         # If child_data only contains text for that child, simplify
-         simple_key = f"{current_prefix}{child_tag}" if prefix else f"{child_tag}"
-         if len(child_data) == 1 and list(child_data.keys())[0] == simple_key:
-             # Check if multiple children have same tag - if so, make a list
-             if child_counts[child_tag] > 1:
-                  if simple_key not in result: result[simple_key] = []
-                  result[simple_key].append(list(child_data.values())[0])
-             else:
-                  result[simple_key] = list(child_data.values())[0]
-         else:
-              # Merge complex child data
-              result.update(child_data)
-
-         processed_children[child_tag].append(child_tag) # Track processed children for indexing
+    # Merge grouped child data into the main result
+    for tag, data_list in child_data_grouped.items():
+        key = f"{prefix}{element_tag}_{tag}" if prefix else f"{element_tag}_{tag}"
+        if len(data_list) == 1:
+            # If only one child with this tag, merge its content or assign directly
+            if isinstance(data_list[0], dict):
+                 # Prefix keys from the child dict before merging to avoid collisions
+                 prefixed_child_data = {f"{key}_{sub_key}": val for sub_key, val in data_list[0].items()}
+                 result.update(prefixed_child_data)
+            else:
+                 result[key] = data_list[0] # Assign simple value directly
+        else:
+            # If multiple children with the same tag, keep as a list
+            result[key] = data_list
 
     return result
+
+
+# ... rest of dataset_loader.py (assess_datafile_relevance, etc.) ...
+
+
+# --- Helper functions for XML/JSON parsing (used by _load_xml, _load_json) ---
+
+def find_repeating_elements(root: ET.Element) -> Dict[str, int]:
+    """
+    Find elements that repeat within the XML tree (excluding root).
+    Args: root: Root element of the XML tree
+    Returns: Dictionary mapping element tags to their frequency
+    """
+    element_counts = defaultdict(int)
+    for elem in root.iter():
+        if elem != root: # Don't count the root itself
+             element_counts[elem.tag] += 1
+    # Filter to elements that appear more than once
+    return {tag: count for tag, count in element_counts.items() if count > 1}
 
 
 # --- Existing Relevance Assessment Function (Kept as per request) ---

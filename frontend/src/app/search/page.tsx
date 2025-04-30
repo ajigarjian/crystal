@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Input } from "@/components/ui/input";
-import { Search, Loader2, ChevronDown, ChevronUp, FileText, ExternalLink, Info, ChevronRight, Download, X, Lock, AlertCircle, Lightbulb, MessageSquare, ThumbsUp, Bug, ArrowRight } from "lucide-react";
+import { Search, Loader2, ChevronDown, ChevronUp, FileText, ExternalLink, Info, ChevronRight, Download, X, Lock, AlertCircle, Lightbulb, MessageSquare, ThumbsUp, Bug, ArrowRight, Calendar, Hash, Eye } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { trackDwellTimeEnd, trackDwellTimeStart, warmFunctions, streamSearchDatasets } from "@/lib/firebase";
 import { Badge } from "@/components/ui/badge";
@@ -729,7 +729,12 @@ export default function SearchPage() {
 
   // Extract the chunk handling logic to a separate function so we can reuse it
   const handleSearchChunk = (chunk: any) => {
-    // Process incoming chunks
+    // Log the entire chunk
+    console.group(`%cChunk received: ${chunk.type}`, 'color: #3498db; font-weight: bold');
+    console.dir(chunk, { depth: null });
+    console.groupEnd();
+
+    // Continue with normal processing
     if (chunk.type === 'status') {
       setStatusMessage(chunk.message);
       // Bump progress a bit for each status message
@@ -752,13 +757,26 @@ export default function SearchPage() {
       
       // Small progress boost for each dataset found
       setSearchProgress(prev => Math.min(prev + 1, 90));
+      // Add enrichment placeholders
+      setDatasets(prev => {
+        const newDataset = { ...chunk.data, is_enriched: false }; // Add enrichment flag
+        // Avoid duplicates
+        if (!prev.some(d => d.id === newDataset.id)) {
+            return [...prev, newDataset];
+        }
+        return prev;
+      });
+      // Also add to ref with placeholder
+      if (!allDatasetsRef.current.some(d => d.id === chunk.data.id)) {
+        allDatasetsRef.current.push({ ...chunk.data, is_enriched: false });
+      }
     }
     else if (chunk.type === 'dataset_update') {
       // Update dataset in our ref - more efficiently
-      const allDatasets = allDatasetsRef.current;
-      for (let i = 0; i < allDatasets.length; i++) {
-        if (allDatasets[i].id === chunk.data.id) {
-          allDatasetsRef.current[i] = { ...allDatasets[i], ...chunk.data };
+      const datasetsArray = allDatasetsRef.current;
+      for (let i = 0; i < datasetsArray.length; i++) {
+        if (datasetsArray[i].id === chunk.data.id) {
+          allDatasetsRef.current[i] = { ...datasetsArray[i], ...chunk.data };
           break;
         }
       }
@@ -779,6 +797,238 @@ export default function SearchPage() {
           !dataset.relevance || dataset.relevance.is_relevant !== false
         );
       });
+      // Make sure to preserve enrichment status if already present
+      setDatasets(prev => {
+          return prev.map(dataset => {
+            if (dataset.id === chunk.data.id) {
+              return { ...dataset, ...chunk.data }; // Merge update, keep is_enriched etc.
+            }
+            return dataset;
+          });
+      });
+      
+      // Update ref
+       const allDatasets = allDatasetsRef.current;
+        for (let i = 0; i < allDatasets.length; i++) {
+            if (allDatasets[i].id === chunk.data.id) {
+                allDatasetsRef.current[i] = { ...allDatasets[i], ...chunk.data };
+                break;
+            }
+        }
+    }
+    else if (chunk.type === 'analysis_result' && chunk.data && chunk.data.dataset_info) {
+      // Add this log
+      console.log('Received analysis_result:', chunk.data.dataset_info);
+      
+      const datasetInfo = chunk.data.dataset_info;
+      const datasetId = datasetInfo.id;
+      
+      console.log(`Received analysis_result dimensions for ${datasetId}:`, datasetInfo.rows, 'x', datasetInfo.columns);
+      
+      // Create a dataset update with the row and column counts
+      const datasetUpdate = {
+        id: datasetId,
+        // Only update if not already enriched
+        ...(datasetInfo.rows !== undefined && allDatasetsRef.current.find(d => d.id === datasetId)?.is_enriched !== true ? { row_count: datasetInfo.rows } : {}),
+        ...(datasetInfo.columns !== undefined && allDatasetsRef.current.find(d => d.id === datasetId)?.is_enriched !== true ? { column_count: datasetInfo.columns } : {}),
+        // Still update relevance from analysis if available
+        relevance: {
+          ...(allDatasetsRef.current.find(d => d.id === datasetId)?.relevance || {}), // Keep existing relevance
+          ...(datasetInfo.relevance_score !== undefined ? { relevance_score: datasetInfo.relevance_score } : {}),
+          ...(datasetInfo.relevance_reasoning ? { reasoning: datasetInfo.relevance_reasoning } : {}),
+        }
+      };
+
+       // Update in allDatasetsRef if necessary
+       const analysisRefDatasets = allDatasetsRef.current;
+        let updated = false;
+        for (let i = 0; i < analysisRefDatasets.length; i++) {
+            if (analysisRefDatasets[i].id === datasetId) {
+                // Only apply dimension updates if not enriched
+                if (analysisRefDatasets[i].is_enriched !== true) {
+                   allDatasetsRef.current[i] = { ...analysisRefDatasets[i], ...datasetUpdate };
+                   updated = true;
+                } else {
+                    // Still update relevance if needed
+                     allDatasetsRef.current[i].relevance = datasetUpdate.relevance;
+                     updated = true; // Mark as updated even if only relevance changed
+                }
+                break;
+            }
+        }
+        
+        // Update state if changes were made
+        if (updated) {
+             setDatasets(prev => prev.map(dataset => 
+                dataset.id === datasetId ? { ...dataset, ...datasetUpdate } : dataset
+             ));
+        }
+      
+      // Small progress boost for receiving analysis
+      setSearchProgress(prev => Math.min(prev + 1, 90));
+    }
+    else if (chunk.type === 'dataset_enrichment') { // <<< New Handler
+        const enrichedData = chunk.data;
+        const datasetId = enrichedData.id;
+
+        // --- START: Add console log for head preview ---
+        if (enrichedData.content_info && enrichedData.content_info.head_preview) {
+          console.log(`Head Preview for Dataset ${datasetId}:`, enrichedData.content_info.head_preview);
+        } else if (enrichedData.content_info && enrichedData.content_info.has_preview === false) {
+          console.log(`No Head Preview available for Dataset ${datasetId}`);
+        } else if (enrichedData.enrichment_error) {
+          console.log(`Enrichment error for Dataset ${datasetId}:`, enrichedData.enrichment_error);
+        }
+        // --- END: Add console log ---
+
+        setDatasets(prev => {
+          return prev.map(dataset => {
+            if (dataset.id === datasetId) {
+              // Merge the content_info into the dataset
+              const contentInfo = enrichedData.content_info || {};
+              const qualityInfo = contentInfo.quality || {};
+              const granularityInfo = contentInfo.granularity || {};
+              const timeRangeInfo = contentInfo.time_range || {};
+              const dimensionsInfo = contentInfo.dimensions || {};
+              
+              // Set has_preview based on content_info.has_preview or the presence of head_preview
+              const hasPreview = 
+                contentInfo.has_preview === true || 
+                (contentInfo.head_preview && Array.isArray(contentInfo.head_preview) && contentInfo.head_preview.length > 0);
+
+              return {
+                ...dataset,
+                // Add enriched fields
+                row_count: dimensionsInfo.rows,
+                column_count: dimensionsInfo.columns,
+                column_names: dimensionsInfo.column_names || [],
+                quality_score: qualityInfo.quality_score, // Raw score
+                quality_label: qualityInfo.quality_label, // High/Medium/Low label
+                missing_percentage: qualityInfo.missing_percentage, // Specific metric
+                duplicate_percentage: qualityInfo.duplicate_percentage, // Specific metric
+                granularity: granularityInfo.granularity, // Description
+                granularity_reasoning: granularityInfo.reasoning, // LLM reasoning
+                has_time_data: timeRangeInfo.has_time_data,
+                time_range_min: timeRangeInfo.min,
+                time_range_max: timeRangeInfo.max,
+                time_range_column: timeRangeInfo.column, // Which column was used
+                is_enriched: true, // Mark as enriched
+                has_preview: hasPreview, // Set the has_preview property
+                content_info: contentInfo, // Store the original content_info for preview access
+                enrichment_error: contentInfo.enrichment_error || enrichedData.enrichment_error, // Capture potential errors
+              };
+            }
+            return dataset;
+          });
+        });
+
+        // Update ref as well
+        const currentRefDatasets = allDatasetsRef.current;
+        for (let i = 0; i < currentRefDatasets.length; i++) {
+            if (currentRefDatasets[i].id === datasetId) {
+                const contentInfo = enrichedData.content_info || {};
+                const qualityInfo = contentInfo.quality || {};
+                const granularityInfo = contentInfo.granularity || {};
+                const timeRangeInfo = contentInfo.time_range || {};
+                const dimensionsInfo = contentInfo.dimensions || {};
+                
+                // Set has_preview based on content_info.has_preview or the presence of head_preview
+                const hasPreview = 
+                  contentInfo.has_preview === true || 
+                  (contentInfo.head_preview && Array.isArray(contentInfo.head_preview) && contentInfo.head_preview.length > 0);
+
+                allDatasetsRef.current[i] = {
+                    ...currentRefDatasets[i],
+                    row_count: dimensionsInfo.rows,
+                    column_count: dimensionsInfo.columns,
+                    column_names: dimensionsInfo.column_names || [],
+                    quality_score: qualityInfo.quality_score,
+                    quality_label: qualityInfo.quality_label,
+                    missing_percentage: qualityInfo.missing_percentage,
+                    duplicate_percentage: qualityInfo.duplicate_percentage,
+                    granularity: granularityInfo.granularity,
+                    granularity_reasoning: granularityInfo.reasoning,
+                    has_time_data: timeRangeInfo.has_time_data,
+                    time_range_min: timeRangeInfo.min,
+                    time_range_max: timeRangeInfo.max,
+                    time_range_column: timeRangeInfo.column,
+                    is_enriched: true,
+                    has_preview: hasPreview, // Set the has_preview property
+                    content_info: contentInfo, // Store the original content_info for preview access
+                    enrichment_error: contentInfo.enrichment_error || enrichedData.enrichment_error,
+                };
+                
+                // Enhanced logging with detailed dataset information
+                const datasetTitle = currentRefDatasets[i].title || 'Unnamed Dataset';
+                const colCount = dimensionsInfo.columns || 'unknown';
+                const rowCount = dimensionsInfo.rows || 'unknown';
+                
+                // Format time range info for logging
+                let timeRangeText = 'No time data';
+                if (timeRangeInfo.has_time_data) {
+                    const minDate = timeRangeInfo.min ? new Date(timeRangeInfo.min).toLocaleDateString() : 'N/A';
+                    const maxDate = timeRangeInfo.max ? new Date(timeRangeInfo.max).toLocaleDateString() : 'N/A';
+                    timeRangeText = `Time range: ${minDate} to ${maxDate}`;
+                    if (timeRangeInfo.column) {
+                        timeRangeText += ` (column: ${timeRangeInfo.column})`;
+                    }
+                }
+                
+                // Create colorful console logs
+                console.group(`%cEnriched Dataset: ${datasetTitle} (${datasetId})`, 'color: #4CAF50; font-weight: bold');
+                console.log(`%cDimensions: %c${rowCount} rows × ${colCount} columns`, 
+                    'font-weight: bold', 'color: #2196F3');
+                
+                // Quality metrics
+                if (qualityInfo.quality_label) {
+                    const qualityColor = 
+                        qualityInfo.quality_label === 'High' ? '#4CAF50' : 
+                        qualityInfo.quality_label === 'Medium' ? '#FF9800' : 
+                        qualityInfo.quality_label === 'Low' ? '#F44336' : '#757575';
+                    
+                    console.log(`%cQuality: %c${qualityInfo.quality_label}`, 
+                        'font-weight: bold', `color: ${qualityColor}; font-weight: bold`);
+                    
+                    if (qualityInfo.quality_score !== undefined) {
+                        console.log(`  Score: ${(qualityInfo.quality_score * 100).toFixed(1)}%`);
+                    }
+                    
+                    if (qualityInfo.missing_percentage !== undefined) {
+                        console.log(`  Missing data: ${(qualityInfo.missing_percentage * 100).toFixed(1)}%`);
+                    }
+                    
+                    if (qualityInfo.duplicate_percentage !== undefined) {
+                        console.log(`  Duplicate rows: ${(qualityInfo.duplicate_percentage * 100).toFixed(1)}%`);
+                    }
+                }
+                
+                // Granularity
+                if (granularityInfo.granularity) {
+                    console.log(`%cGranularity: %c${granularityInfo.granularity}`, 
+                        'font-weight: bold', 'color: #673AB7');
+                }
+                
+                // Time range
+                console.log(`%c${timeRangeText}`, 'color: #795548');
+                
+                // Column names (if available, showing first 5)
+                if (dimensionsInfo.column_names && dimensionsInfo.column_names.length > 0) {
+                    const columnList = dimensionsInfo.column_names.slice(0, 5).join(', ');
+                    const hasMore = dimensionsInfo.column_names.length > 5 ? 
+                        ` (${dimensionsInfo.column_names.length - 5} more)` : '';
+                    console.log(`%cColumns: %c${columnList}${hasMore}`, 
+                        'font-weight: bold', 'color: #607D8B');
+                }
+                
+                // Any errors
+                if (contentInfo.enrichment_error || enrichedData.enrichment_error) {
+                    console.warn(`Enrichment warnings: ${contentInfo.enrichment_error || enrichedData.enrichment_error}`);
+                }
+                
+                console.groupEnd();
+                break;
+            }
+        }
     }
     else if (chunk.type === 'complete') {
       // Search complete
@@ -1418,16 +1668,23 @@ export default function SearchPage() {
   const [analysisResults, setAnalysisResults] = useState<any>(null);
   const [analysisModalOpen, setAnalysisModalOpen] = useState(false);
 
+  // Add near other useState hooks
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [previewData, setPreviewData] = useState<any>(null); // Adjust 'any' to a more specific type if possible
+
   // Add this function inside your SearchPage component, before the return statement
   const handleAnalyzeDatasets = () => {
-    // Get all relevant datasets instead of just the first 3
-    const relevantDatasets = datasets.slice(0, 15); // Limit to first 3
+    // Get all relevant datasets
+    const relevantDatasets = datasets.slice(0, 15); 
     const currentQuery = query.trim();
     
     if (relevantDatasets.length > 0 && currentQuery) {
       // Set analyzing state
       setAnalysisStatus('analyzing');
       setAnalysisResults(null);
+      
+      // Create an abort controller for cancellation if needed
+      const controller = new AbortController();
       
       // Import the streamAnalyzeDatasets function
       import("@/lib/firebase").then(({ streamAnalyzeDatasets }) => {
@@ -1436,39 +1693,227 @@ export default function SearchPage() {
         streamAnalyzeDatasets({
           query: currentQuery,
           datasets: relevantDatasets // Pass all datasets
-        }, (chunk) => {
-          console.log("Analysis chunk received:", chunk);
+        }, 
+        // Ensure handleAnalysisChunk gets called immediately for each chunk
+        (chunk) => {
+          handleAnalysisChunk(chunk);
           
-          // Specifically look for the 'findings' chunk type
-          if (chunk.type === 'findings' && chunk.data) {
-            // Store the findings data directly
-            setAnalysisResults({
-              summary: chunk.data.summary || '',
-              key_findings: chunk.data.key_data_points || [],
-              sources: chunk.data.sources || []
-            });
-            
-            // Since we got the findings, we can mark analysis as complete
-            setAnalysisStatus('complete');
-          } 
-          // Also handle regular result chunks as fallback
-          else if (chunk.type === 'result' || chunk.type === 'complete') {
-            accumulatedResults = { ...accumulatedResults, ...chunk.data };
-            setAnalysisResults(prev => ({
-              ...prev,
-              ...accumulatedResults
-            }));
-            
-            // When complete, update status
-            if (chunk.type === 'complete') {
-              setAnalysisStatus('complete');
-            }
+          // Force a state update to ensure UI refreshes (if needed)
+          // This is a minimal change that might help if React is batching updates
+          setAnalysisStatus(prev => {
+            // Return same value but trigger a state update
+            return prev === 'analyzing' ? 'analyzing' : prev;
+          });
+        },
+        controller.signal // Add abort signal support (optional)
+        ).catch(error => {
+          // Only show errors that aren't from user cancellation
+          if (error.name !== 'AbortError') {
+            console.error("Analysis error:", error);
+            setAnalysisStatus('idle');
           }
-        }).catch(error => {
-          console.error("Analysis error:", error);
-          setAnalysisStatus('idle');
         });
       });
+    }
+  };
+
+  // Add these helper functions for formatting numbers and percentages
+  const formatNumber = (num?: number) => {
+    if (num === undefined) return "—";
+    if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`;
+    if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`;
+    return num.toString();
+  };
+
+  const formatPercent = (value?: number) => {
+    if (value === undefined) return "—";
+    return `${(value * 100).toFixed(1)}%`;
+  };
+
+  // Add this function to handle analysis chunks separately from search chunks
+  const handleAnalysisChunk = (chunk: any) => {
+    // Log the full chunk for debugging
+    console.log("Analysis chunk (full):", chunk);
+    
+    // Keep the existing type logging for quick reference
+    console.log("Analysis chunk received:", chunk.type);
+    
+    if (chunk.type === 'status') {
+      // Update status message during analysis
+      setStatusMessage(chunk.message);
+    }
+    else if (chunk.type === 'dataset_status') {
+      // Handle dataset-specific status updates
+      setStatusMessage(chunk.message);
+      
+      if (chunk.dataset_id) {
+        // Update the specific dataset's status in the datasets state
+        setDatasets(prev => prev.map(dataset => 
+          dataset.id === chunk.dataset_id ? 
+            { 
+              ...dataset, 
+              status: chunk.status || dataset.status,
+              // Add progress if available
+              ...(chunk.progress !== undefined ? { progress: chunk.progress } : {})
+            } 
+            : dataset
+        ));
+        
+        // Also update in the allDatasetsRef for consistency
+        const allDatasets = allDatasetsRef.current;
+        for (let i = 0; i < allDatasets.length; i++) {
+          if (allDatasets[i].id === chunk.dataset_id) {
+            allDatasetsRef.current[i] = { 
+              ...allDatasets[i], 
+              status: chunk.status || allDatasets[i].status,
+              ...(chunk.progress !== undefined ? { progress: chunk.progress } : {})
+            };
+            break;
+          }
+        }
+        
+        console.log(`Updated dataset ${chunk.dataset_id} status to: ${chunk.status}`);
+      }
+    }
+    else if (chunk.type === 'analysis_result' && chunk.data && chunk.data.dataset_info) {
+      const datasetInfo = chunk.data.dataset_info;
+      const datasetId = datasetInfo.id;
+      
+      console.log(`Received analysis_result dimensions for ${datasetId}:`, datasetInfo.rows, 'x', datasetInfo.columns);
+      
+      // Update dataset with dimensions if not already set by enrichment
+      const datasetUpdate = {
+        id: datasetId,
+        // Only update if not already enriched
+        ...(datasetInfo.rows !== undefined && allDatasetsRef.current.find(d => d.id === datasetId)?.is_enriched !== true ? { row_count: datasetInfo.rows } : {}),
+        ...(datasetInfo.columns !== undefined && allDatasetsRef.current.find(d => d.id === datasetId)?.is_enriched !== true ? { column_count: datasetInfo.columns } : {}),
+        // Still update relevance from analysis if available
+        relevance: {
+          ...(allDatasetsRef.current.find(d => d.id === datasetId)?.relevance || {}), // Keep existing relevance
+          ...(datasetInfo.relevance_score !== undefined ? { relevance_score: datasetInfo.relevance_score } : {}),
+          ...(datasetInfo.relevance_reasoning ? { reasoning: datasetInfo.relevance_reasoning } : {}),
+        }
+      };
+
+       // Update in allDatasetsRef if necessary
+       const analysisRefDatasets = allDatasetsRef.current;
+        let updated = false;
+        for (let i = 0; i < analysisRefDatasets.length; i++) {
+            if (analysisRefDatasets[i].id === datasetId) {
+                // Only apply dimension updates if not enriched
+                if (analysisRefDatasets[i].is_enriched !== true) {
+                   allDatasetsRef.current[i] = { ...analysisRefDatasets[i], ...datasetUpdate };
+                   updated = true;
+                } else {
+                    // Still update relevance if needed
+                     allDatasetsRef.current[i].relevance = datasetUpdate.relevance;
+                     updated = true; // Mark as updated even if only relevance changed
+                }
+                break;
+            }
+        }
+        
+        // Update state if changes were made
+        if (updated) {
+             setDatasets(prev => prev.map(dataset => 
+                dataset.id === datasetId ? { ...dataset, ...datasetUpdate } : dataset
+             ));
+        }
+      
+      // Small progress boost for receiving analysis
+      setSearchProgress(prev => Math.min(prev + 1, 90));
+    }
+    else if (chunk.type === 'extracted_data' || chunk.type === 'formatted_data') {
+      // Handle other analysis data if needed
+      // This is where you'd process specific analysis results
+    }
+    else if (chunk.type === 'findings') {
+      // Handle the findings summary
+      setAnalysisResults({
+        summary: chunk.data.summary || '',
+        key_findings: chunk.data.key_data_points || [],
+        sources: chunk.data.sources || []
+      });
+    }
+    else if (chunk.type === 'complete') {
+      // Analysis complete
+      setAnalysisStatus('complete');
+      console.log("Analysis complete");
+    }
+    else if (chunk.type === 'error') {
+      console.error("Analysis error:", chunk.message);
+      setAnalysisStatus('idle');
+      
+      // If the error has a dataset_id, update that dataset's status
+      if (chunk.dataset_id) {
+        setDatasets(prev => prev.map(dataset => 
+          dataset.id === chunk.dataset_id ? 
+            { ...dataset, status: 'error' } : dataset
+        ));
+      }
+    }
+  };
+
+  // Add the date formatting helper function HERE
+  const formatDateToMonthYear = (dateString?: string): string => {
+    if (!dateString) {
+      return '?';
+    }
+    try {
+      // Append time and timezone to ensure consistent parsing, treating input as UTC
+      const date = new Date(`${dateString}T00:00:00Z`);
+      if (isNaN(date.getTime())) {
+        // Handle invalid date strings
+        return '?';
+      }
+      // Use toLocaleDateString for formatting (e.g., "Jul 2023")
+      // Specify UTC timezone to avoid local timezone shifts affecting the output
+      return date.toLocaleDateString('en-US', { 
+        month: 'short', 
+        year: 'numeric', 
+        timeZone: 'UTC' 
+      });
+    } catch (error) {
+      console.error("Error formatting date:", dateString, error);
+      return '?'; // Return '?' in case of any unexpected error
+    }
+  };
+
+  // Add this function within your SearchPage component
+  const handlePreviewClick = (dataset: any) => {
+    // Check if the dataset has content_info with head_preview
+    if (dataset && dataset.content_info && dataset.content_info.head_preview) {
+      // Transform the head_preview data into the format expected by the preview dialog
+      const previewData = {
+        ...dataset,
+        head: {
+          // Extract column names from the first item in head_preview
+          columns: dataset.content_info.head_preview.length > 0 
+            ? Object.keys(dataset.content_info.head_preview[0]) 
+            : [],
+          // Map the head_preview objects to arrays of values in column order
+          data: dataset.content_info.head_preview.map((row: any) => {
+            // If we have columns, maintain the same order for each row
+            if (dataset.content_info.head_preview.length > 0) {
+              const columns = Object.keys(dataset.content_info.head_preview[0]);
+              return columns.map(col => row[col]);
+            }
+            return Object.values(row);
+          })
+        }
+      };
+      
+      console.log("Dataset preview data prepared:", previewData.head);
+      setPreviewData(previewData);
+      setIsPreviewOpen(true);
+    } else if (dataset && dataset.head) {
+      // Handle original format if present
+      setPreviewData(dataset);
+      setIsPreviewOpen(true);
+    } else {
+      console.warn("Preview requested for dataset without head data:", dataset?.id);
+      console.log("Dataset content:", dataset);
+      // Optionally show a notification to the user
     }
   };
 
@@ -1548,7 +1993,7 @@ export default function SearchPage() {
                     {/* Simplified rendering - always show the first 3 suggestions */}
                     {initialSuggestions.slice(0, 3).map((suggestion) => (
                       <TooltipProvider key={suggestion.topic}>
-                        <Tooltip delayDuration={300}>
+                        <Tooltip delayDuration={50}>
                           <TooltipTrigger asChild>
                             <Badge 
                               variant="outline" 
@@ -1645,7 +2090,7 @@ export default function SearchPage() {
             >
               {/* Keep your existing search icon or stop button code */}
               {searchStatus === SearchStatus.SEARCHING ? (
-                <TooltipProvider delayDuration={150}>
+                <TooltipProvider delayDuration={50}>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <motion.div
@@ -1956,54 +2401,87 @@ export default function SearchPage() {
 
                   {/* Updated button rendering logic with new CSS classes */}
                   {(searchStatus === SearchStatus.COMPLETE && datasets.length > 0) && (
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button 
-                            onClick={() => {
-                              if (analysisStatus === 'complete') {
-                                // If analysis is complete, show the results modal
-                                setAnalysisModalOpen(true);
-                              } else if (analysisStatus !== 'analyzing') {
-                                // If not currently analyzing, start a new analysis
-                                handleAnalyzeDatasets();
-                              }
-                              // If analyzing, clicking does nothing (button will be disabled anyway)
-                            }}
-                            className={`${
-                              analysisStatus === 'complete'
-                                ? 'bg-gray-800 hover:bg-gray-900' // Different style for "View Analysis"
-                                : 'bg-green-600 hover:bg-green-700' // Original style for "Analyze"
-                            } text-white transition-all duration-200 border border-gray-200 border-b-0 rounded-b-none rounded-md rounded-bl-none rounded-br-none h-[38px]`}
-                            disabled={datasets.length === 0 || !query.trim() || searchStatus === SearchStatus.SEARCHING || analysisStatus === 'analyzing'}
-                          >
-                            {analysisStatus === 'analyzing' ? (
-                              <>
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Analyzing...
-                              </>
-                            ) : analysisStatus === 'complete' ? (
-                              <>
-                                <FileText className="mr-2 h-4 w-4" />
-                                View Analysis
-                              </>
-                            ) : (
-                              <>
-                                <Lightbulb className="mr-2 h-4 w-4" />
-                                Analyze these datasets (~1 min)
-                              </>
-                            )}
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>{
-                            analysisStatus === 'analyzing' ? 'Analysis in progress...' :
-                            analysisStatus === 'complete' ? 'View your analysis results' :
-                            'Run deep analysis on the selected datasets with your query'
-                          }</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
+                    <>
+                      {analysisStatus === 'idle' ? ( // <<< NEW: Conditional rendering for idle state
+                        <TooltipProvider delayDuration={0}>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              {/* Wrap the disabled button in a div for TooltipTrigger */}
+                              <div className="cursor-not-allowed touch-manipulation"> 
+                              <Button
+                                className="opacity-60 text-gray-400 hover:!bg-transparent hover:!text-gray-400 data-[state=active]:bg-transparent bg-white transition-all duration-200 border border-gray-200 border-b-0 rounded-b-none rounded-md rounded-bl-none rounded-br-none h-[38px]"
+                                disabled
+                              >
+                                  <div className="flex items-center gap-1.5"> {/* Flex container for icon and text */}
+                                    Summarize these datasets
+                                    <Lock className="h-3.5 w-3.5 text-gray-400" /> {/* Add Lock icon */}
+                                  </div>
+                                </Button>
+                              </div>
+                            </TooltipTrigger>
+                            <TooltipContent side="bottom" className="bg-white p-3 shadow-lg border border-gray-200 z-50">
+                              <div className="text-sm">
+                                <Link 
+                                  href="/waitlist" 
+                                  target="_blank"
+                                  className="text-gray-900 hover:text-green-700 font-medium inline-flex items-center gap-1.5 transition-colors"
+                                >
+                                  Join beta waitlist for early access <ExternalLink className="h-3 w-3" />
+                                </Link>
+                              </div>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      ) : (
+                        // Existing logic for 'analyzing' and 'complete' states
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button 
+                                onClick={() => {
+                                  if (analysisStatus === 'complete') {
+                                    setAnalysisModalOpen(true);
+                                  } else if (analysisStatus !== 'analyzing') {
+                                    handleAnalyzeDatasets();
+                                  }
+                                }}
+                                className={`${
+                                  analysisStatus === 'complete'
+                                    ? 'bg-gray-800 hover:bg-gray-900' 
+                                    : 'bg-green-600 hover:bg-green-700' 
+                                } text-white transition-all duration-200 border border-gray-200 border-b-0 rounded-b-none rounded-md rounded-bl-none rounded-br-none h-[38px]`}
+                                disabled={analysisStatus === 'analyzing'} // Only disable when analyzing
+                              >
+                                {analysisStatus === 'analyzing' ? (
+                                  <>
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    Analyzing...
+                                  </>
+                                ) : analysisStatus === 'complete' ? (
+                                  <>
+                                    <FileText className="mr-2 h-4 w-4" />
+                                    View Analysis
+                                  </>
+                                ) : (
+                                  // Should not reach here if idle state is handled above, but keep for safety
+                                  <>
+                                    <Lightbulb className="mr-2 h-4 w-4" />
+                                    Analyze these datasets (~1 min)
+                                  </>
+                                )}
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>{
+                                analysisStatus === 'analyzing' ? 'Analysis in progress...' :
+                                analysisStatus === 'complete' ? 'View your analysis results' :
+                                'Run deep analysis on the selected datasets with your query' // Default fallback
+                              }</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      )}
+                    </>
                   )}
                 </div>
               </Tabs>
@@ -2029,47 +2507,180 @@ export default function SearchPage() {
                 /* Desktop table view - Ensure table takes full width */
                 <div className="rounded-md rounded-t-none border border-gray-200 bg-white overflow-auto scrollbar-fix w-full">
                   <Table className="w-full">
-                    <TableHeader>
-                      <TableRow className="hover:!bg-transparent border-b border-gray-200">
+                    <TableHeader className="sticky top-0 bg-white z-10">
+                      <TableRow className="border-b border-gray-200 hover:!bg-gray-50">
+                        {/* Expansion Cell Header */}
                         <TableHead className="w-[5%] h-10 text-gray-700"></TableHead>
-                        <TableHead className="w-[10%] font-medium text-gray-700">Source</TableHead>
-                        <TableHead className="w-[20%] font-medium text-gray-700">Dataset</TableHead>
-                        <TableHead className="w-[55%] font-medium text-gray-700">Insights</TableHead>
-                        <TableHead className="w-[10%] text-center font-medium text-gray-700">Resources</TableHead>
+
+                        {/* Source Header */}
+                        <TableHead className="w-[10%] font-medium text-gray-700 px-1">
+                          <span className="flex items-center justify-center">
+                            Source
+                            <TooltipProvider delayDuration={50}>
+                              <Tooltip>
+                                <TooltipTrigger className="ml-1 cursor-help align-middle leading-none"> {/* Removed asChild */}
+                                  <Info className="h-3.5 w-3.5 text-gray-400 hover:text-gray-600" />
+                                </TooltipTrigger>
+                                <TooltipContent side="top">
+                                  <p className="text-xs max-w-xs">The organization or agency that published the dataset.</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </span>
+                        </TableHead>
+
+                        {/* Dataset Header */}
+                        <TableHead className="w-[15%] font-medium text-gray-700 px-1">
+                          <span className="flex items-center justify-center">
+                            Dataset
+                            <TooltipProvider delayDuration={50}>
+                              <Tooltip>
+                                <TooltipTrigger className="ml-1 cursor-help align-middle leading-none"> {/* Removed asChild */}
+                                  <Info className="h-3.5 w-3.5 text-gray-400 hover:text-gray-600" />
+                                </TooltipTrigger>
+                                <TooltipContent side="top">
+                                  <p className="text-xs max-w-xs">The name or title of the dataset.</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </span>
+                        </TableHead>
+
+                        {/* Relevance Header */}
+                        <TableHead className="w-[10%] text-center font-medium text-gray-700 px-1">
+                          <span className="flex items-center justify-center">
+                            Relevance
+                            <TooltipProvider delayDuration={50}>
+                              <Tooltip>
+                                <TooltipTrigger className="ml-1 cursor-help align-middle leading-none"> {/* Removed asChild */}
+                                  <Info className="h-3.5 w-3.5 text-gray-400 hover:text-gray-600" />
+                                </TooltipTrigger>
+                                <TooltipContent side="top">
+                                  <p className="text-xs max-w-xs">Estimated relevance score (0-100%) based on your search query.</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </span>
+                        </TableHead>
+
+                        {/* Time Range Header */}
+                        <TableHead className="w-[10%] text-center font-medium text-gray-700 px-1">
+                          <span className="flex items-center justify-center">
+                            Time Range
+                            <TooltipProvider delayDuration={50}>
+                              <Tooltip>
+                                <TooltipTrigger className="ml-1 cursor-help align-middle leading-none"> {/* Removed asChild */}
+                                  <Info className="h-3.5 w-3.5 text-gray-400 hover:text-gray-600" />
+                                </TooltipTrigger>
+                                <TooltipContent side="top">
+                                  <p className="text-xs max-w-xs">The earliest and latest time points covered by the data, if detected.</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </span>
+                        </TableHead>
+
+                        {/* Granularity Header */}
+                        <TableHead className="w-[10%] font-medium text-gray-700 px-1">
+                          <span className="flex items-center justify-center">
+                            Granularity
+                            <TooltipProvider delayDuration={50}>
+                              <Tooltip>
+                                <TooltipTrigger className="ml-1 cursor-help align-middle leading-none"> {/* Removed asChild */}
+                                  <Info className="h-3.5 w-3.5 text-gray-400 hover:text-gray-600" />
+                                </TooltipTrigger>
+                                <TooltipContent side="top">
+                                  <p className="text-xs max-w-xs">Represents a record or row, indicating the unit of observation in the data (e.g., daily, county-level).</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </span>
+                        </TableHead>
+
+                        {/* Dimensions Header */}
+                        <TableHead className="w-[10%] text-center font-medium text-gray-700 px-1">
+                           <span className="flex items-center justify-center">
+                            Dimensions
+                            <TooltipProvider delayDuration={50}>
+                              <Tooltip>
+                                <TooltipTrigger className="ml-1 cursor-help align-middle leading-none"> {/* Removed asChild */}
+                                  <Info className="h-3.5 w-3.5 text-gray-400 hover:text-gray-600" />
+                                </TooltipTrigger>
+                                <TooltipContent side="top">
+                                  <p className="text-xs max-w-xs">The number of rows and columns detected in the primary data resource.</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </span>
+                        </TableHead>
+
+                        {/* Completeness Header */}
+                        <TableHead className="w-[10%] text-center font-medium text-gray-700 px-1">
+                          <span className="flex items-center justify-center">
+                            Completeness
+                            <TooltipProvider delayDuration={50}>
+                              <Tooltip>
+                                <TooltipTrigger className="ml-1 cursor-help align-middle leading-none"> {/* Removed asChild */}
+                                  <Info className="h-3.5 w-3.5 text-gray-400 hover:text-gray-600" />
+                                </TooltipTrigger>
+                                <TooltipContent side="top">
+                                  <p className="text-xs max-w-xs">Estimated percentage of non-missing values. Higher is generally better.</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </span>
+                        </TableHead>
+
+                        {/* Resources Header */}
+                        <TableHead className="w-[10%] text-center font-medium text-gray-700 px-1">
+                          <span className="flex items-center justify-center">
+                            Resources
+                             <TooltipProvider delayDuration={50}>
+                              <Tooltip>
+                                <TooltipTrigger className="ml-1 cursor-help align-middle leading-none"> {/* Removed asChild */}
+                                  <Info className="h-3.5 w-3.5 text-gray-400 hover:text-gray-600" />
+                                </TooltipTrigger>
+                                <TooltipContent side="top">
+                                  <p className="text-xs max-w-xs">Number of downloadable files, accessible API endpoints, or other resources associated with the dataset.</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </span>
+                        </TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {/* Always show real dataset rows if we have any */}
                       {datasets.map((dataset, index) => (
-                          <React.Fragment key={dataset.id}>
-                            <TableRow 
-                              className={`border-b border-gray-200 hover:bg-gray-50 transition-colors cursor-pointer ${
-                                expandedDataset === dataset.id ? 'bg-gray-50' : ''
-                              }`}
-                              onClick={() => toggleExpand(dataset.id)}
-                            >
-                              <TableCell className="py-8 px-4">
-                                <motion.div
-                                  initial={{ rotate: 0 }}
-                                  animate={{ rotate: expandedDataset === dataset.id ? 90 : 0 }}
-                                  transition={{ duration: 0.2 }}
-                                  className="flex items-center justify-center w-5 h-5"
-                                >
-                                  <ChevronRight className="h-4 w-4 text-gray-500" />
-                                </motion.div>
-                              </TableCell>
+                        <React.Fragment key={dataset.id}>
+                          <TableRow 
+                            className={`border-b border-gray-200 hover:bg-gray-50 transition-colors cursor-pointer ${
+                              expandedDataset === dataset.id ? 'bg-gray-50' : ''
+                            }`}
+                            onClick={() => toggleExpand(dataset.id)}
+                          >
+                            <TableCell className="py-8 px-4">
+                              <motion.div
+                                initial={{ rotate: 0 }}
+                                animate={{ rotate: expandedDataset === dataset.id ? 90 : 0 }}
+                                transition={{ duration: 0.2 }}
+                                className="flex items-center justify-center w-5 h-5"
+                              >
+                                <ChevronRight className="h-4 w-4 text-gray-500" />
+                              </motion.div>
+                            </TableCell>
                             <TableCell className="py-4 max-w-[200px]">
-                                <div className="flex items-center gap-2">
-                                  <Avatar className="h-6 w-6 rounded shrink-0">
-                                    {typeof getOrganizationImage(dataset) === 'string' && 
-                                     getOrganizationImage(dataset).length > 1 ? (
-                                      <AvatarImage src={getOrganizationImage(dataset) as string} />
-                                    ) : (
-                                      <AvatarFallback className="rounded bg-green-100 text-green-600 text-xs">
-                                        {getOrganizationImage(dataset)}
-                                      </AvatarFallback>
-                                    )}
-                                  </Avatar>
+                              <div className="flex items-center gap-2">
+                                <Avatar className="h-6 w-6 rounded shrink-0">
+                                  {typeof getOrganizationImage(dataset) === 'string' && 
+                                   getOrganizationImage(dataset).length > 1 ? (
+                                    <AvatarImage src={getOrganizationImage(dataset) as string} />
+                                  ) : (
+                                    <AvatarFallback className="rounded bg-green-100 text-green-600 text-xs">
+                                      {getOrganizationImage(dataset)}
+                                    </AvatarFallback>
+                                  )}
+                                </Avatar>
                                 <div className="min-w-0 flex-1">
                                   <span 
                                     className="text-xs block text-gray-800 leading-tight break-words whitespace-normal"
@@ -2078,33 +2689,193 @@ export default function SearchPage() {
                                     {getOrganizationName(dataset)}
                                   </span>
                                 </div>
-                                </div>
-                              </TableCell>
+                              </div>
+                            </TableCell>
                             <TableCell className="py-4">
-                              <div>
+                              <div className="flex items-center gap-2"> {/* Add flex container */}
+                                {/* Preview Button/Icon */}
+                                <TooltipProvider delayDuration={50}>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      {/* Wrap Button in a div to allow tooltip even when disabled */}
+                                      <div> 
+                                        <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          className={`h-6 w-6 p-1 ${
+                                            !dataset.has_preview 
+                                              ? 'opacity-40 cursor-not-allowed text-gray-400 hover:bg-transparent' 
+                                              : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                                          }`}
+                                          onClick={(e) => {
+                                            if (dataset.has_preview) {
+                                              e.stopPropagation(); // Prevent row click if button is clicked
+                                              handlePreviewClick(dataset);
+                                            }
+                                          }}
+                                          disabled={!dataset.has_preview} 
+                                          aria-label={dataset.has_preview ? "Preview dataset" : "Preview not available"}
+                                        >
+                                          <Eye className="h-4 w-4" />
+                                        </Button>
+                                      </div>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="top">
+                                      <p className="text-xs">
+                                        {dataset.has_preview ? "Preview dataset" : "Preview not available"}
+                                      </p>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
+
+                                {/* Existing Dataset Title */}
                                 <h3 
-                                  className="text-xs font-medium text-gray-900 break-words whitespace-normal" 
+                                  className="text-xs font-medium text-gray-900 block max-w-[250px] line-clamp-2 break-words whitespace-normal" /* Keep existing styles */
                                   title={dataset.title}
                                 >
-                                    {dataset.title}
-                                  </h3>
-                                </div>
-                              </TableCell>
-                              
-                              {/* New Insights column */}
-                              <TableCell className="py-4">
-                                <div>
-                                  {dataset.relevance && dataset.relevance.reasoning ? (
-                                    <p className="text-xs text-black break-words whitespace-normal" title={dataset.relevance.reasoning}>
-                                      {dataset.relevance.reasoning}
-                                    </p>
+                                  {dataset.title}
+                                </h3>
+                              </div>
+                            </TableCell>
+                            
+                            {/* New Relevance column */}
+                            <TableCell className="py-4 text-center">
+                              {dataset.relevance?.relevance_score !== undefined ? (
+                                <TooltipProvider>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <Badge 
+                                        variant="outline" 
+                                        className={`font-medium text-xs ${
+                                          dataset.relevance?.relevance_score >= 0.7 
+                                            ? 'bg-green-50 text-green-700 border-green-200' 
+                                            : dataset.relevance?.relevance_score >= 0.5
+                                              ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                              : 'bg-gray-50 text-gray-700 border-gray-200'
+                                        }`}
+                                      >
+                                        {(dataset.relevance.relevance_score * 100).toFixed(0)}%
+                                      </Badge>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="bottom" className="p-2 max-w-xs">
+                                      <p className="text-xs">{dataset.relevance.reasoning?.split('.')[0] || "Relevance score based on query match"}</p>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
+                              ) : (
+                                <Skeleton className="h-6 w-16 mx-auto bg-gray-200" />
+                              )}
+                            </TableCell>
+                            
+                            {/* Time Range column - Updated */}
+                            <TableCell className="py-4 text-center">
+                              {dataset.is_enriched ? ( // Check if enrichment data is available
+                                <div className="flex items-center justify-center text-xs">
+                                  <Calendar className="h-3 w-3 mr-1 text-gray-500" />
+                                  {dataset.has_time_data ? (
+                                    <TooltipProvider>
+                                      <Tooltip>
+                                        <TooltipTrigger asChild>
+                                           <span>
+                                              {/* Format min and max dates using the helper function */}
+                                              {formatDateToMonthYear(dataset.time_range_min)} - {formatDateToMonthYear(dataset.time_range_max)}
+                                           </span>
+                                        </TooltipTrigger>
+                                        {dataset.time_range_column && (
+                                          <TooltipContent side="bottom" className="p-2">
+                                              <p className="text-xs">Extracted from column: {dataset.time_range_column}</p>
+                                          </TooltipContent>
+                                        )}
+                                      </Tooltip>
+                                    </TooltipProvider>
                                   ) : (
-                                    <Skeleton className="h-8 w-full bg-gray-200" />
+                                    <span className="text-gray-400">—</span>
                                   )}
                                 </div>
-                              </TableCell>
-                              
-                              <TableCell className="py-4 text-center">
+                              ) : (
+                                <Skeleton className="h-4 w-20 mx-auto bg-gray-200" /> // Loading state
+                              )}
+                            </TableCell>
+                            
+                            {/* Granularity column - Updated */}
+                            <TableCell className="py-4"> {/* Removed max-width from TableCell */}
+                                {dataset.is_enriched ? (
+                                    <TooltipProvider>
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                {/* Apply block, max-width, line-clamp, break-words, and title like Dataset title */}
+                                                <div 
+                                                    className="text-xs block max-w-[250px] line-clamp-2 break-words whitespace-normal" 
+                                                    title={dataset.granularity}
+                                                > 
+                                                    {dataset.granularity || <span className="text-gray-400">—</span>}
+                                                </div>
+                                            </TooltipTrigger>
+                                            {dataset.granularity_reasoning && (
+                                              <TooltipContent side="bottom" className="p-2 max-w-sm">
+                                                  <p className="text-xs">{dataset.granularity_reasoning}</p>
+                                              </TooltipContent>
+                                            )}
+                                        </Tooltip>
+                                    </TooltipProvider>
+                                ) : (
+                                    <Skeleton className="h-4 w-24 bg-gray-200" /> // Loading state
+                                )}
+                            </TableCell>
+                            
+                            {/* Dimensions column - Updated */}
+                            <TableCell className="py-4 text-center">
+                              {dataset.is_enriched ? ( // Check enrichment status
+                                  <div className="flex items-center justify-center text-xs">
+                                      <Hash className="h-3 w-3 mr-1 text-gray-500" />
+                                      {/* Check if row_count and column_count are valid numbers */}
+                                      {(typeof dataset.row_count === 'number' && typeof dataset.column_count === 'number') ? (
+                                          <span>{formatNumber(dataset.row_count)} × {formatNumber(dataset.column_count)}</span>
+                                      ) : (
+                                          <span className="text-gray-400">—</span>
+                                      )}
+                                  </div>
+                              ) : (
+                                  <Skeleton className="h-4 w-16 mx-auto bg-gray-200" /> // Loading state
+                              )}
+                            </TableCell>
+                            
+                            {/* Completeness column - Updated */}
+                            <TableCell className="py-4 text-center">
+                              {dataset.is_enriched ? ( // Check if enriched first
+                                (typeof dataset.quality_score === 'number' && dataset.quality_score > 0) ? ( // Check if score is a positive number
+                                  // Display colored badge
+                                <Badge 
+                                  variant="outline" 
+                                  className={`text-xs ${
+                                    // Divide score by 100 before comparison
+                                    (dataset.quality_score / 100) >= 0.75 
+                                      ? 'bg-green-50 text-green-700 border-green-200' 
+                                      : (dataset.quality_score / 100) >= 0.50
+                                        ? 'bg-yellow-50 text-yellow-700 border-yellow-200'
+                                        // Handle potential very large invalid numbers or scores below 0.50
+                                        : 'bg-red-50 text-red-700 border-red-200'
+                                  }`}
+                                >
+                                  {/* Display the percentage */}
+                                  {`${Math.max(0, Math.min(100, dataset.quality_score)).toFixed(0)}%`} 
+                                </Badge>
+                                ) : (
+                                  // Display gray N/A badge if score is 0, undefined, or not a number
+                                  <Badge variant="outline" className="text-xs bg-gray-100 text-gray-500 border-gray-200">
+                                    N/A
+                                  </Badge>
+                                )
+                              ) : (
+                                // Display skeleton if not enriched
+                                <Skeleton className="h-6 w-12 mx-auto bg-gray-200 rounded-full" /> 
+                              )}
+                            </TableCell>
+                            
+                            {/* Resources column */}
+                            <TableCell className="py-4 text-center">
+                              {/* Wrap buttons in a flex container for alignment and spacing */}
+                              <div className="flex items-center justify-center gap-1.5"> 
                                 <Drawer>
                                   <DrawerTrigger asChild>
                                     <Badge 
@@ -2182,84 +2953,177 @@ export default function SearchPage() {
                                     )}
                                   </DrawerContent>
                                 </Drawer>
-                              </TableCell>
-                            </TableRow>
-                            
-                            {/* Expandable row for resources */}
-                            <AnimatePresence>
-                              {expandedDataset === dataset.id && (
-                                <motion.tr
-                                  initial={{ opacity: 0, height: 0 }}
-                                  animate={{ opacity: 1, height: 'auto' }}
-                                  exit={{ opacity: 0, height: 0 }}
-                                  transition={{ duration: 0.2 }}
-                                  className="bg-gray-50"
-                                >
-                                <td colSpan={5} className="p-0 border-b border-gray-200">
-                                    <motion.div
-                                      initial={{ opacity: 0 }}
-                                      animate={{ opacity: 1 }}
-                                      exit={{ opacity: 0 }}
-                                      transition={{ duration: 0.2, delay: 0.1 }}
-                                      className="px-4 py-4"
-                                    >
-                                      {/* Full description */}
-                                      <div className="mb-4">
-                                      <h4 className="text-sm font-medium mb-1 text-gray-800">Description</h4>
-                                        <p className="text-sm text-gray-600">
-                                          {dataset.description || 'No description available'}
-                                        </p>
-                                      </div>
-                                      
-                                      {/* Relevance reasoning */}
-                                      {dataset.relevance && dataset.relevance.reasoning && (
-                                      <div className="mb-4">
-                                          <div className="flex items-center mb-1">
-                                            <h4 className="text-sm font-medium text-gray-800">Relevance Assessment</h4>
-                                            <Badge 
-                                              variant="outline" 
-                                              className={`ml-2 font-medium text-xs ${
-                                                dataset.relevance?.relevance_score >= 0.7 
-                                                  ? 'bg-green-50 text-green-700 border-green-200' 
-                                                  : dataset.relevance?.relevance_score >= 0.5
-                                                    ? 'bg-blue-50 text-blue-700 border-blue-200'
-                                                    : 'bg-gray-50 text-gray-700 border-gray-200'
-                                              }`}
-                                            >
-                                              {dataset.relevance?.relevance_score 
-                                                ? (dataset.relevance.relevance_score * 100).toFixed(0) + '%' 
-                                                : dataset.similarity
-                                                  ? (dataset.similarity * 100).toFixed(0) + '%'
-                                                  : 'N/A'}
-                                            </Badge>
-                                          </div>
+
+                                {/* Conditionally render the Preview button */}
+                                {dataset.has_preview && ( 
+                                  <TooltipProvider>
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        {/* New Preview Button */}
+                                        <Button
+                                          variant="outline"
+                                          size="icon" // Use size="icon" for a smaller square button
+                                          className="h-7 w-7 p-1 font-medium text-white border border-gray-800 bg-black hover:bg-gray-800 cursor-pointer inline-flex items-center justify-center transition-colors"
+                                          // Add onClick handler later when functionality is defined
+                                          // onClick={() => handlePreviewClick(dataset)} 
+                                        >
+                                          <Eye className="h-3.5 w-3.5" /> {/* Eye Icon */}
+                                        </Button>
+                                      </TooltipTrigger>
+                                      <TooltipContent side="bottom">
+                                        <p className="text-xs">Preview dataset head</p>
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  </TooltipProvider>
+                                )}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                          
+                          {/* Expandable row for resources */}
+                          <AnimatePresence>
+                            {expandedDataset === dataset.id && (
+                              <motion.tr
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: 'auto' }}
+                                exit={{ opacity: 0, height: 0 }}
+                                transition={{ duration: 0.2 }}
+                                className="bg-gray-50"
+                              >
+                                <td colSpan={9} className="p-0 border-b border-gray-200">
+                                  <motion.div
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    exit={{ opacity: 0 }}
+                                    transition={{ duration: 0.2, delay: 0.1 }}
+                                    className="px-4 py-4"
+                                  >
+                                    {/* Two-column metadata grid */}
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                                      <div>
+                                        {/* Full description */}
+                                        <div className="mb-4">
+                                          <h4 className="text-sm font-medium mb-1 text-gray-800">Description</h4>
                                           <p className="text-sm text-gray-600">
-                                            {dataset.relevance.reasoning}
+                                            {dataset.description || 'No description available'}
                                           </p>
                                         </div>
-                                      )}
-                                    {/* Tags section */}
-                                    {dataset.tags && dataset.tags.length > 0 && (
-                                      <div>
-                                        <h4 className="text-sm font-medium mb-2 text-gray-800">Tags</h4>
-                                        <div className="flex flex-wrap gap-1.5">
-                                          {dataset.tags.map((tag: any, tagIndex: number) => {
-                                            const tagText = typeof tag === 'string' 
-                                              ? tag 
-                                              : (tag.display_name || tag.name || '');
-                                              
-                                            return (
-                                              <Badge 
-                                                key={tagIndex} 
-                                                variant="secondary"
-                                                className="text-xs text-gray-700 bg-gray-100 hover:bg-gray-200"
-                                              >
-                                                {tagText}
-                                              </Badge>
-                                            );
-                                          })}
-                                        </div>
+                                        
+                                        {/* Enhanced metadata (left column) */}
+                                        {/* <div className="space-y-2">
+                                          {dataset.column_count && (
+                                            <div>
+                                              <span className="text-xs font-medium text-gray-700">Columns: </span>
+                                              <span className="text-xs text-gray-600">{dataset.column_count}</span>
+                                            </div>
+                                          )}
+                                          
+                                          {dataset.file_size && (
+                                            <div>
+                                              <span className="text-xs font-medium text-gray-700">File Size: </span>
+                                              <span className="text-xs text-gray-600">{dataset.file_size}</span>
+                                            </div>
+                                          )}
+                                          
+                                          {dataset.data_types && (
+                                            <div>
+                                              <span className="text-xs font-medium text-gray-700">Data Types: </span>
+                                              <span className="text-xs text-gray-600">{dataset.data_types}</span>
+                                            </div>
+                                          )}
+                                        </div> */}
                                       </div>
+                                      
+                                      <div>
+                                        {/* Relevance reasoning */}
+                                        {dataset.relevance && dataset.relevance.reasoning && (
+                                          <div className="mb-4">
+                                            <div className="flex items-center mb-1">
+                                              <h4 className="text-sm font-medium text-gray-800">Relevance Assessment</h4>
+                                            </div>
+                                            <p className="text-sm text-gray-600">
+                                              {dataset.relevance.reasoning}
+                                            </p>
+                                          </div>
+                                        )}
+                                        
+                                        {/* Enhanced metadata (right column) */}
+                                        {/* <div className="space-y-2">
+                                          {dataset.key_variables && dataset.key_variables.length > 0 && (
+                                            <div>
+                                              <span className="text-xs font-medium text-gray-700">Key Variables: </span>
+                                              <div className="flex flex-wrap gap-1 mt-1">
+                                                {dataset.key_variables.map((variable: string, idx: number) => (
+                                                  <Badge 
+                                                    key={idx}
+                                                    variant="outline" 
+                                                    className="text-xs bg-blue-50 text-blue-700 border-blue-200"
+                                                  >
+                                                    {variable}
+                                                  </Badge>
+                                                ))}
+                                              </div>
+                                            </div>
+                                          )}
+                                          
+                                          {dataset.duplicate_rate !== undefined && (
+                                            <div>
+                                              <span className="text-xs font-medium text-gray-700">Duplicate Rows: </span>
+                                              <span className="text-xs text-gray-600">{formatPercent(dataset.duplicate_rate)}</span>
+                                            </div>
+                                          )}
+                                          
+                                          {dataset.license && (
+                                            <div>
+                                              <span className="text-xs font-medium text-gray-700">License: </span>
+                                              <span className="text-xs text-gray-600">{dataset.license}</span>
+                                            </div>
+                                          )}
+                                        </div> */}
+                                        
+                                        {/* Tags section */}
+                                        {dataset.tags && dataset.tags.length > 0 && (
+                                          <div className="mt-4">
+                                            <h4 className="text-sm font-medium mb-2 text-gray-800">Tags</h4>
+                                            <div className="flex flex-wrap gap-1.5">
+                                              {dataset.tags.map((tag: any, tagIndex: number) => {
+                                                const tagText = typeof tag === 'string' 
+                                                  ? tag 
+                                                  : (tag.display_name || tag.name || '');
+                                                  
+                                                return (
+                                                  <Badge 
+                                                    key={tagIndex} 
+                                                    variant="secondary"
+                                                    className="text-xs text-gray-700 bg-gray-100 hover:bg-gray-200"
+                                                  >
+                                                    {tagText}
+                                                  </Badge>
+                                                );
+                                              })}
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                    {/* Add Column Names List */}
+                                    {dataset.column_names && dataset.column_names.length > 0 && (
+                                        <div className="mt-4">
+                                            <h4 className="text-sm font-medium mb-2 text-gray-800">Columns ({dataset.column_names.length})</h4>
+                                            <ScrollArea className="h-24"> {/* Limit height and add scroll */}
+                                                <div className="flex flex-wrap gap-1.5">
+                                                    {dataset.column_names.map((colName: string, idx: number) => (
+                                                        <Badge 
+                                                            key={idx}
+                                                            variant="outline" 
+                                                            className="text-xs bg-blue-50 text-blue-700 border-blue-200 font-mono"
+                                                        >
+                                                            {colName}
+                                                        </Badge>
+                                                    ))}
+                                                </div>
+                                            </ScrollArea>
+                                        </div>
                                     )}
                                   </motion.div>
                                 </td>
@@ -2267,51 +3131,62 @@ export default function SearchPage() {
                             )}
                           </AnimatePresence>
                         </React.Fragment>
-                    ))}
-                    
-                    {/* Show skeleton rows only when searching and no datasets are available yet */}
-                    {searchStatus === SearchStatus.SEARCHING && datasets.length === 0 && (
-                      // Skeleton rows when searching and no datasets loaded yet
-                      Array(6).fill(0).map((_, index) => (
-                        <TableRow 
-                          key={`skeleton-${index}`}
-                          className="border-b border-gray-200 hover:!bg-transparent"
-                        >
-                          <TableCell className="py-8 px-4">
-                            <div className="flex items-center justify-center w-5 h-5">
-                              <Skeleton className="h-4 w-4 bg-gray-200 rounded-sm" />
-                            </div>
-                          </TableCell>
-                          <TableCell className="py-4 max-w-[200px]">
-                            <div className="flex items-center gap-2">
-                              <Skeleton className="h-6 w-6 rounded-full bg-gray-200 shrink-0" />
-                              <div className="min-w-0 flex-1">
-                                <Skeleton className="h-4 w-full bg-gray-200" />
+                      ))}
+                      
+                      {/* Show skeleton rows only when searching and no datasets are available yet */}
+                      {searchStatus === SearchStatus.SEARCHING && datasets.length === 0 && (
+                        // Skeleton rows when searching and no datasets loaded yet
+                        Array(6).fill(0).map((_, index) => (
+                          <TableRow 
+                            key={`skeleton-${index}`}
+                            className="border-b border-gray-200 hover:!bg-transparent"
+                          >
+                            <TableCell className="py-8 px-4">
+                              <div className="flex items-center justify-center w-5 h-5">
+                                <Skeleton className="h-4 w-4 bg-gray-200 rounded-sm" />
                               </div>
-                            </div>
-                          </TableCell>
-                          <TableCell className="py-4">
-                            <div>
-                              <Skeleton className="h-5 w-full bg-gray-200" />
-                            </div>
-                          </TableCell>
-                          {/* New skeleton for Insights column */}
-                          <TableCell className="py-4">
-                            <div>
-                              <Skeleton className="h-8 w-full bg-gray-200" />
-                            </div>
-                          </TableCell>
-                          <TableCell className="py-4 text-center">
-                            <div className="flex justify-center">
-                              <Skeleton className="h-7 w-20 bg-gray-200 rounded-full" />
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
+                            </TableCell>
+                            {/* Source Skeleton */}
+                            <TableCell className="py-4 max-w-[200px]"> 
+                                <div className="flex items-center gap-2">
+                                    <Skeleton className="h-6 w-6 rounded-full bg-gray-200 shrink-0" />
+                                    <Skeleton className="h-4 w-20 bg-gray-200" />
+                                </div>
+                            </TableCell>
+                            {/* Dataset Skeleton */}
+                            <TableCell className="py-4">
+                                <Skeleton className="h-5 w-full bg-gray-200" />
+                            </TableCell>
+                            {/* Relevance Skeleton */}
+                            <TableCell className="py-4 text-center">
+                                <Skeleton className="h-6 w-16 mx-auto bg-gray-200 rounded-full" />
+                            </TableCell>
+                            {/* Time Range Skeleton */}
+                            <TableCell className="py-4 text-center">
+                                <Skeleton className="h-4 w-20 mx-auto bg-gray-200" />
+                            </TableCell>
+                            {/* Granularity Skeleton */}
+                            <TableCell className="py-4 text-center"> 
+                                <Skeleton className="h-4 w-24 bg-gray-200 mx-auto" /> 
+                            </TableCell>
+                            {/* Dimensions Skeleton */}
+                            <TableCell className="py-4 text-center">
+                                <Skeleton className="h-4 w-16 mx-auto bg-gray-200" />
+                            </TableCell>
+                            {/* Completeness Skeleton */}
+                            <TableCell className="py-4 text-center">
+                                <Skeleton className="h-6 w-12 mx-auto bg-gray-200 rounded-full" />
+                            </TableCell>
+                             {/* Resources Skeleton */}
+                             <TableCell className="py-4 text-center"> 
+                                <Skeleton className="h-7 w-20 bg-gray-200 rounded-full mx-auto" /> 
+                             </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
               )}
             </motion.div>
             
@@ -2390,6 +3265,73 @@ export default function SearchPage() {
           }))}
         />
       )}
+
+      {/* +++ Add Dataset Preview Dialog +++ */}
+      <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
+        <DialogContent className="sm:max-w-[70vw] max-h-[80vh] bg-white flex flex-col"> {/* Adjust width/height */}
+          <DialogHeader className="border-b border-gray-100 pb-4 flex-shrink-0"> {/* Prevent header/footer shrink */}
+            <DialogTitle className="text-gray-900">
+              Preview: {previewData?.title || 'Dataset'}
+            </DialogTitle>
+            <DialogDescription className="text-gray-600">
+              Showing first few rows and columns (if available).
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* Scrollable content area */}
+          <div className="flex-1 overflow-auto p-0 scrollbar-thin scrollbar-thumb-gray-300 hover:scrollbar-thumb-gray-400">
+            {/* Check previewData and its head */}
+            {(previewData?.head && previewData.head.columns && previewData.head.data) ? (
+              <Table className="text-xs min-w-full"> {/* Ensure table tries to take full width */}
+                <TableHeader className="sticky top-0 bg-white z-10 shadow-sm">
+                  <TableRow className="border-b-0">
+                    {/* Use columns from previewData.head */}
+                    {previewData.head.columns?.map((colName: string, index: number) => (
+                      <TableHead
+                        key={index}
+                        className="whitespace-nowrap px-2 py-2 h-auto font-medium text-gray-600 border-b border-gray-200 bg-gray-50" // Added background
+                      >
+                        {colName}
+                      </TableHead>
+                    ))}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {/* Use data from previewData.head */}
+                  {previewData.head.data?.map((row: any[], rowIndex: number) => (
+                    <TableRow key={rowIndex} className="border-b border-gray-100 hover:bg-gray-50/50">
+                      {previewData.head.columns?.map((_colName: string, cellIndex: number) => ( // Iterate based on columns to ensure alignment
+                        <TableCell
+                          key={cellIndex}
+                          className="whitespace-nowrap px-2 py-1.5 border-r border-gray-100 last:border-r-0 max-w-[200px] truncate" // Added max-width & truncate
+                          title={String(row[cellIndex] ?? '')} // Add title for potential overflow, handle null/undefined
+                        >
+                          {/* Display cell data, handle null/undefined */}
+                          {String(row[cellIndex] ?? '')}
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <div className="p-6 text-center text-gray-500 italic">
+                Preview data structure is missing or invalid.
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="border-t border-gray-100 pt-4 bg-white flex-shrink-0"> {/* Prevent header/footer shrink */}
+            <Button
+              variant="outline"
+              onClick={() => setIsPreviewOpen(false)}
+              className="text-gray-700 border-gray-300 hover:bg-gray-100 hover:text-gray-900"
+            >
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

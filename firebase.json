@@ -22,7 +22,8 @@
       "firebase-debug.*.log",
       "*.local",
       "__pycache__",
-      "*.pyc"
+      "*.pyc",
+      "downloads"
     ],
     "predeploy": [
       "pip install -r functions/requirements.txt --no-cache-dir"
