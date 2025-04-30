@@ -2953,29 +2953,6 @@ export default function SearchPage() {
                                     )}
                                   </DrawerContent>
                                 </Drawer>
-
-                                {/* Conditionally render the Preview button */}
-                                {dataset.has_preview && ( 
-                                  <TooltipProvider>
-                                    <Tooltip>
-                                      <TooltipTrigger asChild>
-                                        {/* New Preview Button */}
-                                        <Button
-                                          variant="outline"
-                                          size="icon" // Use size="icon" for a smaller square button
-                                          className="h-7 w-7 p-1 font-medium text-white border border-gray-800 bg-black hover:bg-gray-800 cursor-pointer inline-flex items-center justify-center transition-colors"
-                                          // Add onClick handler later when functionality is defined
-                                          // onClick={() => handlePreviewClick(dataset)} 
-                                        >
-                                          <Eye className="h-3.5 w-3.5" /> {/* Eye Icon */}
-                                        </Button>
-                                      </TooltipTrigger>
-                                      <TooltipContent side="bottom">
-                                        <p className="text-xs">Preview dataset head</p>
-                                      </TooltipContent>
-                                    </Tooltip>
-                                  </TooltipProvider>
-                                )}
                               </div>
                             </TableCell>
                           </TableRow>
