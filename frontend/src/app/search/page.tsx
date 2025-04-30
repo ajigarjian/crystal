@@ -1571,6 +1571,10 @@ export default function SearchPage() {
   const [analysisResults, setAnalysisResults] = useState<any>(null);
   const [analysisModalOpen, setAnalysisModalOpen] = useState(false);
 
+  // Add near other useState hooks
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [previewData, setPreviewData] = useState<any>(null); // Adjust 'any' to a more specific type if possible
+
   // Add this function inside your SearchPage component, before the return statement
   const handleAnalyzeDatasets = () => {
     // Get all relevant datasets
@@ -1775,6 +1779,17 @@ export default function SearchPage() {
     } catch (error) {
       console.error("Error formatting date:", dateString, error);
       return '?'; // Return '?' in case of any unexpected error
+    }
+  };
+
+  // Add this function within your SearchPage component
+  const handlePreviewClick = (dataset: any) => {
+    if (dataset && dataset.head) { // Check if dataset and head data exist
+      setPreviewData(dataset); // Store the whole dataset (or just dataset.head)
+      setIsPreviewOpen(true);
+    } else {
+      console.warn("Preview requested for dataset without head data:", dataset?.id);
+      // Optionally show a notification to the user
     }
   };
 
@@ -2553,9 +2568,45 @@ export default function SearchPage() {
                               </div>
                             </TableCell>
                             <TableCell className="py-4">
-                              <div>
+                              <div className="flex items-center gap-2"> {/* Add flex container */}
+                                {/* Preview Button/Icon */}
+                                <TooltipProvider delayDuration={50}>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      {/* Wrap Button in a div to allow tooltip even when disabled */}
+                                      <div> 
+                                        <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          className={`h-6 w-6 p-1 ${
+                                            !dataset.has_preview 
+                                              ? 'opacity-40 cursor-not-allowed text-gray-400 hover:bg-transparent' 
+                                              : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                                          }`}
+                                          onClick={(e) => {
+                                            if (dataset.has_preview) {
+                                              e.stopPropagation(); // Prevent row click if button is clicked
+                                              handlePreviewClick(dataset);
+                                            }
+                                          }}
+                                          disabled={!dataset.has_preview} 
+                                          aria-label={dataset.has_preview ? "Preview dataset" : "Preview not available"}
+                                        >
+                                          <Eye className="h-4 w-4" />
+                                        </Button>
+                                      </div>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="top">
+                                      <p className="text-xs">
+                                        {dataset.has_preview ? "Preview dataset" : "Preview not available"}
+                                      </p>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
+
+                                {/* Existing Dataset Title */}
                                 <h3 
-                                  className="text-xs font-medium text-gray-900 block max-w-[250px] line-clamp-2 break-words whitespace-normal" /* Added block, max-w, line-clamp */
+                                  className="text-xs font-medium text-gray-900 block max-w-[250px] line-clamp-2 break-words whitespace-normal" /* Keep existing styles */
                                   title={dataset.title}
                                 >
                                   {dataset.title}
@@ -3090,6 +3141,73 @@ export default function SearchPage() {
           }))}
         />
       )}
+
+      {/* +++ Add Dataset Preview Dialog +++ */}
+      <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
+        <DialogContent className="sm:max-w-[70vw] max-h-[80vh] bg-white flex flex-col"> {/* Adjust width/height */}
+          <DialogHeader className="border-b border-gray-100 pb-4 flex-shrink-0"> {/* Prevent header/footer shrink */}
+            <DialogTitle className="text-gray-900">
+              Preview: {previewData?.title || 'Dataset'}
+            </DialogTitle>
+            <DialogDescription className="text-gray-600">
+              Showing first few rows and columns (if available).
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* Scrollable content area */}
+          <div className="flex-1 overflow-auto p-0 scrollbar-thin scrollbar-thumb-gray-300 hover:scrollbar-thumb-gray-400">
+            {/* Check previewData and its head */}
+            {(previewData?.head && previewData.head.columns && previewData.head.data) ? (
+              <Table className="text-xs min-w-full"> {/* Ensure table tries to take full width */}
+                <TableHeader className="sticky top-0 bg-white z-10 shadow-sm">
+                  <TableRow className="border-b-0">
+                    {/* Use columns from previewData.head */}
+                    {previewData.head.columns?.map((colName: string, index: number) => (
+                      <TableHead
+                        key={index}
+                        className="whitespace-nowrap px-2 py-2 h-auto font-medium text-gray-600 border-b border-gray-200 bg-gray-50" // Added background
+                      >
+                        {colName}
+                      </TableHead>
+                    ))}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {/* Use data from previewData.head */}
+                  {previewData.head.data?.map((row: any[], rowIndex: number) => (
+                    <TableRow key={rowIndex} className="border-b border-gray-100 hover:bg-gray-50/50">
+                      {previewData.head.columns?.map((_colName: string, cellIndex: number) => ( // Iterate based on columns to ensure alignment
+                        <TableCell
+                          key={cellIndex}
+                          className="whitespace-nowrap px-2 py-1.5 border-r border-gray-100 last:border-r-0 max-w-[200px] truncate" // Added max-width & truncate
+                          title={String(row[cellIndex] ?? '')} // Add title for potential overflow, handle null/undefined
+                        >
+                          {/* Display cell data, handle null/undefined */}
+                          {String(row[cellIndex] ?? '')}
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <div className="p-6 text-center text-gray-500 italic">
+                Preview data structure is missing or invalid.
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="border-t border-gray-100 pt-4 bg-white flex-shrink-0"> {/* Prevent header/footer shrink */}
+            <Button
+              variant="outline"
+              onClick={() => setIsPreviewOpen(false)}
+              className="text-gray-700 border-gray-300 hover:bg-gray-100 hover:text-gray-900"
+            >
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
