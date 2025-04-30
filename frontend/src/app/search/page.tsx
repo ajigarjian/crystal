@@ -3142,30 +3142,29 @@ export default function SearchPage() {
         />
       )}
 
-      {/* +++ Add Dataset Preview Dialog +++ */}
+      {/* Dataset Preview Dialog */}
       <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
         <DialogContent className="sm:max-w-[70vw] max-h-[80vh] bg-white flex flex-col"> {/* Adjust width/height */}
-          <DialogHeader className="border-b border-gray-100 pb-4 flex-shrink-0"> {/* Prevent header/footer shrink */}
+          <DialogHeader className="border-b border-gray-100 pb-4">
             <DialogTitle className="text-gray-900">
-              Preview: {previewData?.title || 'Dataset'}
+              Preview: {previewData?.title || 'Dataset'} 
             </DialogTitle>
             <DialogDescription className="text-gray-600">
-              Showing first few rows and columns (if available).
+              Showing first few rows and columns.
             </DialogDescription>
           </DialogHeader>
-
+          
           {/* Scrollable content area */}
-          <div className="flex-1 overflow-auto p-0 scrollbar-thin scrollbar-thumb-gray-300 hover:scrollbar-thumb-gray-400">
-            {/* Check previewData and its head */}
-            {(previewData?.head && previewData.head.columns && previewData.head.data) ? (
-              <Table className="text-xs min-w-full"> {/* Ensure table tries to take full width */}
-                <TableHeader className="sticky top-0 bg-white z-10 shadow-sm">
+          <div className="flex-1 overflow-auto p-0 scrollbar-thin scrollbar-thumb-gray-300 hover:scrollbar-thumb-gray-400"> 
+            {previewData?.head ? (
+              <Table className="text-xs">
+                <TableHeader className="sticky top-0 bg-white z-10">
                   <TableRow className="border-b-0">
-                    {/* Use columns from previewData.head */}
+                    {/* Assuming previewData.head.columns is an array of column names */}
                     {previewData.head.columns?.map((colName: string, index: number) => (
-                      <TableHead
-                        key={index}
-                        className="whitespace-nowrap px-2 py-2 h-auto font-medium text-gray-600 border-b border-gray-200 bg-gray-50" // Added background
+                      <TableHead 
+                        key={index} 
+                        className="whitespace-nowrap px-2 py-2 h-auto font-medium text-gray-600 border-b border-gray-200"
                       >
                         {colName}
                       </TableHead>
@@ -3173,17 +3172,17 @@ export default function SearchPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {/* Use data from previewData.head */}
+                  {/* Assuming previewData.head.data is an array of arrays (rows) */}
                   {previewData.head.data?.map((row: any[], rowIndex: number) => (
-                    <TableRow key={rowIndex} className="border-b border-gray-100 hover:bg-gray-50/50">
-                      {previewData.head.columns?.map((_colName: string, cellIndex: number) => ( // Iterate based on columns to ensure alignment
-                        <TableCell
-                          key={cellIndex}
-                          className="whitespace-nowrap px-2 py-1.5 border-r border-gray-100 last:border-r-0 max-w-[200px] truncate" // Added max-width & truncate
-                          title={String(row[cellIndex] ?? '')} // Add title for potential overflow, handle null/undefined
+                    <TableRow key={rowIndex} className="border-b border-gray-100 hover:bg-gray-50">
+                      {row.map((cell: any, cellIndex: number) => (
+                        <TableCell 
+                          key={cellIndex} 
+                          className="whitespace-nowrap px-2 py-1.5 border-r border-gray-100 last:border-r-0" 
+                          title={String(cell)} // Add title for potential overflow
                         >
-                          {/* Display cell data, handle null/undefined */}
-                          {String(row[cellIndex] ?? '')}
+                          {/* Display cell data, truncate long strings if needed */}
+                          {String(cell).length > 100 ? String(cell).substring(0, 100) + '...' : String(cell)}
                         </TableCell>
                       ))}
                     </TableRow>
@@ -3191,15 +3190,15 @@ export default function SearchPage() {
                 </TableBody>
               </Table>
             ) : (
-              <div className="p-6 text-center text-gray-500 italic">
-                Preview data structure is missing or invalid.
+              <div className="p-6 text-center text-gray-500">
+                No preview data available.
               </div>
             )}
           </div>
-
-          <DialogFooter className="border-t border-gray-100 pt-4 bg-white flex-shrink-0"> {/* Prevent header/footer shrink */}
-            <Button
-              variant="outline"
+          
+          <DialogFooter className="border-t border-gray-100 pt-4 bg-white">
+            <Button 
+              variant="outline" 
               onClick={() => setIsPreviewOpen(false)}
               className="text-gray-700 border-gray-300 hover:bg-gray-100 hover:text-gray-900"
             >
@@ -3208,6 +3207,7 @@ export default function SearchPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+
+    </div> // Closing div for the main component
   );
 }
