@@ -177,6 +177,7 @@ class DatasetResource(models.Model):
     resource_head = models.TextField(blank=True, null=True)
     resource_quality = models.TextField(blank=True, null=True)
     resource_granularity = models.TextField(blank=True, null=True)
+    resource_time_range = models.TextField(blank=True, null=True)
     
     class Meta:
         app_label = 'factchecker'

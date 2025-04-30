@@ -265,114 +265,146 @@ REASONING: [2-3 sentence explanation of your determination]
             "reasoning": f"Error in determination: {str(e)}"
         }
 
-def extract_time_range(dataset_content: pd.DataFrame) -> Dict[str, Any]:
+def refine_time_range_with_llm(time_range_info: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Extract the time range covered by the dataset.
-    
-    Args:
-        dataset_content: Pandas DataFrame containing the dataset
-        
-    Returns:
-        Dictionary with time range information including:
-        - min: Minimum date/time value
-        - max: Maximum date/time value
-        - column: The column used for extraction
-        - has_time_data: Boolean indicating if time data was found
+    Uses an LLM to check if the extracted time range is plausible.
+    If min > max or they're obviously out-of-bound, it can try to refine or recommend ignoring them.
+    """
+    if not time_range_info.get('has_time_data'):
+        return time_range_info  # No changes if there's no time data.
+
+    claimed_min = str(time_range_info.get('min', 'N/A'))
+    claimed_max = str(time_range_info.get('max', 'N/A'))
+    if not claimed_min and not claimed_max:
+        return time_range_info  # nothing to refine
+
+    system_message = "You are a helpful assistant that checks for obviously invalid or improbable dates."
+    prompt = f"""We have a dataset with a claimed time range from {claimed_min} to {claimed_max}.
+    Are these obviously invalid or from a far-future year? If so, propose a corrected time range if possible.
+    Otherwise, confirm that the range is plausible.
+    Respond with JSON in the format:
+    {{\"is_plausible\": true/false, \"min\": <corrected_min_or_original>, \"max\": <corrected_max_or_original>, \"reason\": <short explanation>}}"""
+
+    llm_response = chat_completion(
+        prompt=prompt,
+        system_message=system_message,
+        temperature=0.0
+    )
+
+    import json
+    try:
+        parsed = json.loads(llm_response)
+        if not isinstance(parsed, dict) or 'is_plausible' not in parsed:
+            return time_range_info  # Malformed LLM reply, fallback.
+        is_plausible = parsed.get('is_plausible', True)
+        refined_min = str(parsed.get('min', claimed_min)).strip()
+        refined_max = str(parsed.get('max', claimed_max)).strip()
+        reason = parsed.get('reason', '')
+
+        if not is_plausible:
+            # Possibly set has_time_data=False if it's truly invalid, or store the refined times.
+            # We'll store the refined anyway, but add a 'note'.
+            time_range_info['reason'] = f"LLM flagged as implausible or corrected. {reason}"
+        # Merge updated min/max
+        time_range_info['min'] = refined_min
+        time_range_info['max'] = refined_max
+        return time_range_info
+    except Exception as e:
+        # We just fallback if parse fails.
+        return time_range_info
+
+def extract_time_range_llm(dataset_content: pd.DataFrame, dataset_metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Called if no explicit date columns or time info is found in the data.
+    We'll pass relevant info (e.g. dataset title, shape, first few rows, etc.)
+    to an LLM, asking it to guess a time range or declare none.
+    Return a structure in the same format: {"has_time_data": bool, "min":..., "max":..., "reason":..., ...}
+    """
+    system_message = "You are a helpful assistant that determines the approximate time range of a dataset by looking at metadata, columns, and sample rows."
+
+    title = dataset_metadata.get('title', 'No Title')
+    description = dataset_metadata.get('description', '')
+    org_data = dataset_metadata.get('organization', {})
+    if isinstance(org_data, dict):
+        org_name = org_data.get('title') or org_data.get('name') or 'Unknown Organization'
+    else:
+        org_name = str(org_data) if org_data else 'Unknown Organization'
+
+    shape_str = f"{len(dataset_content)} rows, {len(dataset_content.columns)} cols"
+    sample_rows = dataset_content.head(3).to_dict(orient='records') if not dataset_content.empty else []
+    columns_list = list(dataset_content.columns)
+
+    prompt = f"""We have a dataset with the following metadata:\nTitle: {title}\nDescription: {description}\nOrganization: {org_name}\nShape: {shape_str}\nColumns: {columns_list}\nSample rows (up to 3): {sample_rows}\n\nWe couldn't find any explicit date/datetime columns automatically. Please guess if there's a time range or time period indicated in this data or its metadata.\n\nRespond in valid JSON with the format:\n{{\"has_time_data\": <true or false>, \"min\": <YYYY-MM-DD or empty>, \"max\": <YYYY-MM-DD or empty>, \"reason\": <string explaining your reasoning>}}\n"""
+
+    llm_response = chat_completion(
+        prompt=prompt,
+        system_message=system_message,
+        temperature=0.1,
+        max_tokens=300
+    )
+
+    import json
+    try:
+        parsed = json.loads(llm_response)
+        if not isinstance(parsed, dict) or 'has_time_data' not in parsed:
+            return {
+                "has_time_data": False,
+                "reason": "LLM response not parseable"
+            }
+        # We'll trust the keys if present
+        return {
+            "has_time_data": bool(parsed.get('has_time_data', False)),
+            "min": parsed.get('min', None),
+            "max": parsed.get('max', None),
+            "reason": parsed.get('reason', '')
+        }
+    except Exception as e:
+        return {
+            "has_time_data": False,
+            "error": f"Error parsing LLM response: {e}"
+        }
+
+def extract_time_range(dataset_content: pd.DataFrame, dataset_metadata: Dict[str, Any] = None) -> Dict[str, Any]:
+    """
+    Extract the time range from a dataset.
+    1) If we find an explicit datetime64 column, we use that.
+    2) Otherwise, we do a single LLM call with context to guess if there's a time range.
     """
     if not isinstance(dataset_content, pd.DataFrame):
         return {
             "has_time_data": False,
             "error": "Not a valid DataFrame"
         }
-    
+    if dataset_metadata is None:
+        dataset_metadata = {}
+
     try:
-        # Look for datetime columns first
-        datetime_cols = dataset_content.select_dtypes(include=['datetime64']).columns.tolist()
-        
-        # If no datetime columns, look for columns with date-related names
-        if not datetime_cols:
-            date_related_terms = ['date', 'time', 'year', 'month', 'day', 'period']
-            potential_date_cols = [col for col in dataset_content.columns 
-                                if any(term in col.lower() for term in date_related_terms)]
-            
-            # Try to convert these columns to datetime
-            for col in potential_date_cols:
-                try:
-                    # Skip if column has too many missing values
-                    if dataset_content[col].isna().sum() > 0.5 * len(dataset_content):
-                        continue
-                        
-                    # For numeric columns that might be years
-                    if pd.api.types.is_numeric_dtype(dataset_content[col]):
-                        # Check if values look like years (typically between 1900-2100)
-                        min_val = dataset_content[col].min()
-                        max_val = dataset_content[col].max()
-                        
-                        if 1900 <= min_val <= 2100 and 1900 <= max_val <= 2100:
-                            return {
-                                "has_time_data": True,
-                                "min": int(min_val),
-                                "max": int(max_val),
-                                "column": col,
-                                "type": "year"
-                            }
-                    
-                    # Try to parse as datetime for string columns
-                    elif pd.api.types.is_string_dtype(dataset_content[col]) or pd.api.types.is_object_dtype(dataset_content[col]):
-                        # Sample the column to check if values can be parsed as dates
-                        sample = dataset_content[col].dropna().head(100)
-                        if len(sample) > 0:
-                            pd.to_datetime(sample, errors='raise')
-                            datetime_cols.append(col)
-                except:
-                    pass
-        
-        # If we found datetime columns, extract the range
+        # Step 1: Look for actual datetime columns
+        datetime_cols = dataset_content.select_dtypes(include=["datetime64"]).columns.tolist()
         if datetime_cols:
-            # Use the first datetime column
+            # Use the first one to get min/max
             col = datetime_cols[0]
-            
-            # Convert to datetime if not already
-            if not pd.api.types.is_datetime64_dtype(dataset_content[col]):
-                try:
-                    date_series = pd.to_datetime(dataset_content[col], errors='coerce')
-                except:
-                    return {
-                        "has_time_data": False,
-                        "error": f"Failed to convert column {col} to datetime"
-                    }
-            else:
-                date_series = dataset_content[col]
-            
-            # Get min and max dates
+            date_series = dataset_content[col]
+            if date_series.isna().all():
+                # All NaN, fallback
+                return extract_time_range_llm(dataset_content, dataset_metadata)
             min_date = date_series.min()
             max_date = date_series.max()
-            
-            # Check if we got valid dates
             if pd.isna(min_date) or pd.isna(max_date):
-                return {
-                    "has_time_data": False,
-                    "error": "Date values are all NaN"
-                }
-            
-            # Format dates as strings
-            min_date_str = min_date.strftime('%Y-%m-%d') if hasattr(min_date, 'strftime') else str(min_date)
-            max_date_str = max_date.strftime('%Y-%m-%d') if hasattr(max_date, 'strftime') else str(max_date)
-            
+                return extract_time_range_llm(dataset_content, dataset_metadata)
+            min_date_str = min_date.strftime('%Y-%m-%d')
+            max_date_str = max_date.strftime('%Y-%m-%d')
             return {
                 "has_time_data": True,
                 "min": min_date_str,
                 "max": max_date_str,
                 "column": col,
-                "type": "datetime"
+                "reason": "Found explicit datetime column"
             }
-        
-        # If we got here, we couldn't find time data
-        return {
-            "has_time_data": False,
-            "reason": "No time-related columns identified"
-        }
-        
+        else:
+            # Step 2: if no datetime columns, ask LLM
+            return extract_time_range_llm(dataset_content, dataset_metadata)
+
     except Exception as e:
         logger.error(f"Error extracting time range: {str(e)}")
         return {
@@ -413,7 +445,7 @@ def enrich_dataset_metadata(dataset_content: pd.DataFrame, query: str, dataset_m
         granularity = determine_granularity(dataset_content, query, dataset_metadata)
         
         # Extract time range
-        time_range = extract_time_range(dataset_content)
+        time_range = extract_time_range(dataset_content, dataset_metadata)
         
         # Return the combined enriched metadata
         return {
