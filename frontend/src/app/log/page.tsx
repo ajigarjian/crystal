@@ -42,6 +42,35 @@ export default function ChangelogPage() {
 
           <section className="space-y-3">
               <div className="flex items-baseline gap-3">
+                <h2 className="text-xl font-semibold text-neutral-900 dark:text-white">Version 1.1.2</h2>
+                <span className="text-sm text-neutral-600 dark:text-neutral-400">April 30, 2025</span>
+              </div>
+              <div className="pl-2 border-l-2 border-green-500 dark:border-green-500/70">
+                <h3 className="text-lg font-medium text-neutral-900 dark:text-white mb-2">New Features</h3>
+                <ul className="list-disc pl-5 space-y-1">
+                  <li>Added enriched metadata to search results, including time range, granularity, dimensions, and completeness</li>
+                  <li>Added previews to available datasets</li>
+                </ul>
+              </div>
+              <div className="pl-2 border-l-2 border-blue-500 dark:border-blue-500/70">
+                <h3 className="text-lg font-medium text-neutral-900 dark:text-white mb-2">Improvements</h3>
+                <ul className="list-disc pl-5 space-y-1">
+                  <li>Improved table tooltips for better user guidance</li>
+                </ul>
+              </div>
+              <div className="pl-2 border-l-2 border-red-500 dark:border-red-500/70">
+                <h3 className="text-lg font-medium text-neutral-900 dark:text-white mb-2">Bug Fixes</h3>
+                <ul className="list-disc pl-5 space-y-1">
+                <li>None</li>
+                </ul>
+              </div>
+            </section>
+
+            <Separator className="my-6 bg-neutral-300 dark:bg-neutral-700" />
+
+
+          <section className="space-y-3">
+              <div className="flex items-baseline gap-3">
                 <h2 className="text-xl font-semibold text-neutral-900 dark:text-white">Version 1.1.1</h2>
                 <span className="text-sm text-neutral-600 dark:text-neutral-400">April 18, 2025</span>
               </div>
