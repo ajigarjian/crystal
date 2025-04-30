@@ -13,6 +13,26 @@ import json
 # Configure logging
 logger = logging.getLogger(__name__)
 
+# Add NumpyEncoder if not already imported at the top
+import json
+import numpy as np
+class NumpyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            # Handle NaN and Inf specifically
+            if np.isnan(obj) or np.isinf(obj):
+                return None  # Or another representation like "NaN", "Infinity"
+            return float(obj)
+        if isinstance(obj, np.bool_):
+             return bool(obj)
+        if isinstance(obj, (np.ndarray,)):
+            return obj.tolist()
+        if pd.isna(obj): # Handle pandas NA/NaT
+            return None
+        return super(NumpyEncoder, self).default(obj)
+
 def calculate_quality_metrics(dataset_content: pd.DataFrame) -> Dict[str, Any]:
     """
     Calculate quality metrics for a dataset.
@@ -445,9 +465,8 @@ def enrich_dataset_metadata(dataset_content: pd.DataFrame, query: str, dataset_m
         try:
             # Generate preview only if dataframe is not empty
             if not dataset_content.empty:
-                # Use NumpyEncoder compatible format
                 head_preview_df = dataset_content.head(5)
-                # Convert DataFrame head to list of dicts, handling potential NaN/Inf
+                # Convert DataFrame head to list of dicts using NumpyEncoder for safety
                 head_preview = json.loads(json.dumps(head_preview_df.to_dict(orient='records'), cls=NumpyEncoder))
                 if head_preview: # Ensure preview is not empty
                     has_preview_flag = True

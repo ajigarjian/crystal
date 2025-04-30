@@ -729,7 +729,12 @@ export default function SearchPage() {
 
   // Extract the chunk handling logic to a separate function so we can reuse it
   const handleSearchChunk = (chunk: any) => {
-    // Process incoming chunks
+    // Log the entire chunk
+    console.group(`%cChunk received: ${chunk.type}`, 'color: #3498db; font-weight: bold');
+    console.dir(chunk, { depth: null });
+    console.groupEnd();
+
+    // Continue with normal processing
     if (chunk.type === 'status') {
       setStatusMessage(chunk.message);
       // Bump progress a bit for each status message
@@ -866,6 +871,16 @@ export default function SearchPage() {
         const enrichedData = chunk.data;
         const datasetId = enrichedData.id;
 
+        // --- START: Add console log for head preview ---
+        if (enrichedData.content_info && enrichedData.content_info.head_preview) {
+          console.log(`Head Preview for Dataset ${datasetId}:`, enrichedData.content_info.head_preview);
+        } else if (enrichedData.content_info && enrichedData.content_info.has_preview === false) {
+          console.log(`No Head Preview available for Dataset ${datasetId}`);
+        } else if (enrichedData.enrichment_error) {
+          console.log(`Enrichment error for Dataset ${datasetId}:`, enrichedData.enrichment_error);
+        }
+        // --- END: Add console log ---
+
         setDatasets(prev => {
           return prev.map(dataset => {
             if (dataset.id === datasetId) {
@@ -875,6 +890,11 @@ export default function SearchPage() {
               const granularityInfo = contentInfo.granularity || {};
               const timeRangeInfo = contentInfo.time_range || {};
               const dimensionsInfo = contentInfo.dimensions || {};
+              
+              // Set has_preview based on content_info.has_preview or the presence of head_preview
+              const hasPreview = 
+                contentInfo.has_preview === true || 
+                (contentInfo.head_preview && Array.isArray(contentInfo.head_preview) && contentInfo.head_preview.length > 0);
 
               return {
                 ...dataset,
@@ -893,6 +913,8 @@ export default function SearchPage() {
                 time_range_max: timeRangeInfo.max,
                 time_range_column: timeRangeInfo.column, // Which column was used
                 is_enriched: true, // Mark as enriched
+                has_preview: hasPreview, // Set the has_preview property
+                content_info: contentInfo, // Store the original content_info for preview access
                 enrichment_error: contentInfo.enrichment_error || enrichedData.enrichment_error, // Capture potential errors
               };
             }
@@ -909,10 +931,15 @@ export default function SearchPage() {
                 const granularityInfo = contentInfo.granularity || {};
                 const timeRangeInfo = contentInfo.time_range || {};
                 const dimensionsInfo = contentInfo.dimensions || {};
+                
+                // Set has_preview based on content_info.has_preview or the presence of head_preview
+                const hasPreview = 
+                  contentInfo.has_preview === true || 
+                  (contentInfo.head_preview && Array.isArray(contentInfo.head_preview) && contentInfo.head_preview.length > 0);
 
                 allDatasetsRef.current[i] = {
                     ...currentRefDatasets[i],
-                     row_count: dimensionsInfo.rows,
+                    row_count: dimensionsInfo.rows,
                     column_count: dimensionsInfo.columns,
                     column_names: dimensionsInfo.column_names || [],
                     quality_score: qualityInfo.quality_score,
@@ -926,13 +953,83 @@ export default function SearchPage() {
                     time_range_max: timeRangeInfo.max,
                     time_range_column: timeRangeInfo.column,
                     is_enriched: true,
+                    has_preview: hasPreview, // Set the has_preview property
+                    content_info: contentInfo, // Store the original content_info for preview access
                     enrichment_error: contentInfo.enrichment_error || enrichedData.enrichment_error,
                 };
+                
+                // Enhanced logging with detailed dataset information
+                const datasetTitle = currentRefDatasets[i].title || 'Unnamed Dataset';
+                const colCount = dimensionsInfo.columns || 'unknown';
+                const rowCount = dimensionsInfo.rows || 'unknown';
+                
+                // Format time range info for logging
+                let timeRangeText = 'No time data';
+                if (timeRangeInfo.has_time_data) {
+                    const minDate = timeRangeInfo.min ? new Date(timeRangeInfo.min).toLocaleDateString() : 'N/A';
+                    const maxDate = timeRangeInfo.max ? new Date(timeRangeInfo.max).toLocaleDateString() : 'N/A';
+                    timeRangeText = `Time range: ${minDate} to ${maxDate}`;
+                    if (timeRangeInfo.column) {
+                        timeRangeText += ` (column: ${timeRangeInfo.column})`;
+                    }
+                }
+                
+                // Create colorful console logs
+                console.group(`%cEnriched Dataset: ${datasetTitle} (${datasetId})`, 'color: #4CAF50; font-weight: bold');
+                console.log(`%cDimensions: %c${rowCount} rows × ${colCount} columns`, 
+                    'font-weight: bold', 'color: #2196F3');
+                
+                // Quality metrics
+                if (qualityInfo.quality_label) {
+                    const qualityColor = 
+                        qualityInfo.quality_label === 'High' ? '#4CAF50' : 
+                        qualityInfo.quality_label === 'Medium' ? '#FF9800' : 
+                        qualityInfo.quality_label === 'Low' ? '#F44336' : '#757575';
+                    
+                    console.log(`%cQuality: %c${qualityInfo.quality_label}`, 
+                        'font-weight: bold', `color: ${qualityColor}; font-weight: bold`);
+                    
+                    if (qualityInfo.quality_score !== undefined) {
+                        console.log(`  Score: ${(qualityInfo.quality_score * 100).toFixed(1)}%`);
+                    }
+                    
+                    if (qualityInfo.missing_percentage !== undefined) {
+                        console.log(`  Missing data: ${(qualityInfo.missing_percentage * 100).toFixed(1)}%`);
+                    }
+                    
+                    if (qualityInfo.duplicate_percentage !== undefined) {
+                        console.log(`  Duplicate rows: ${(qualityInfo.duplicate_percentage * 100).toFixed(1)}%`);
+                    }
+                }
+                
+                // Granularity
+                if (granularityInfo.granularity) {
+                    console.log(`%cGranularity: %c${granularityInfo.granularity}`, 
+                        'font-weight: bold', 'color: #673AB7');
+                }
+                
+                // Time range
+                console.log(`%c${timeRangeText}`, 'color: #795548');
+                
+                // Column names (if available, showing first 5)
+                if (dimensionsInfo.column_names && dimensionsInfo.column_names.length > 0) {
+                    const columnList = dimensionsInfo.column_names.slice(0, 5).join(', ');
+                    const hasMore = dimensionsInfo.column_names.length > 5 ? 
+                        ` (${dimensionsInfo.column_names.length - 5} more)` : '';
+                    console.log(`%cColumns: %c${columnList}${hasMore}`, 
+                        'font-weight: bold', 'color: #607D8B');
+                }
+                
+                // Any errors
+                if (contentInfo.enrichment_error || enrichedData.enrichment_error) {
+                    console.warn(`Enrichment warnings: ${contentInfo.enrichment_error || enrichedData.enrichment_error}`);
+                }
+                
+                console.groupEnd();
                 break;
             }
         }
-         console.log(`Enriched dataset ${datasetId}`); // Add log
-      }
+    }
     else if (chunk.type === 'complete') {
       // Search complete
       setSearchProgress(100); // Set to 100% before transitioning to complete
@@ -1784,11 +1881,38 @@ export default function SearchPage() {
 
   // Add this function within your SearchPage component
   const handlePreviewClick = (dataset: any) => {
-    if (dataset && dataset.head) { // Check if dataset and head data exist
-      setPreviewData(dataset); // Store the whole dataset (or just dataset.head)
+    // Check if the dataset has content_info with head_preview
+    if (dataset && dataset.content_info && dataset.content_info.head_preview) {
+      // Transform the head_preview data into the format expected by the preview dialog
+      const previewData = {
+        ...dataset,
+        head: {
+          // Extract column names from the first item in head_preview
+          columns: dataset.content_info.head_preview.length > 0 
+            ? Object.keys(dataset.content_info.head_preview[0]) 
+            : [],
+          // Map the head_preview objects to arrays of values in column order
+          data: dataset.content_info.head_preview.map((row: any) => {
+            // If we have columns, maintain the same order for each row
+            if (dataset.content_info.head_preview.length > 0) {
+              const columns = Object.keys(dataset.content_info.head_preview[0]);
+              return columns.map(col => row[col]);
+            }
+            return Object.values(row);
+          })
+        }
+      };
+      
+      console.log("Dataset preview data prepared:", previewData.head);
+      setPreviewData(previewData);
+      setIsPreviewOpen(true);
+    } else if (dataset && dataset.head) {
+      // Handle original format if present
+      setPreviewData(dataset);
       setIsPreviewOpen(true);
     } else {
       console.warn("Preview requested for dataset without head data:", dataset?.id);
+      console.log("Dataset content:", dataset);
       // Optionally show a notification to the user
     }
   };
@@ -3142,29 +3266,30 @@ export default function SearchPage() {
         />
       )}
 
-      {/* Dataset Preview Dialog */}
+      {/* +++ Add Dataset Preview Dialog +++ */}
       <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
         <DialogContent className="sm:max-w-[70vw] max-h-[80vh] bg-white flex flex-col"> {/* Adjust width/height */}
-          <DialogHeader className="border-b border-gray-100 pb-4">
+          <DialogHeader className="border-b border-gray-100 pb-4 flex-shrink-0"> {/* Prevent header/footer shrink */}
             <DialogTitle className="text-gray-900">
-              Preview: {previewData?.title || 'Dataset'} 
+              Preview: {previewData?.title || 'Dataset'}
             </DialogTitle>
             <DialogDescription className="text-gray-600">
-              Showing first few rows and columns.
+              Showing first few rows and columns (if available).
             </DialogDescription>
           </DialogHeader>
-          
+
           {/* Scrollable content area */}
-          <div className="flex-1 overflow-auto p-0 scrollbar-thin scrollbar-thumb-gray-300 hover:scrollbar-thumb-gray-400"> 
-            {previewData?.head ? (
-              <Table className="text-xs">
-                <TableHeader className="sticky top-0 bg-white z-10">
+          <div className="flex-1 overflow-auto p-0 scrollbar-thin scrollbar-thumb-gray-300 hover:scrollbar-thumb-gray-400">
+            {/* Check previewData and its head */}
+            {(previewData?.head && previewData.head.columns && previewData.head.data) ? (
+              <Table className="text-xs min-w-full"> {/* Ensure table tries to take full width */}
+                <TableHeader className="sticky top-0 bg-white z-10 shadow-sm">
                   <TableRow className="border-b-0">
-                    {/* Assuming previewData.head.columns is an array of column names */}
+                    {/* Use columns from previewData.head */}
                     {previewData.head.columns?.map((colName: string, index: number) => (
-                      <TableHead 
-                        key={index} 
-                        className="whitespace-nowrap px-2 py-2 h-auto font-medium text-gray-600 border-b border-gray-200"
+                      <TableHead
+                        key={index}
+                        className="whitespace-nowrap px-2 py-2 h-auto font-medium text-gray-600 border-b border-gray-200 bg-gray-50" // Added background
                       >
                         {colName}
                       </TableHead>
@@ -3172,17 +3297,17 @@ export default function SearchPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {/* Assuming previewData.head.data is an array of arrays (rows) */}
+                  {/* Use data from previewData.head */}
                   {previewData.head.data?.map((row: any[], rowIndex: number) => (
-                    <TableRow key={rowIndex} className="border-b border-gray-100 hover:bg-gray-50">
-                      {row.map((cell: any, cellIndex: number) => (
-                        <TableCell 
-                          key={cellIndex} 
-                          className="whitespace-nowrap px-2 py-1.5 border-r border-gray-100 last:border-r-0" 
-                          title={String(cell)} // Add title for potential overflow
+                    <TableRow key={rowIndex} className="border-b border-gray-100 hover:bg-gray-50/50">
+                      {previewData.head.columns?.map((_colName: string, cellIndex: number) => ( // Iterate based on columns to ensure alignment
+                        <TableCell
+                          key={cellIndex}
+                          className="whitespace-nowrap px-2 py-1.5 border-r border-gray-100 last:border-r-0 max-w-[200px] truncate" // Added max-width & truncate
+                          title={String(row[cellIndex] ?? '')} // Add title for potential overflow, handle null/undefined
                         >
-                          {/* Display cell data, truncate long strings if needed */}
-                          {String(cell).length > 100 ? String(cell).substring(0, 100) + '...' : String(cell)}
+                          {/* Display cell data, handle null/undefined */}
+                          {String(row[cellIndex] ?? '')}
                         </TableCell>
                       ))}
                     </TableRow>
@@ -3190,15 +3315,15 @@ export default function SearchPage() {
                 </TableBody>
               </Table>
             ) : (
-              <div className="p-6 text-center text-gray-500">
-                No preview data available.
+              <div className="p-6 text-center text-gray-500 italic">
+                Preview data structure is missing or invalid.
               </div>
             )}
           </div>
-          
-          <DialogFooter className="border-t border-gray-100 pt-4 bg-white">
-            <Button 
-              variant="outline" 
+
+          <DialogFooter className="border-t border-gray-100 pt-4 bg-white flex-shrink-0"> {/* Prevent header/footer shrink */}
+            <Button
+              variant="outline"
               onClick={() => setIsPreviewOpen(false)}
               className="text-gray-700 border-gray-300 hover:bg-gray-100 hover:text-gray-900"
             >
@@ -3207,7 +3332,6 @@ export default function SearchPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-    </div> // Closing div for the main component
+    </div>
   );
 }
