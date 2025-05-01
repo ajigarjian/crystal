@@ -3280,7 +3280,7 @@ export default function SearchPage() {
                       {previewData.head.columns?.map((_colName: string, cellIndex: number) => ( // Iterate based on columns to ensure alignment
                         <TableCell
                           key={cellIndex}
-                          className="whitespace-nowrap px-2 py-1.5 border-r border-gray-100 last:border-r-0 max-w-[200px] truncate" // Added max-width & truncate
+                          className="whitespace-nowrap text-black px-2 py-1.5 border-r border-gray-100 last:border-r-0 max-w-[200px] truncate" // Added max-width & truncate
                           title={String(row[cellIndex] ?? '')} // Add title for potential overflow, handle null/undefined
                         >
                           {/* Display cell data, handle null/undefined */}
@@ -3302,7 +3302,7 @@ export default function SearchPage() {
             <Button
               variant="outline"
               onClick={() => setIsPreviewOpen(false)}
-              className="text-gray-700 border-gray-300 hover:bg-gray-100 hover:text-gray-900"
+              className="text-gray-700 border-gray-300 bg-white hover:bg-gray-100 hover:text-gray-900"
             >
               Close
             </Button>
