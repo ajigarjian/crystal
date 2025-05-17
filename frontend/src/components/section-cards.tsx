@@ -1,0 +1,104 @@
+import { IconTrendingDown, IconTrendingUp, IconClock, IconAlertCircle, IconMinus } from "@tabler/icons-react"
+
+import { Badge } from "@/components/ui/badge"
+import {
+  Card,
+  CardAction,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import { SectionCardData } from "@/lib/firebase"
+
+// Define the props for the SectionCards component
+interface SectionCardsProps {
+  data: SectionCardData[];
+}
+
+// Helper component to render the correct trend icon
+const TrendIcon = ({ trend }: { trend: SectionCardData['trend'] }) => {
+  if (trend === 'up') return <IconTrendingUp className="size-4 text-green-500" />;
+  if (trend === 'down') return <IconTrendingDown className="size-4 text-red-500" />;
+  // Optionally, render a neutral icon if needed, or null if no icon for neutral
+  return <IconMinus className="size-4 text-muted-foreground" />;
+};
+
+export function SectionCards({ data }: SectionCardsProps) {
+  // Handle loading state or empty data state
+  // Note: With Server Components, loading is often handled by Suspense higher up,
+  // but providing a fallback for empty or error states is good practice.
+  if (!data || data.length === 0) {
+    return (
+      <div className="col-span-1 flex items-center justify-center rounded-lg border border-dashed p-8 text-center sm:col-span-2 lg:col-span-3">
+        <div className="flex flex-col items-center">
+          <IconAlertCircle className="mb-2 size-8 text-muted-foreground" />
+          <p className="text-sm text-muted-foreground">Operational data for cards is currently unavailable.</p>
+          <p className="text-xs text-muted-foreground">This might be due to a temporary issue or no data being found.</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="*:data-[slot=card]:from-primary/5 *:data-[slot=card]:to-card dark:*:data-[slot=card]:bg-card grid grid-cols-1 gap-4 px-4 *:data-[slot=card]:bg-gradient-to-t *:data-[slot=card]:shadow-xs sm:grid-cols-2 lg:grid-cols-3 lg:px-6">
+      {data.map((card) => (
+        <Card key={card.id} className="@container/card flex flex-col">
+          <CardHeader className="flex-grow">
+            <CardDescription>{card.title}</CardDescription>
+            <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
+              {(() => {
+                const valueStr = card.value;
+                const num = parseFloat(valueStr);
+
+                if (isNaN(num)) {
+                  return valueStr; // Return original string if not a number
+                }
+
+                let displayNum = num;
+                // Scale if the absolute value of num is between 0 and 1 (exclusive of 0) and finite
+                if (isFinite(num) && num !== 0 && Math.abs(num) < 1) {
+                  displayNum = num * 100;
+                }
+
+                let formattedText;
+                if (isFinite(displayNum)) {
+                  formattedText = displayNum.toLocaleString(undefined, {
+                    minimumFractionDigits: 0,
+                    maximumFractionDigits: 1,
+                  });
+                } else {
+                  // Handle Infinity, -Infinity (toLocaleString typically returns "Infinity" or based on locale)
+                  formattedText = displayNum.toString();
+                }
+
+                // Extract unit using the regex that was implicitly part of the previously accepted logic
+                const unitRegex = /^\s*(-?\d*\.?\d+)\s*(.*)\s*$/;
+                const unitMatch = valueStr.match(unitRegex);
+                const unit = (unitMatch && unitMatch[2]) ? unitMatch[2].trim() : '';
+
+                return `${formattedText}${unit ? ' ' + unit : ''}`;
+              })()}
+            </CardTitle>
+            <CardAction>
+              <Badge variant="outline" className="flex items-center gap-1">
+                <IconClock className="size-3.5" />
+                {/* Format timestamp for display (e.g., just time) */}
+                <span>{new Date(card.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}</span>
+              </Badge>
+            </CardAction>
+          </CardHeader>
+          <CardFooter className="flex-col items-start gap-1.5 text-sm">
+            <div className="line-clamp-1 flex items-center gap-2 font-medium">
+              <TrendIcon trend={card.trend} />
+              <span>{card.trendDescription}</span>
+            </div>
+            <div className="text-muted-foreground">
+              {card.footerNote}
+            </div>
+          </CardFooter>
+        </Card>
+      ))}
+    </div>
+  )
+}

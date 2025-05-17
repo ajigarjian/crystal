@@ -460,7 +460,8 @@ export const warmFunctions = async () => {
       'stream_search_datasets',
       'stream_analyze',
       'submit_feedback',
-      'evaluate_search_query' // Add the new function
+      'evaluate_search_query', // Add the new function
+      'get_dashboard_section_cards_data' // Added new function here
     ];
     
     // Warm each function with a minimal payload
@@ -613,5 +614,63 @@ export const streamAnalyzeDatasets = async (
   } catch (error: any) {
     console.error('Error calling stream_analyze:', error);
     throw new Error(error.message || 'Failed to analyze datasets');
+  }
+};
+
+// Define the expected structure of a single card's data from the backend
+export interface SectionCardData {
+  id: string; // metric_id will be used as id
+  title: string;
+  value: string; // e.g., "123.45 ft" or "N/A %"
+  timestamp: string; // ISO string format from the backend
+  trend: 'up' | 'down' | 'neutral'; // Current placeholder, will be 'neutral'
+  trendDescription: string; // Default description from backend config
+  footerNote: string;
+}
+
+// Export a helper for calling the new dashboard card data function
+export const getDashboardSectionCards = async (): Promise<SectionCardData[]> => {
+  const region = functions.region || 'us-central1';
+  const projectId = firebaseConfig.projectId;
+  let baseUrl = '';
+
+  if (process.env.NODE_ENV === 'development') {
+    baseUrl = `http://localhost:5001/${projectId}/${region}`;
+  } else {
+    baseUrl = `https://${region}-${projectId}.cloudfunctions.net`;
+  }
+
+  // The name of the new Python Cloud Function
+  const url = `${baseUrl}/get_dashboard_section_cards_data`;
+
+  try {
+    // This is a GET request to fetch data
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      let errorData = { error: "Failed to fetch section card data" };
+      try {
+        errorData = await response.json();
+      } catch (e) {
+        // If parsing error response fails, use the default error
+        console.error("Failed to parse error response from getDashboardSectionCards: ", e);
+      }
+      console.error('Error fetching section card data:', response.status, errorData);
+      throw new Error(errorData.error || `Failed to fetch section card data. Status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data as SectionCardData[];
+  } catch (error: any) {
+    console.error('Error calling getDashboardSectionCards function:', error);
+    // Return an empty array in case of error so the UI can handle it gracefully
+    // Or re-throw if you have a higher-level error boundary in Next.js
+    return []; 
+    // throw new Error(error.message || 'Failed to fetch section card data');
   }
 }; 

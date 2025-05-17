@@ -74,6 +74,18 @@ logger = logging.getLogger(__name__)
 # Initialize Firebase app
 firebase_admin.initialize_app()
 
+# Metric configuration for the dashboard cards
+# Maps card titles to their corresponding metric_id in the fact_dam_ops table
+# and a default unit/trend description.
+METRICS_CONFIG = {
+    "Headroom": {"metric_id": 3, "unit": "ft", "default_trend_desc": "Stable"},
+    "Reservoir Fill": {"metric_id": 5, "unit": "%", "default_trend_desc": "Steady"},
+    "Inflow": {"metric_id": 6, "unit": "cfs", "default_trend_desc": "Constant"},
+    "Spill %": {"metric_id": 9, "unit": "%", "default_trend_desc": "No change"}, # Changed from Spill to Spill % to match ID
+    "Spill": {"metric_id": 8, "unit": "cfs", "default_trend_desc": "None"}, # Changed from Spill % to Spill
+    "Gates Open": {"metric_id": 10, "unit": "gates", "default_trend_desc": "Unchanged"}
+}
+
 @https_fn.on_request(
     cors=options.CorsOptions(
         cors_origins=[
@@ -937,6 +949,150 @@ def submit_feedback(request):
         logger.error(traceback.format_exc())
         return https_fn.Response(
             json.dumps({"status": "error", "message": f"Failed to submit feedback: {str(e)}"}),
+            status=500,
+            headers={"Content-Type": "application/json"}
+        )
+
+@https_fn.on_request(
+    cors=options.CorsOptions(
+        cors_origins=[
+            "https://crystal-2f87e.web.app",
+            "https://askcrystal.info",
+            "https://www.askcrystal.info",
+            "http://localhost:3000",  # For Next.js local dev
+            "http://localhost:5173",  # For Vite local dev (if used)
+        ],
+        cors_methods=["get", "post", "options"]
+    ),
+    timeout_sec=60, # Standard timeout
+    memory=options.MemoryOption.MB_256, # Standard memory
+    min_instances=0 # Allow scale to zero for cost-effectiveness
+)
+def get_dashboard_section_cards_data(request: https_fn.Request) -> https_fn.Response:
+    """
+    HTTP Cloud Function to fetch the latest operational data for dashboard section cards.
+    Queries the 'fact_dam_ops' table for dam_id = 1 and specific metric_ids.
+    """
+    logger.info("Received request for dashboard section cards data.")
+
+    # Handle warming requests if sent via POST with a specific body
+    if request.method == 'POST':
+        try:
+            request_json = request.get_json(silent=True)
+            if request_json and request_json.get('warming'):
+                logger.info("Warming request received for get_dashboard_section_cards_data.")
+                return https_fn.Response(
+                    json.dumps({"status": "warmed"}),
+                    status=200,
+                    headers={"Content-Type": "application/json"}
+                )
+        except Exception: # pylint: disable=broad-except
+            # If JSON parsing fails for a POST, it's not a valid warming request, proceed
+            pass
+    
+    # For actual data fetching, typically a GET request is used.
+    # No specific request body is expected for this data retrieval.
+
+    try:
+        pool = get_connection_pool()
+        conn = pool.getconn()
+        card_data_list = []
+        
+        # Dam ID is fixed at 1 as per requirements
+        dam_id_to_query = 1
+
+        try:
+            with conn.cursor() as cursor:
+                for card_title, config in METRICS_CONFIG.items():
+                    metric_id_to_query = config["metric_id"]
+                    
+                    # SQL to get the most recent record for the given dam_id and metric_id
+                    # It uses a subquery to find the MAX(ts_utc) for the specific metric and dam
+                    # and then joins back to get the corresponding value_num.
+                    query_sql = """
+                        SELECT f.ts_utc, f.value_num
+                        FROM fact_dam_ops f
+                        INNER JOIN (
+                            SELECT metric_id, MAX(ts_utc) as max_ts_utc
+                            FROM fact_dam_ops
+                            WHERE dam_id = %s AND metric_id = %s
+                            GROUP BY metric_id
+                        ) latest_f ON f.metric_id = latest_f.metric_id AND f.ts_utc = latest_f.max_ts_utc
+                        WHERE f.dam_id = %s AND f.metric_id = %s;
+                    """
+                    
+                    cursor.execute(query_sql, (dam_id_to_query, metric_id_to_query, dam_id_to_query, metric_id_to_query))
+                    row = cursor.fetchone()
+                    
+                    value_display = f"N/A {config['unit']}" # Default if no data or value is null
+                    raw_numerical_value = None
+                    timestamp_iso = datetime.now().isoformat() + "Z" # Default to now if no data
+                    trend_val = "neutral" # Default trend
+                    
+                    if row and row[1] is not None: # Check if row exists and value_num is not NULL
+                        raw_numerical_value = row[1]
+                        timestamp_iso = row[0].isoformat() + "Z" if row[0] else timestamp_iso
+
+                        # Specific logic for Reservoir Fill: multiply by 100
+                        if card_title == "Reservoir Fill":
+                            if isinstance(raw_numerical_value, (int, float)):
+                                raw_numerical_value *= 100
+                            else: # If it's not a number after all, can't multiply
+                                logger.warning(f"Reservoir Fill value for metric_id {metric_id_to_query} is not a number: {raw_numerical_value}")
+                        
+                        # Formatting: Comma separators and at most one decimal place
+                        if isinstance(raw_numerical_value, (int, float)):
+                            # Format to one decimal place with commas
+                            formatted_num_str = "{:,.1f}".format(raw_numerical_value)
+                            # If it ends with .0, remove .0 to show as integer or whole number
+                            if formatted_num_str.endswith(".0"):
+                                formatted_num_str = formatted_num_str[:-2]
+                            value_display = f"{formatted_num_str} {config['unit']}"
+                        else:
+                            # If not a number (e.g. a string from DB, though unlikely for value_num)
+                            # This case should ideally not happen if value_num is a numeric type in DB
+                            value_display = f"{raw_numerical_value} {config['unit']}"
+                            logger.warning(f"Value for metric_id {metric_id_to_query} is not a number: {raw_numerical_value}")
+
+
+                    card_data_list.append({
+                        "id": str(metric_id_to_query), # Use metric_id as a unique ID for the card
+                        "title": card_title,
+                        "value": value_display,
+                        "timestamp": timestamp_iso,
+                        "trend": trend_val, # Placeholder
+                        "trendDescription": config["default_trend_desc"], # Placeholder
+                        "footerNote": f"Latest reading for {card_title.lower()}"
+                    })
+
+            # Ensure consistent ordering of cards based on METRICS_CONFIG keys
+            ordered_card_data_list = sorted(card_data_list, key=lambda x: list(METRICS_CONFIG.keys()).index(x["title"]))
+
+            return https_fn.Response(
+                json.dumps(ordered_card_data_list), # Use default=str for datetime if not already string
+                status=200,
+                headers={"Content-Type": "application/json"}
+            )
+
+        except Exception as db_error: # pylint: disable=broad-except
+            logger.error(f"Database error in get_dashboard_section_cards_data: {db_error}")
+            logger.error(traceback.format_exc())
+            if conn: # conn might not be None if getconn() succeeded but cursor failed
+                conn.rollback()
+            return https_fn.Response(
+                json.dumps({"error": "A database error occurred.", "details": str(db_error)}),
+                status=500,
+                headers={"Content-Type": "application/json"}
+            )
+        finally:
+            if conn: # conn should exist if pool.getconn() was successful
+                pool.putconn(conn)
+
+    except Exception as e: # pylint: disable=broad-except
+        logger.error(f"General error in get_dashboard_section_cards_data: {e}")
+        logger.error(traceback.format_exc())
+        return https_fn.Response(
+            json.dumps({"error": "An internal server error occurred.", "details": str(e)}),
             status=500,
             headers={"Content-Type": "application/json"}
         )
