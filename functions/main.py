@@ -967,7 +967,7 @@ def submit_feedback(request):
         cors_methods=["get", "post", "options"]
     ),
     timeout_sec=30,
-    memory=options.MemoryOption.MB_256
+    memory=options.MemoryOption.MB_512
 )
 def get_inflow_timeseries(request: https_fn.Request) -> https_fn.Response:
     """
@@ -1079,7 +1079,7 @@ def get_inflow_timeseries(request: https_fn.Request) -> https_fn.Response:
         cors_methods=["get", "post", "options"]
     ),
     timeout_sec=60, # Standard timeout
-    memory=options.MemoryOption.MB_256, # Standard memory
+    memory=options.MemoryOption.MB_512, # Standard memory
     min_instances=0 # Allow scale to zero for cost-effectiveness
 )
 
