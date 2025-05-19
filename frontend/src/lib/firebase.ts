@@ -461,7 +461,8 @@ export const warmFunctions = async () => {
       'stream_analyze',
       'submit_feedback',
       'evaluate_search_query', // Add the new function
-      'get_dashboard_section_cards_data' // Added new function here
+      'get_dashboard_section_cards_data', // Added new function here
+      'get_inflow_timeseries' // Add new inflow timeseries function
     ];
     
     // Warm each function with a minimal payload
@@ -672,5 +673,58 @@ export const getDashboardSectionCards = async (): Promise<SectionCardData[]> => 
     // Or re-throw if you have a higher-level error boundary in Next.js
     return []; 
     // throw new Error(error.message || 'Failed to fetch section card data');
+  }
+};
+
+// Define the expected structure for a single data point from the inflow timeseries
+export interface InflowDataPoint {
+  ts_utc: string; // ISO string from backend
+  value_num: number;
+}
+
+// Define the new time range options type here as well to be used by the function
+export type TimeRangeOption = "mtd" | "14d" | "7d";
+
+// Export a helper for calling the new inflow timeseries data function
+// Updated to accept new TimeRangeOption types
+export const getInflowTimeseries = async (range: TimeRangeOption): Promise<InflowDataPoint[]> => {
+  const region = functions.region || 'us-central1';
+  const projectId = firebaseConfig.projectId;
+  let baseUrl = '';
+
+  if (process.env.NODE_ENV === 'development') {
+    baseUrl = `http://localhost:5001/${projectId}/${region}`;
+  } else {
+    baseUrl = `https://${region}-${projectId}.cloudfunctions.net`;
+  }
+
+  // The name of the new Python Cloud Function
+  const url = `${baseUrl}/get_inflow_timeseries?range=${range}`; // Pass range as query parameter
+
+  try {
+    // This is a GET request to fetch data
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      let errorData = { error: "Failed to fetch inflow timeseries data" };
+      try {
+        errorData = await response.json();
+      } catch (e) {
+        console.error("Failed to parse error response from getInflowTimeseries: ", e);
+      }
+      console.error('Error fetching inflow timeseries data:', response.status, errorData);
+      throw new Error(errorData.error || `Failed to fetch inflow timeseries data. Status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data as InflowDataPoint[];
+  } catch (error: any) {
+    console.error('Error calling getInflowTimeseries function:', error);
+    return []; 
   }
 }; 

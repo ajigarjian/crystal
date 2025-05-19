@@ -41,7 +41,7 @@ export function SectionCards({ data }: SectionCardsProps) {
   }
 
   return (
-    <div className="*:data-[slot=card]:from-primary/5 *:data-[slot=card]:to-card dark:*:data-[slot=card]:bg-card grid grid-cols-1 gap-4 px-4 *:data-[slot=card]:bg-gradient-to-t *:data-[slot=card]:shadow-xs sm:grid-cols-2 lg:grid-cols-3 lg:px-6">
+    <div className="*:data-[slot=card]:from-primary/5 *:data-[slot=card]:to-card dark:*:data-[slot=card]:bg-card grid grid-cols-1 gap-4 px-4 *:data-[slot=card]:shadow-none sm:grid-cols-2 lg:grid-cols-3 lg:px-6">
       {data.map((card) => (
         <Card key={card.id} className="@container/card flex flex-col">
           <CardHeader className="flex-grow">
@@ -83,8 +83,22 @@ export function SectionCards({ data }: SectionCardsProps) {
             <CardAction>
               <Badge variant="outline" className="flex items-center gap-1">
                 <IconClock className="size-3.5" />
-                {/* Format timestamp for display (e.g., just time) */}
-                <span>{new Date(card.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}</span>
+                {/* Format timestamp to display time in UTC */}
+                <span>
+                  {(() => {
+                    try {
+                      const dateObj = new Date(card.timestamp);
+                      // Check if dateObj is valid before formatting
+                      if (String(dateObj) === "Invalid Date") {
+                        return "Invalid Time";
+                      }
+                      return `${dateObj.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'UTC' })} UTC`;
+                    } catch (e) {
+                      console.error("Error formatting card timestamp:", e);
+                      return "Time N/A"; // Fallback for any unexpected error
+                    }
+                  })()}
+                </span>
               </Badge>
             </CardAction>
           </CardHeader>

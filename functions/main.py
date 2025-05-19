@@ -1,6 +1,8 @@
 import os
 import django
 from django.conf import settings
+import decimal # Add import for decimal
+from datetime import timezone # Import timezone
 
 # Set the DJANGO_SETTINGS_MODULE environment variable
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "factchecker.settings")
@@ -11,7 +13,7 @@ django.setup()
 from firebase_functions import https_fn, options
 from firebase_admin import initialize_app, firestore
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 import firebase_admin
 import logging
 import time
@@ -482,12 +484,12 @@ def register_waitlist(request):
     cors=options.CorsOptions(
         cors_origins=[
         "https://crystal-2f87e.web.app",
-        "https://www.askcrystal.info",
         "https://askcrystal.info",
+        "https://www.askcrystal.info",
         "http://localhost:3000",
         "http://localhost:5173",
         ],
-        cors_methods=["get", "post", "options"],
+        cors_methods=["get", "post", "options"]
     ),
     memory=options.MemoryOption.GB_2,
     timeout_sec=300
@@ -959,8 +961,120 @@ def submit_feedback(request):
             "https://crystal-2f87e.web.app",
             "https://askcrystal.info",
             "https://www.askcrystal.info",
-            "http://localhost:3000",  # For Next.js local dev
-            "http://localhost:5173",  # For Vite local dev (if used)
+            "http://localhost:3000",
+            "http://localhost:5173",
+        ],
+        cors_methods=["get", "post", "options"]
+    ),
+    timeout_sec=30,
+    memory=options.MemoryOption.MB_256
+)
+def get_inflow_timeseries(request: https_fn.Request) -> https_fn.Response:
+    """
+    Minimal Cloud Function to fetch inflow (metric_id=6) timeseries for dam_id=1.
+    Accepts a query param 'range' (either 'today' or '7d').
+    Returns an array of { ts_utc, value_num } objects for the chart.
+    """
+    logger.info("Received request for inflow timeseries data.")
+
+    # Parse query params for range
+    range_param = request.args.get('range', '7d')  # Default to last 7 days
+
+    # Calculate date filter
+    now_utc = datetime.utcnow()
+    if range_param == 'today': # This case will no longer be hit from frontend
+        start_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+    elif range_param == 'mtd': # New: Month to Date
+        start_utc = now_utc.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    elif range_param == '14d': # New: Last 14 days
+        # Ensure it's 14 days including today, so subtract 13 days from today's start
+        start_of_today_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+        start_utc = start_of_today_utc - timedelta(days=13)
+    elif range_param == '7d': # Existing: Last 7 days
+        # Ensure it's 7 days including today, so subtract 6 days from today's start
+        start_of_today_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+        start_utc = start_of_today_utc - timedelta(days=6)
+    else: # Default fallback if an unexpected range is passed (e.g., '7d')
+        logger.warning(f"Unexpected range_param: {range_param}, defaulting to 7d logic.")
+        start_of_today_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+        start_utc = start_of_today_utc - timedelta(days=6)
+
+    try:
+        pool = get_connection_pool()
+        conn = pool.getconn()
+        try:
+            with conn.cursor() as cursor:
+                # Query all inflow rows for dam_id=1, metric_id=6, in the date range
+                query_sql = """
+                    SELECT ts_utc, value_num
+                    FROM fact_dam_ops
+                    WHERE dam_id = %s AND metric_id = %s AND ts_utc >= %s
+                    ORDER BY ts_utc ASC;
+                """
+                cursor.execute(query_sql, (1, 6, start_utc))
+                rows = cursor.fetchall()
+                
+                result = []
+                for row in rows:
+                    # Ensure the datetime is in UTC and then format with 'Z'
+                    # If row[0] is already timezone-aware and UTC, this is fine.
+                    # If it's naive, it assumes UTC. If aware and not UTC, it converts.
+                    ts_utc_val_dt = row[0].astimezone(timezone.utc) # Convert to UTC
+                    ts_utc_val = ts_utc_val_dt.strftime('%Y-%m-%dT%H:%M:%SZ') # Format as YYYY-MM-DDTHH:MM:SSZ
+
+                    value_num_val = None
+                    if row[1] is not None:
+                        if isinstance(row[1], decimal.Decimal):
+                            value_num_val = float(row[1])
+                        elif isinstance(row[1], (int, float)):
+                            value_num_val = row[1] # Already a compatible number
+                        else:
+                            # Fallback or log if it's an unexpected type
+                            try:
+                                value_num_val = float(row[1])
+                            except (ValueError, TypeError):
+                                logger.error(f"Could not convert value_num {row[1]} of type {type(row[1])} to float.")
+                                continue # Skip this row if conversion fails
+                    
+                    if value_num_val is not None:
+                        result.append({"ts_utc": ts_utc_val, "value_num": value_num_val})
+
+                # valid_result is now just result as filtering is done during construction
+                return https_fn.Response(
+                    json.dumps(result), # Use result directly
+                    status=200,
+                    headers={"Content-Type": "application/json"}
+                )
+        except Exception as db_error:
+            logger.error(f"Database error in get_inflow_timeseries: {db_error}")
+            logger.error(traceback.format_exc())
+            if conn:
+                conn.rollback()
+            return https_fn.Response(
+                json.dumps({"error": "A database error occurred.", "details": str(db_error)}),
+                status=500,
+                headers={"Content-Type": "application/json"}
+            )
+        finally:
+            if conn:
+                pool.putconn(conn)
+    except Exception as e:
+        logger.error(f"General error in get_inflow_timeseries: {e}")
+        logger.error(traceback.format_exc())
+        return https_fn.Response(
+            json.dumps({"error": "An internal server error occurred.", "details": str(e)}),
+            status=500,
+            headers={"Content-Type": "application/json"}
+        )
+
+@https_fn.on_request(
+    cors=options.CorsOptions(
+        cors_origins=[
+        "https://crystal-2f87e.web.app",
+        "https://askcrystal.info",
+        "https://www.askcrystal.info",
+        "http://localhost:3000",  # For Next.js local dev
+        "http://localhost:5173",  # For Vite local dev (if used)
         ],
         cors_methods=["get", "post", "options"]
     ),
@@ -968,6 +1082,7 @@ def submit_feedback(request):
     memory=options.MemoryOption.MB_256, # Standard memory
     min_instances=0 # Allow scale to zero for cost-effectiveness
 )
+
 def get_dashboard_section_cards_data(request: https_fn.Request) -> https_fn.Response:
     """
     HTTP Cloud Function to fetch the latest operational data for dashboard section cards.
@@ -1024,36 +1139,51 @@ def get_dashboard_section_cards_data(request: https_fn.Request) -> https_fn.Resp
                     cursor.execute(query_sql, (dam_id_to_query, metric_id_to_query, dam_id_to_query, metric_id_to_query))
                     row = cursor.fetchone()
                     
-                    value_display = f"N/A {config['unit']}" # Default if no data or value is null
-                    raw_numerical_value = None
-                    timestamp_iso = datetime.now().isoformat() + "Z" # Default to now if no data
-                    trend_val = "neutral" # Default trend
+                    # Initialize defaults
+                    value_display = f"N/A {config['unit']}" 
+                    timestamp_iso = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ') 
+                    trend_val = "neutral" 
                     
-                    if row and row[1] is not None: # Check if row exists and value_num is not NULL
-                        raw_numerical_value = row[1]
-                        timestamp_iso = row[0].isoformat() + "Z" if row[0] else timestamp_iso
+                    if row: # If a record was found
+                        db_ts_utc, db_value_num = row[0], row[1]
 
-                        # Specific logic for Reservoir Fill: multiply by 100
-                        if card_title == "Reservoir Fill":
+                        if db_ts_utc is not None:
+                            # Ensure the database timestamp is UTC and correctly formatted
+                            if db_ts_utc.tzinfo is None:
+                                # If naive, assume it's UTC and make it aware
+                                aware_utc_datetime = db_ts_utc.replace(tzinfo=timezone.utc)
+                            else:
+                                # If already aware, convert to UTC to be certain
+                                aware_utc_datetime = db_ts_utc.astimezone(timezone.utc)
+                            # Ensure Z (Zulu) suffix for UTC timestamps
+                            timestamp_iso = aware_utc_datetime.strftime('%Y-%m-%dT%H:%M:%SZ')
+                        # If db_ts_utc is None, timestamp_iso remains the current UTC time default (already formatted with Z)
+
+                        if db_value_num is not None:
+                            raw_numerical_value = db_value_num
+                            # Specific logic for Reservoir Fill: multiply by 100
+                            if card_title == "Reservoir Fill":
+                                if isinstance(raw_numerical_value, (int, float)):
+                                    raw_numerical_value *= 100
+                                else: # If it's not a number after all, can't multiply
+                                    logger.warning(f"Reservoir Fill value for metric_id {metric_id_to_query} is not a number: {raw_numerical_value}")
+                            
+                            # Formatting: Comma separators and at most one decimal place
                             if isinstance(raw_numerical_value, (int, float)):
-                                raw_numerical_value *= 100
-                            else: # If it's not a number after all, can't multiply
-                                logger.warning(f"Reservoir Fill value for metric_id {metric_id_to_query} is not a number: {raw_numerical_value}")
-                        
-                        # Formatting: Comma separators and at most one decimal place
-                        if isinstance(raw_numerical_value, (int, float)):
-                            # Format to one decimal place with commas
-                            formatted_num_str = "{:,.1f}".format(raw_numerical_value)
-                            # If it ends with .0, remove .0 to show as integer or whole number
-                            if formatted_num_str.endswith(".0"):
-                                formatted_num_str = formatted_num_str[:-2]
-                            value_display = f"{formatted_num_str} {config['unit']}"
-                        else:
-                            # If not a number (e.g. a string from DB, though unlikely for value_num)
-                            # This case should ideally not happen if value_num is a numeric type in DB
-                            value_display = f"{raw_numerical_value} {config['unit']}"
-                            logger.warning(f"Value for metric_id {metric_id_to_query} is not a number: {raw_numerical_value}")
+                                # Format to one decimal place with commas
+                                formatted_num_str = "{:,.1f}".format(raw_numerical_value)
+                                # If it ends with .0, remove .0 to show as integer or whole number
+                                if formatted_num_str.endswith(".0"):
+                                    formatted_num_str = formatted_num_str[:-2]
+                                value_display = f"{formatted_num_str} {config['unit']}"
+                            else:
+                                # If not a number (e.g. a string from DB, though unlikely for value_num)
+                                value_display = f"{raw_numerical_value} {config['unit']}"
+                                logger.warning(f"Value for metric_id {metric_id_to_query} is not a number: {raw_numerical_value}")
+                        # If db_value_num is None, value_display remains "N/A {unit}"
+                    # else (if row is None), defaults for value_display and timestamp_iso are used.
 
+                    logger.info(f"DEBUG: Card: {card_title}, Formatted Timestamp: {timestamp_iso}") # <--- ADD THIS
 
                     card_data_list.append({
                         "id": str(metric_id_to_query), # Use metric_id as a unique ID for the card
