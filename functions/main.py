@@ -1160,27 +1160,32 @@ def get_dashboard_section_cards_data(request: https_fn.Request) -> https_fn.Resp
                         # If db_ts_utc is None, timestamp_iso remains the current UTC time default (already formatted with Z)
 
                         if db_value_num is not None:
-                            raw_numerical_value = db_value_num
-                            # Specific logic for Reservoir Fill: multiply by 100
-                            if card_title == "Reservoir Fill":
-                                if isinstance(raw_numerical_value, (int, float)):
-                                    raw_numerical_value *= 100
-                                else: # If it's not a number after all, can't multiply
-                                    logger.warning(f"Reservoir Fill value for metric_id {metric_id_to_query} is not a number: {raw_numerical_value}")
-                            
-                            # Formatting: Comma separators and at most one decimal place
-                            if isinstance(raw_numerical_value, (int, float)):
-                                # Format to one decimal place with commas
-                                formatted_num_str = "{:,.1f}".format(raw_numerical_value)
-                                # If it ends with .0, remove .0 to show as integer or whole number
+                            numeric_value_for_processing = None
+                            if isinstance(db_value_num, decimal.Decimal):
+                                numeric_value_for_processing = float(db_value_num)
+                            elif isinstance(db_value_num, (int, float)):
+                                numeric_value_for_processing = db_value_num
+                            else:
+                                try:
+                                    numeric_value_for_processing = float(str(db_value_num))
+                                    logger.info(f"Successfully converted db_value_num '{db_value_num}' (type {type(db_value_num)}) to float for metric_id {metric_id_to_query}.")
+                                except (ValueError, TypeError):
+                                    logger.warning(f"Value for metric_id {metric_id_to_query} ('{db_value_num}' type: {type(db_value_num)}) is not a recognized number and could not be converted. Defaulting to N/A.")
+                                    # value_display will use the default "N/A {config['unit']}"
+
+                            if numeric_value_for_processing is not None:
+                                temp_value = numeric_value_for_processing
+
+                                if card_title == "Reservoir Fill":
+                                    temp_value *= 100
+                                
+                                formatted_num_str = "{:,.1f}".format(temp_value)
                                 if formatted_num_str.endswith(".0"):
                                     formatted_num_str = formatted_num_str[:-2]
                                 value_display = f"{formatted_num_str} {config['unit']}"
-                            else:
-                                # If not a number (e.g. a string from DB, though unlikely for value_num)
-                                value_display = f"{raw_numerical_value} {config['unit']}"
-                                logger.warning(f"Value for metric_id {metric_id_to_query} is not a number: {raw_numerical_value}")
-                        # If db_value_num is None, value_display remains "N/A {unit}"
+                            # If conversion failed or numeric_value_for_processing is None,
+                            # value_display retains its default "N/A {config['unit']}"
+                        # else (if db_value_num is None), value_display remains "N/A {config['unit']}"
                     # else (if row is None), defaults for value_display and timestamp_iso are used.
 
                     logger.info(f"DEBUG: Card: {card_title}, Formatted Timestamp: {timestamp_iso}") # <--- ADD THIS
