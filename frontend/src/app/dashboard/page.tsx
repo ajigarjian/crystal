@@ -29,6 +29,8 @@ export interface DamInfo {
 const AVAILABLE_DAMS: DamInfo[] = [
   { id: 1, name: "Grand Coulee Dam" },
   { id: 2, name: "Chief Joseph Dam" },
+  { id: 3, name: "Wells Dam" },
+  { id: 4, name: "Rocky Reach Dam" },
 ];
 
 export default function Page() {
