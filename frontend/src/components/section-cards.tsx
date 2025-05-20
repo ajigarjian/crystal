@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge"
 import {
   Card,
   CardAction,
+  CardContent,
   CardDescription,
   CardFooter,
   CardHeader,
@@ -44,19 +45,39 @@ export function SectionCards({ data }: SectionCardsProps) {
     <div className="*:data-[slot=card]:from-primary/5 *:data-[slot=card]:to-card dark:*:data-[slot=card]:bg-card grid grid-cols-1 gap-4 px-4 *:data-[slot=card]:shadow-none sm:grid-cols-2 lg:grid-cols-3 lg:px-6">
       {data.map((card) => (
         <Card key={card.id} className="@container/card flex flex-col">
-          <CardHeader className="flex-grow">
+          <CardHeader className="pb-2">
             <CardDescription>{card.title}</CardDescription>
-            <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
+            <CardAction>
+              <Badge variant="outline" className="flex items-center gap-1">
+                <IconClock className="size-3.5" />
+                <span>
+                  {(() => {
+                    try {
+                      const dateObj = new Date(card.timestamp);
+                      if (String(dateObj) === "Invalid Date") {
+                        return "Invalid Time";
+                      }
+                      return `${dateObj.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'UTC' })} UTC`;
+                    } catch (e) {
+                      console.error("Error formatting card timestamp:", e);
+                      return "Time N/A";
+                    }
+                  })()}
+                </span>
+              </Badge>
+            </CardAction>
+          </CardHeader>
+          <CardContent className="py-0 px-6">
+            <div className="text-3xl font-semibold tabular-nums @[250px]/card:text-4xl">
               {(() => {
                 const valueStr = card.value;
                 const num = parseFloat(valueStr);
 
                 if (isNaN(num)) {
-                  return valueStr; // Return original string if not a number
+                  return valueStr;
                 }
 
                 let displayNum = num;
-                // Scale if the absolute value of num is between 0 and 1 (exclusive of 0) and finite
                 if (isFinite(num) && num !== 0 && Math.abs(num) < 1) {
                   displayNum = num * 100;
                 }
@@ -68,41 +89,18 @@ export function SectionCards({ data }: SectionCardsProps) {
                     maximumFractionDigits: 1,
                   });
                 } else {
-                  // Handle Infinity, -Infinity (toLocaleString typically returns "Infinity" or based on locale)
                   formattedText = displayNum.toString();
                 }
 
-                // Extract unit using the regex that was implicitly part of the previously accepted logic
                 const unitRegex = /^\s*(-?\d*\.?\d+)\s*(.*)\s*$/;
                 const unitMatch = valueStr.match(unitRegex);
                 const unit = (unitMatch && unitMatch[2]) ? unitMatch[2].trim() : '';
 
                 return `${formattedText}${unit ? ' ' + unit : ''}`;
               })()}
-            </CardTitle>
-            <CardAction>
-              <Badge variant="outline" className="flex items-center gap-1">
-                <IconClock className="size-3.5" />
-                {/* Format timestamp to display time in UTC */}
-                <span>
-                  {(() => {
-                    try {
-                      const dateObj = new Date(card.timestamp);
-                      // Check if dateObj is valid before formatting
-                      if (String(dateObj) === "Invalid Date") {
-                        return "Invalid Time";
-                      }
-                      return `${dateObj.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'UTC' })} UTC`;
-                    } catch (e) {
-                      console.error("Error formatting card timestamp:", e);
-                      return "Time N/A"; // Fallback for any unexpected error
-                    }
-                  })()}
-                </span>
-              </Badge>
-            </CardAction>
-          </CardHeader>
-          <CardFooter className="flex-col items-start gap-1.5 text-sm">
+            </div>
+          </CardContent>
+          <CardFooter className="flex-col items-start gap-1.5 text-sm pt-4">
             <div className="line-clamp-1 flex items-center gap-2 font-medium">
               <TrendIcon trend={card.trend} />
               <span>{card.trendDescription}</span>

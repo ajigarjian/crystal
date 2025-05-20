@@ -1,7 +1,11 @@
+"use client";
+
+import * as React from "react";
 import { AppSidebar } from "@/components/app-sidebar"
 import { ChartAreaInteractive } from "@/components/chart-area-interactive"
 import { DataTable } from "@/components/data-table"
 import { SectionCards } from "@/components/section-cards"
+import { SectionCardSkeleton } from "@/components/SectionCardSkeleton"
 import { SiteHeader } from "@/components/site-header"
 import {
   SidebarInset,
@@ -17,13 +21,39 @@ import {
 import data from "./data.json"
 import { getDashboardSectionCards, SectionCardData } from "@/lib/firebase"
 
-export default async function Page() {
-  let sectionCardData: SectionCardData[] = []
-  try {
-    sectionCardData = await getDashboardSectionCards()
-  } catch (error) {
-    console.error("Failed to load section card data for dashboard page:", error)
-  }
+export interface DamInfo {
+  id: number;
+  name: string;
+}
+
+const AVAILABLE_DAMS: DamInfo[] = [
+  { id: 1, name: "Grand Coulee Dam" },
+  { id: 2, name: "Chief Joseph Dam" },
+];
+
+export default function Page() {
+  const [selectedDam, setSelectedDam] = React.useState<DamInfo>(AVAILABLE_DAMS[0]);
+  const [currentSectionCardData, setCurrentSectionCardData] = React.useState<SectionCardData[]>([]);
+  const [isLoadingCards, setIsLoadingCards] = React.useState<boolean>(true);
+
+  // Fetch section card data when selectedDam changes
+  React.useEffect(() => {
+    async function loadSectionCards() {
+      setIsLoadingCards(true);
+      try {
+        const data = await getDashboardSectionCards(selectedDam.id);
+        setCurrentSectionCardData(data);
+      } catch (error) {
+        console.error("Failed to load section card data for dam: ", selectedDam.id, error);
+        setCurrentSectionCardData([]); // Set to empty on error
+      }
+      setIsLoadingCards(false);
+    }
+
+    if (selectedDam) { // Ensure selectedDam is available
+      loadSectionCards();
+    }
+  }, [selectedDam]); // Re-run when selectedDam object changes
 
   return (
     <SidebarProvider
@@ -36,7 +66,11 @@ export default async function Page() {
     >
       <AppSidebar variant="inset" />
       <SidebarInset>
-        <SiteHeader />
+        <SiteHeader
+          availableDams={AVAILABLE_DAMS}
+          selectedDam={selectedDam}
+          onDamChange={setSelectedDam}
+        />
         <Tabs defaultValue="operational" className="flex flex-1 flex-col pt-4">
           <div className="px-4 lg:px-6">
             <TabsList>
@@ -51,9 +85,19 @@ export default async function Page() {
               <div className="@container/main flex flex-1 flex-col gap-2">
                 <div className="flex flex-col gap-4 pt-2 pb-4 md:gap-6 md:pb-6">
                   <div className="px-4 lg:px-6">
-                    <ChartAreaInteractive />
+                    <ChartAreaInteractive selectedDamId={selectedDam.id} />
                   </div>
-                  <SectionCards data={sectionCardData} />
+                  {/* Pass currentSectionCardData to SectionCards */}
+                  {/* Optionally, show a loading state for cards */}
+                  {isLoadingCards ? (
+                    <div className="grid grid-cols-1 gap-4 px-4 sm:grid-cols-2 lg:grid-cols-3 lg:px-6">
+                      {Array.from({ length: 6 }).map((_, index) => (
+                        <SectionCardSkeleton key={index} />
+                      ))}
+                    </div>
+                  ) : (
+                    <SectionCards data={currentSectionCardData} />
+                  )}
                   {/* <DataTable data={data} /> */}
                 </div>
               </div>

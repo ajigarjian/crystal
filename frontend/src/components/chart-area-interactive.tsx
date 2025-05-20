@@ -30,10 +30,10 @@ import {
   ToggleGroup,
   ToggleGroupItem,
 } from "@/components/ui/toggle-group"
-import { InflowDataPoint, getInflowTimeseries } from "@/lib/firebase" 
+import { InflowDataPoint, getInflowTimeseries, TimeRangeOption } from "@/lib/firebase" 
 
 // Define the new time range options type
-type TimeRangeOption = "mtd" | "14d" | "7d";
+// type TimeRangeOption = "mtd" | "14d" | "7d"; // Already in firebase.ts, no need to redefine if imported
 
 interface ProcessedChartData {
   date: string // Will store UTC date string, e.g., "YYYY-MM-DD HH:mm"
@@ -67,8 +67,11 @@ const formatUtcDateForDisplay = (isoString: string): string => {
   return `${dateObj.getUTCFullYear()}-${(dateObj.getUTCMonth() + 1).toString().padStart(2, '0')}-${dateObj.getUTCDate().toString().padStart(2, '0')}`;
 };
 
+interface ChartAreaInteractiveProps {
+  selectedDamId: number;
+}
 
-export function ChartAreaInteractive() {
+export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProps) {
   const isMobile = useIsMobile()
   // Updated state type and default value
   const [timeRange, setTimeRange] = React.useState<TimeRangeOption>("14d") 
@@ -87,7 +90,8 @@ export function ChartAreaInteractive() {
     const fetchData = async () => {
       setIsLoading(true)
       try {
-        const rawData: InflowDataPoint[] = await getInflowTimeseries(timeRange)
+        // Pass selectedDamId to getInflowTimeseries
+        const rawData: InflowDataPoint[] = await getInflowTimeseries(timeRange, selectedDamId)
         
         const transformed = rawData.map(point => {
           // Using UTC date directly
@@ -106,7 +110,7 @@ export function ChartAreaInteractive() {
       }
     }
     fetchData()
-  }, [timeRange]) 
+  }, [timeRange, selectedDamId]) // Add selectedDamId to dependency array
 
   return (
     <Card className="@container/card shadow-none">

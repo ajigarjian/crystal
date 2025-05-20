@@ -32,7 +32,7 @@ export const getFirebaseAnalytics = () => {
   return null;
 };
 
-export const trackDwellTimeStart = (pageName) => {
+export const trackDwellTimeStart = (pageName: string) => {
   const analytics = getFirebaseAnalytics();
   if (analytics) {
     console.log(`Tracking dwell time start for: ${pageName}`);
@@ -53,11 +53,11 @@ export const trackDwellTimeStart = (pageName) => {
   }
 };
 
-export const trackDwellTimeEnd = (pageName, startTime) => {
+export const trackDwellTimeEnd = (pageName: string, startTime: Date) => {
   const analytics = getFirebaseAnalytics();
   if (analytics) {
     const endTime = new Date();
-    const durationSeconds = Math.floor((endTime - startTime) / 1000);
+    const durationSeconds = Math.floor((endTime.getTime() - startTime.getTime()) / 1000);
     logEvent(analytics, 'dwell_time_end', { 
       page_name: pageName,
       duration_seconds: durationSeconds
@@ -493,7 +493,7 @@ export const warmFunctions = async () => {
 export const streamAnalyzeDatasets = async (
   data: {
     query: string;
-    datasets?: Dataset[];     // Support datasets array
+    datasets?: any[];     // Support datasets array - Using any[] to resolve linter error
     dataset_ids?: string[];   // Support dataset_ids array
   },
   onChunk?: (chunk: any) => void
@@ -630,7 +630,7 @@ export interface SectionCardData {
 }
 
 // Export a helper for calling the new dashboard card data function
-export const getDashboardSectionCards = async (): Promise<SectionCardData[]> => {
+export const getDashboardSectionCards = async (damId: number): Promise<SectionCardData[]> => {
   const region = functions.region || 'us-central1';
   const projectId = firebaseConfig.projectId;
   let baseUrl = '';
@@ -642,7 +642,7 @@ export const getDashboardSectionCards = async (): Promise<SectionCardData[]> => 
   }
 
   // The name of the new Python Cloud Function
-  const url = `${baseUrl}/get_dashboard_section_cards_data`;
+  const url = `${baseUrl}/get_dashboard_section_cards_data?dam_id=${damId}`;
 
   try {
     // This is a GET request to fetch data
@@ -686,8 +686,8 @@ export interface InflowDataPoint {
 export type TimeRangeOption = "mtd" | "14d" | "7d";
 
 // Export a helper for calling the new inflow timeseries data function
-// Updated to accept new TimeRangeOption types
-export const getInflowTimeseries = async (range: TimeRangeOption): Promise<InflowDataPoint[]> => {
+// Updated to accept new TimeRangeOption types and damId
+export const getInflowTimeseries = async (range: TimeRangeOption, damId: number): Promise<InflowDataPoint[]> => {
   const region = functions.region || 'us-central1';
   const projectId = firebaseConfig.projectId;
   let baseUrl = '';
@@ -699,7 +699,8 @@ export const getInflowTimeseries = async (range: TimeRangeOption): Promise<Inflo
   }
 
   // The name of the new Python Cloud Function
-  const url = `${baseUrl}/get_inflow_timeseries?range=${range}`; // Pass range as query parameter
+  // Append dam_id to the query parameters
+  const url = `${baseUrl}/get_inflow_timeseries?range=${range}&dam_id=${damId}`;
 
   try {
     // This is a GET request to fetch data

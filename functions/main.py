@@ -971,14 +971,24 @@ def submit_feedback(request):
 )
 def get_inflow_timeseries(request: https_fn.Request) -> https_fn.Response:
     """
-    Minimal Cloud Function to fetch inflow (metric_id=6) timeseries for dam_id=1.
-    Accepts a query param 'range' (either 'today' or '7d').
+    Minimal Cloud Function to fetch inflow (metric_id=6) timeseries for a given dam_id.
+    Accepts query params 'range' (e.g., '7d', '14d', 'mtd') and 'dam_id'.
     Returns an array of { ts_utc, value_num } objects for the chart.
     """
     logger.info("Received request for inflow timeseries data.")
 
     # Parse query params for range
     range_param = request.args.get('range', '7d')  # Default to last 7 days
+
+    # Parse query params for dam_id
+    dam_id_param = request.args.get('dam_id', '1')  # Default to '1' (Grand Coulee Dam)
+    try:
+        dam_id_to_query = int(dam_id_param)
+    except ValueError:
+        logger.warning(f"Invalid dam_id parameter: '{dam_id_param}'. Defaulting to dam_id 1.")
+        dam_id_to_query = 1
+    
+    logger.info(f"Processing inflow request for dam_id: {dam_id_to_query}, range: {range_param}")
 
     # Calculate date filter
     now_utc = datetime.utcnow()
@@ -1011,7 +1021,7 @@ def get_inflow_timeseries(request: https_fn.Request) -> https_fn.Response:
                     WHERE dam_id = %s AND metric_id = %s AND ts_utc >= %s
                     ORDER BY ts_utc ASC;
                 """
-                cursor.execute(query_sql, (1, 6, start_utc))
+                cursor.execute(query_sql, (dam_id_to_query, 6, start_utc))
                 rows = cursor.fetchall()
                 
                 result = []
@@ -1086,7 +1096,8 @@ def get_inflow_timeseries(request: https_fn.Request) -> https_fn.Response:
 def get_dashboard_section_cards_data(request: https_fn.Request) -> https_fn.Response:
     """
     HTTP Cloud Function to fetch the latest operational data for dashboard section cards.
-    Queries the 'fact_dam_ops' table for dam_id = 1 and specific metric_ids.
+    Accepts a 'dam_id' query parameter (defaults to 1).
+    Queries the 'fact_dam_ops' table for the given dam_id and specific metric_ids.
     """
     logger.info("Received request for dashboard section cards data.")
 
@@ -1108,13 +1119,23 @@ def get_dashboard_section_cards_data(request: https_fn.Request) -> https_fn.Resp
     # For actual data fetching, typically a GET request is used.
     # No specific request body is expected for this data retrieval.
 
+    # Parse query params for dam_id
+    dam_id_param = request.args.get('dam_id', '1')  # Default to '1' (Grand Coulee Dam)
+    try:
+        dam_id_to_query = int(dam_id_param)
+    except ValueError:
+        logger.warning(f"Invalid dam_id parameter for section cards: '{dam_id_param}'. Defaulting to dam_id 1.")
+        dam_id_to_query = 1
+    
+    logger.info(f"Processing section cards request for dam_id: {dam_id_to_query}")
+
     try:
         pool = get_connection_pool()
         conn = pool.getconn()
         card_data_list = []
         
-        # Dam ID is fixed at 1 as per requirements
-        dam_id_to_query = 1
+        # Dam ID is now dynamically set from the request parameter
+        # dam_id_to_query = 1 # This line is replaced by the parsing logic above
 
         try:
             with conn.cursor() as cursor:
