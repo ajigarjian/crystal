@@ -17,9 +17,10 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs"
+import { InteractiveMap } from "@/components/InteractiveMap"
 
 import data from "./data.json"
-import { getDashboardSectionCards, SectionCardData } from "@/lib/firebase"
+import { getDashboardSectionCards, SectionCardData, getDamLocations, DamLocation } from "@/lib/firebase"
 
 export interface DamInfo {
   id: number;
@@ -37,6 +38,10 @@ export default function Page() {
   const [selectedDam, setSelectedDam] = React.useState<DamInfo>(AVAILABLE_DAMS[0]);
   const [currentSectionCardData, setCurrentSectionCardData] = React.useState<SectionCardData[]>([]);
   const [isLoadingCards, setIsLoadingCards] = React.useState<boolean>(true);
+  const [damMarkers, setDamMarkers] = React.useState<DamLocation[]>([]);
+  const [isLoadingMapMarkers, setIsLoadingMapMarkers] = React.useState<boolean>(true);
+
+  const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
 
   // Fetch section card data when selectedDam changes
   React.useEffect(() => {
@@ -57,8 +62,26 @@ export default function Page() {
     }
   }, [selectedDam]); // Re-run when selectedDam object changes
 
+  // Fetch dam locations for the map
+  React.useEffect(() => {
+    async function loadDamMapData() {
+      setIsLoadingMapMarkers(true);
+      try {
+        const locations = await getDamLocations();
+        setDamMarkers(locations);
+      } catch (error) {
+        console.error("Failed to load dam locations for map:", error);
+        setDamMarkers([]); 
+      }
+      setIsLoadingMapMarkers(false);
+    }
+  
+    loadDamMapData();
+  }, []); // Empty dependency array means this runs once on mount
+
   return (
     <SidebarProvider
+      defaultOpen={false}
       style={
         {
           "--sidebar-width": "calc(var(--spacing) * 72)",
@@ -86,8 +109,26 @@ export default function Page() {
             <div className="flex flex-1 flex-col">
               <div className="@container/main flex flex-1 flex-col gap-2">
                 <div className="flex flex-col gap-4 pt-2 pb-4 md:gap-6 md:pb-6">
-                  <div className="px-4 lg:px-6">
-                    <ChartAreaInteractive selectedDamId={selectedDam.id} />
+                  <div className="flex grid grid-cols-3 gap-4 px-4 lg:px-6">
+                    <div className="col-span-2">
+                      <ChartAreaInteractive selectedDamId={selectedDam.id} />
+                    </div>
+                    <div className="col-span-1 h-full">
+                      {mapboxToken ? (
+                        <InteractiveMap 
+                          mapboxAccessToken={mapboxToken} 
+                          height="100%" 
+                          markers={damMarkers} 
+                        />
+                      ) : (
+                        <div className="flex h-full items-center justify-center rounded-xl border border-dashed bg-muted/50 p-4 text-center">
+                          <p className="text-sm text-muted-foreground">
+                            Map cannot be displayed. <br />
+                            (Mapbox token not configured)
+                          </p>
+                        </div>
+                      )}
+                    </div>
                   </div>
                   {/* Pass currentSectionCardData to SectionCards */}
                   {/* Optionally, show a loading state for cards */}

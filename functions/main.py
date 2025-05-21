@@ -91,6 +91,101 @@ METRICS_CONFIG = {
 @https_fn.on_request(
     cors=options.CorsOptions(
         cors_origins=[
+            "https://crystal-2f87e.web.app",
+            "https://askcrystal.info",
+            "https://www.askcrystal.info",
+            "http://localhost:3000",
+            "http://localhost:5173",
+        ],
+        cors_methods=["get", "options"] # Primarily a GET request
+    ),
+    timeout_sec=30,
+    memory=options.MemoryOption.MB_512
+)
+def get_dam_locations(request: https_fn.Request) -> https_fn.Response:
+    logger.info("Received request for dam locations.")
+
+    # Handle warming requests (optional but good practice)
+    if request.method == 'POST': # Warming often sent as POST
+        try:
+            request_json = request.get_json(silent=True)
+            if request_json and request_json.get('warming'):
+                logger.info("Warming request received for get_dam_locations.")
+                return https_fn.Response(json.dumps({"status": "warmed"}), status=200, headers={"Content-Type": "application/json"})
+        except Exception:
+             # If JSON parsing fails or not a warming request, proceed normally
+            pass
+
+    try:
+        pool = get_connection_pool()
+        conn = pool.getconn()
+        dam_locations_list = []
+        try:
+            with conn.cursor() as cursor:
+                # Query to get dam_id, dam_name, latitude, and longitude from dim_dam
+                # Filters out rows where latitude or longitude is NULL
+                query_sql = """
+                    SELECT dam_id, dam_name, latitude, longitude 
+                    FROM dim_dam 
+                    WHERE latitude IS NOT NULL AND longitude IS NOT NULL;
+                """
+                cursor.execute(query_sql)
+                rows = cursor.fetchall()
+                
+                for row_data in rows:
+                    dam_id, dam_name_val, lat_val, lon_val = row_data
+                    
+                    current_dam_lat = None
+                    current_dam_lon = None
+                    
+                    try:
+                        # Ensure latitude and longitude are converted to float
+                        if lat_val is not None:
+                            current_dam_lat = float(lat_val)
+                        if lon_val is not None:
+                            current_dam_lon = float(lon_val)
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"Could not convert lat/lon for dam_id {dam_id} (name: {dam_name_val}). Error: {e}. Skipping this dam.")
+                        continue # Skip this dam if coordinates are invalid
+                    
+                    # Only add if both latitude and longitude are valid numbers
+                    if current_dam_lat is not None and current_dam_lon is not None:
+                        dam_locations_list.append({
+                            "id": dam_id,
+                            "name": dam_name_val,
+                            "latitude": current_dam_lat,
+                            "longitude": current_dam_lon
+                        })
+            
+            return https_fn.Response(
+                json.dumps(dam_locations_list),
+                status=200,
+                headers={"Content-Type": "application/json"}
+            )
+        except Exception as db_error:
+            logger.error(f"Database error in get_dam_locations: {db_error}")
+            logger.error(traceback.format_exc())
+            if conn: conn.rollback() # Rollback in case of error during transaction
+            return https_fn.Response(
+                json.dumps({"error": "A database error occurred.", "details": str(db_error)}),
+                status=500,
+                headers={"Content-Type": "application/json"}
+            )
+        finally:
+            if conn:
+                pool.putconn(conn) # Return connection to the pool
+    except Exception as e:
+        logger.error(f"General error in get_dam_locations: {e}")
+        logger.error(traceback.format_exc())
+        return https_fn.Response(
+            json.dumps({"error": "An internal server error occurred.", "details": str(e)}),
+            status=500,
+            headers={"Content-Type": "application/json"}
+        )
+
+@https_fn.on_request(
+    cors=options.CorsOptions(
+        cors_origins=[
         "https://crystal-2f87e.web.app",
         "https://askcrystal.info",
         "https://www.askcrystal.info",

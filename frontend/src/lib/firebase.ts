@@ -728,4 +728,53 @@ export const getInflowTimeseries = async (range: TimeRangeOption, damId: number)
     console.error('Error calling getInflowTimeseries function:', error);
     return []; 
   }
+};
+
+// Define the expected structure for a single dam location
+export interface DamLocation {
+  id: number | string; // Should match the type of dam_id from your DB
+  name: string;
+  latitude: number;
+  longitude: number;
+}
+
+// Export a helper for calling the new dam locations function
+export const getDamLocations = async (): Promise<DamLocation[]> => {
+  const region = functions.region || 'us-central1';
+  const projectId = firebaseConfig.projectId;
+  let baseUrl = '';
+
+  if (process.env.NODE_ENV === 'development') {
+    baseUrl = `http://localhost:5001/${projectId}/${region}`;
+  } else {
+    baseUrl = `https://${region}-${projectId}.cloudfunctions.net`;
+  }
+
+  const url = `${baseUrl}/get_dam_locations`; // Name of your Python Cloud Function
+
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      let errorData = { error: "Failed to fetch dam locations" };
+      try {
+        errorData = await response.json();
+      } catch (e) {
+        console.error("Failed to parse error response from getDamLocations: ", e);
+      }
+      console.error('Error fetching dam locations:', response.status, errorData);
+      throw new Error(errorData.error || `Failed to fetch dam locations. Status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data as DamLocation[];
+  } catch (error: any) {
+    console.error('Error calling getDamLocations function:', error);
+    return []; // Return empty array for graceful error handling in UI
+  }
 }; 
