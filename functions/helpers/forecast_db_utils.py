@@ -30,6 +30,17 @@ Usage::
 
 logger = logging.getLogger(__name__)
 
+# 🚨  Hard-coded fallback
+_HARDCODED_DB = {
+    "NAME": "crystal",
+    "USER": "postgres",
+    "PASSWORD": "A$icV~t||V7RT-",
+    "INSTANCE": "crystal-2f87e:us-east4:crystal-sql",  # leave empty if using TCP
+    "HOST": "",     # e.g. "34.48.13.135"  • leave "" to prefer Unix socket
+    "PORT": 5432,
+}
+# ----
+
 # ------------------------------------------------------------
 # Connection handling
 # ------------------------------------------------------------
@@ -42,12 +53,12 @@ def _create_pool(min_conn: int = 1, max_conn: int = 10) -> pool.ThreadedConnecti
         1. Unix‑domain socket at /cloudsql/<instance>
         2. TCP using DB_HOST / DB_PORT (public or private IP)
     """
-    db_name = os.environ["DB_NAME"]
-    db_user = os.environ["DB_USER"]
-    db_pwd = os.environ["DB_PASSWORD"]
-    db_instance = os.getenv("DB_INSTANCE")
-    db_host = os.getenv("DB_HOST")
-    db_port = int(os.getenv("DB_PORT", "5432"))
+    db_name     = os.getenv("DB_NAME",     _HARDCODED_DB["NAME"])
+    db_user     = os.getenv("DB_USER",     _HARDCODED_DB["USER"])
+    db_pwd      = os.getenv("DB_PASSWORD", _HARDCODED_DB["PASSWORD"])
+    db_instance = os.getenv("DB_INSTANCE", _HARDCODED_DB["INSTANCE"])
+    db_host     = os.getenv("DB_HOST",     _HARDCODED_DB["HOST"])
+    db_port     = int(os.getenv("DB_PORT", str(_HARDCODED_DB["PORT"])))
 
     # 1️⃣  Unix‑socket (Cloud Functions Gen 1/2 with --set-cloudsql-instances / --connections)
     if db_instance and not db_host:
