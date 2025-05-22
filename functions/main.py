@@ -1460,6 +1460,9 @@ def generate_inflow_forecast_v0(request: https_fn.Request) -> https_fn.Response:
         lead_time_duration = forecast_start_utc - run_issued_utc
         actual_lead_time_hours = lead_time_duration.total_seconds() / 3600
 
+        # Construct a simple string for the note
+        run_note = f"Source: generate_inflow_forecast_v0_cloud_function, Dam ID processed: {dam_id_to_process}, Horizon: {forecast_horizon_hours}h"
+
         run_id = write_run_header(
             model_id=model_id_to_use,
             run_issued_utc=run_issued_utc,
@@ -1467,7 +1470,7 @@ def generate_inflow_forecast_v0(request: https_fn.Request) -> https_fn.Response:
             forecast_end_utc=forecast_end_utc,
             horizon_hours=actual_horizon_hours, # Use calculated horizon
             lead_time_hours=actual_lead_time_hours, # Use calculated lead time
-            note={"source": "generate_inflow_forecast_v0_cloud_function", "dam_id_processed": dam_id_to_process}
+            note=run_note # Pass the simple string here
         )
 
         if run_id is None:
@@ -1482,7 +1485,6 @@ def generate_inflow_forecast_v0(request: https_fn.Request) -> https_fn.Response:
         write_forecast_rows(
             run_id=run_id,
             dam_id=dam_id_to_process,
-            metric_id=metric_id_for_forecast,
             ensemble_member=ensemble_member,
             forecast_data=forecast_data
         )

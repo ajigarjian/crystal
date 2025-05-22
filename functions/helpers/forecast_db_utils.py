@@ -12,9 +12,9 @@ from psycopg2.extras import RealDictCursor
 from .db_utils import get_connection_pool
 
 """forecast_db_utils.py – *stand‑alone* helpers for writing forecast metadata
-and rows to PostgreSQL / Cloud SQL.
+and rows to PostgreSQL / Cloud SQL.
 
-Environment variables expected (same names used by Cloud SQL Python Connector
+Environment variables expected (same names used by Cloud SQL Python Connector
 & Cloud Functions examples):
     DB_NAME       – database name
     DB_USER       – role / user name
@@ -80,7 +80,7 @@ def write_run_header(
     forecast_end_utc: datetime,
     horizon_hours: int,
     lead_time_hours: float,
-    note: Optional[dict] = None,
+    note: Optional[str] = None,
 ) -> Optional[int]:
     """Insert a record into **fact_forecast_run** and return the generated *run_id*."""
     sql = (
@@ -116,7 +116,6 @@ def write_run_header(
 def write_forecast_rows(
     run_id: int,
     dam_id: int,
-    metric_id: int,
     ensemble_member: int,
     forecast_data: List[Dict[str, Any]],
 ):
@@ -128,30 +127,28 @@ def write_forecast_rows(
     sql = (
         """
         INSERT INTO fact_dam_forecast
-        (run_id, ensemble_member, dam_id, metric_id,
-         valid_utc, value_cfs, created_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s);
+        (run_id, dam_id, ensemble_member, 
+         valid_utc, value_cfs)
+        VALUES (%s, %s, %s, %s, %s);
         """
     )
 
-    created_at = datetime.utcnow().replace(tzinfo=timezone.utc)
     rows_written = 0
 
-    for row in forecast_data:
-        valid_ts = row.get("valid_utc")
-        value_cfs = row.get("value_cfs")
+    for row_data_point in forecast_data:
+        valid_ts = row_data_point.get("valid_utc")
+        value_cfs = row_data_point.get("value_cfs")
+
         if not isinstance(valid_ts, datetime):
-            logger.error("Row skipped – valid_utc is not datetime: %s", row)
+            logger.error("Row skipped – valid_utc is not datetime: %s", row_data_point)
             continue
 
         params = (
             run_id,
-            ensemble_member,
             dam_id,
-            metric_id,
+            ensemble_member,
             valid_ts.astimezone(timezone.utc),
             Decimal(str(value_cfs)) if value_cfs is not None else None,
-            created_at,
         )
         try:
             _execute(sql, params, fetch_all=False)
