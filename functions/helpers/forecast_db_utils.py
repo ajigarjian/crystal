@@ -1,102 +1,216 @@
+import os
 import logging
 from datetime import datetime, timezone
 from decimal import Decimal
-from .db_utils import execute_query # Assuming this is your existing helper
+from typing import List, Dict, Any, Optional
+
+import psycopg2
+from psycopg2 import pool, OperationalError
+from psycopg2.extras import RealDictCursor
+
+"""forecast_db_utils.py – *stand‑alone* helpers for writing forecast metadata
+and rows to PostgreSQL / Cloud SQL.
+
+Environment variables expected (same names used by Cloud SQL Python Connector
+& Cloud Functions examples):
+    DB_NAME       – database name
+    DB_USER       – role / user name
+    DB_PASSWORD   – password for that user
+    DB_INSTANCE   – instance connection name  (project:region:instance)
+    DB_HOST       – **optional**; if set we connect via TCP instead of Unix‑socket
+    DB_PORT       – **optional**; defaults to 5432
+
+Usage::
+
+    from forecast_db_utils import write_run_header, write_forecast_rows
+
+    run_id = write_run_header(...)
+    write_forecast_rows(run_id, ...)
+"""
 
 logger = logging.getLogger(__name__)
 
-def write_run_header(model_id: int, run_issued_utc: datetime, forecast_start_utc: datetime, forecast_end_utc: datetime, horizon_hours: int, lead_time_hours: float, note: dict = None) -> int | None:
+# ------------------------------------------------------------
+# Connection handling
+# ------------------------------------------------------------
+_pool: Optional[pool.ThreadedConnectionPool] = None
+
+def _create_pool(min_conn: int = 1, max_conn: int = 10) -> pool.ThreadedConnectionPool:
+    """Create a connection pool.
+
+    Preference order:
+        1. Unix‑domain socket at /cloudsql/<instance>
+        2. TCP using DB_HOST / DB_PORT (public or private IP)
     """
-    Writes a header row to the fact_forecast_run table and returns the run_id.
-    Uses execute_query from db_utils.
+    db_name = os.environ["DB_NAME"]
+    db_user = os.environ["DB_USER"]
+    db_pwd = os.environ["DB_PASSWORD"]
+    db_instance = os.getenv("DB_INSTANCE")
+    db_host = os.getenv("DB_HOST")
+    db_port = int(os.getenv("DB_PORT", "5432"))
+
+    # 1️⃣  Unix‑socket (Cloud Functions Gen 1/2 with --set-cloudsql-instances / --connections)
+    if db_instance and not db_host:
+        socket_dir = os.getenv("DB_SOCKET_DIR", "/cloudsql")
+        socket_path = f"{socket_dir}/{db_instance}"
+        try:
+            logger.info("Connecting to Cloud SQL over Unix socket %s", socket_path)
+            return pool.ThreadedConnectionPool(
+                min_conn,
+                max_conn,
+                dbname=db_name,
+                user=db_user,
+                password=db_pwd,
+                host=socket_path,
+            )
+        except OperationalError as err:
+            logger.warning("Unix‑socket connection failed – %s", err)
+
+    # 2️⃣  TCP (public / private address)
+    host = db_host or "127.0.0.1"
+    logger.info("Connecting to PostgreSQL over TCP %s:%s", host, db_port)
+    return pool.ThreadedConnectionPool(
+        min_conn,
+        max_conn,
+        dbname=db_name,
+        user=db_user,
+        password=db_pwd,
+        host=host,
+        port=db_port,
+        sslmode="require" if os.getenv("DB_SSL", "true").lower() in {"1", "true", "yes"} else "prefer",
+    )
+
+
+def _get_pool() -> pool.ThreadedConnectionPool:
+    global _pool
+    if _pool is None:
+        _pool = _create_pool()
+    return _pool
+
+
+# ------------------------------------------------------------
+# Low‑level helper
+# ------------------------------------------------------------
+
+def _execute(query: str, params: tuple | None = None, fetch_all: bool = True) -> Any:
+    """Execute *query* inside a pooled connection.
+
+    When *fetch_all* is False return the first row (or None).
+    Uses RealDictCursor so we can refer to columns by name.
     """
-    sql = """
-        INSERT INTO fact_forecast_run 
-        (model_id, run_issued_utc, forecast_start_utc, forecast_end_utc, horizon_hours, lead_time_hours, note)
+    conn = None
+    cur = None
+    try:
+        conn = _get_pool().getconn()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute(query, params)
+        if cur.description:  # SELECT / RETURNING
+            result = cur.fetchall() if fetch_all else cur.fetchone()
+        else:
+            result = None
+        conn.commit()
+        return result
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        logger.error("SQL execution failed: %s", e, exc_info=True)
+        raise
+    finally:
+        if cur:
+            cur.close()
+        if conn:
+            _get_pool().putconn(conn)
+
+
+# ------------------------------------------------------------
+# Public helpers used by your forecast functions
+# ------------------------------------------------------------
+
+def write_run_header(
+    model_id: int,
+    run_issued_utc: datetime,
+    forecast_start_utc: datetime,
+    forecast_end_utc: datetime,
+    horizon_hours: int,
+    lead_time_hours: float,
+    note: Optional[dict] = None,
+) -> Optional[int]:
+    """Insert a record into **fact_forecast_run** and return the generated *run_id*."""
+    sql = (
+        """
+        INSERT INTO fact_forecast_run
+        (model_id, run_issued_utc, forecast_start_utc, forecast_end_utc,
+         horizon_hours, lead_time_hours, note)
         VALUES (%s, %s, %s, %s, %s, %s, %s)
         RETURNING run_id;
-    """
-    # Ensure datetimes are timezone-aware (UTC)
+        """
+    )
+
     params = (
         model_id,
-        run_issued_utc.astimezone(timezone.utc) if run_issued_utc.tzinfo is None else run_issued_utc,
-        forecast_start_utc.astimezone(timezone.utc) if forecast_start_utc.tzinfo is None else forecast_start_utc,
-        forecast_end_utc.astimezone(timezone.utc) if forecast_end_utc.tzinfo is None else forecast_end_utc,
+        run_issued_utc.astimezone(timezone.utc),
+        forecast_start_utc.astimezone(timezone.utc),
+        forecast_end_utc.astimezone(timezone.utc),
         horizon_hours,
         lead_time_hours,
-        note
+        note,
     )
-    
-    try:
-        # Adjust call to match execute_query(query, params=None, fetch_all=True)
-        # To fetch one row (for RETURNING run_id), set fetch_all=False.
-        # The commit is implicit in the version of execute_query being called.
-        result_dict = execute_query(sql, params, fetch_all=False)
-        
-        if result_dict and 'run_id' in result_dict:
-            run_id = result_dict['run_id']
-            logger.info(f"Successfully wrote forecast run header. run_id: {run_id}")
-            return run_id
-        else:
-            logger.warning("Write run header did not return a run_id or result was not a dict as expected.")
-            # Log the actual result type and content for debugging if it's not None
-            if result_dict is not None:
-                logger.debug(f"Actual result from execute_query: {result_dict} (type: {type(result_dict)})")
-            return None
-    except Exception as e:
-        logger.error(f"Error writing forecast run header using execute_query: {e}", exc_info=True)
-        return None
 
-def write_forecast_rows(run_id: int, dam_id: int, metric_id: int, ensemble_member: int, forecast_data: list[dict]):
-    """
-    Writes multiple forecast data rows to the fact_dam_forecast table.
-    Uses execute_query from db_utils for each row.
-    """
-    sql_insert_row = """
+    result = _execute(sql, params, fetch_all=False)
+    if result and result.get("run_id") is not None:
+        run_id = result["run_id"]
+        logger.info("Forecast run header written (run_id=%s)", run_id)
+        return run_id
+
+    logger.error("Failed to obtain run_id from INSERT RETURNING – result=%s", result)
+    return None
+
+
+def write_forecast_rows(
+    run_id: int,
+    dam_id: int,
+    metric_id: int,
+    ensemble_member: int,
+    forecast_data: List[Dict[str, Any]],
+):
+    """Bulk‑insert hourly forecast rows into **fact_dam_forecast**."""
+    if not forecast_data:
+        logger.warning("No forecast rows provided – nothing written (run_id=%s)", run_id)
+        return
+
+    sql = (
+        """
         INSERT INTO fact_dam_forecast
-        (run_id, ensemble_member, dam_id, metric_id, valid_utc, value_cfs, created_at)
+        (run_id, ensemble_member, dam_id, metric_id,
+         valid_utc, value_cfs, created_at)
         VALUES (%s, %s, %s, %s, %s, %s, %s);
-    """
-    created_at_ts = datetime.utcnow().replace(tzinfo=timezone.utc)
-    rows_written_count = 0
+        """
+    )
 
-    for row_data in forecast_data:
-        valid_utc_val = row_data.get('valid_utc')
-        value_cfs_val = row_data.get('value_cfs')
+    created_at = datetime.utcnow().replace(tzinfo=timezone.utc)
+    rows_written = 0
 
-        if not isinstance(valid_utc_val, datetime):
-            logger.error(f"Invalid valid_utc type: {type(valid_utc_val)}. Skipping row: {row_data} for run_id {run_id}")
+    for row in forecast_data:
+        valid_ts = row.get("valid_utc")
+        value_cfs = row.get("value_cfs")
+        if not isinstance(valid_ts, datetime):
+            logger.error("Row skipped – valid_utc is not datetime: %s", row)
             continue
-        
-        aware_valid_utc = valid_utc_val.astimezone(timezone.utc) if valid_utc_val.tzinfo is None else valid_utc_val
 
-        db_value = None
-        if value_cfs_val is not None:
-            try:
-                db_value = Decimal(str(value_cfs_val))
-            except Exception:
-                 logger.warning(f"Could not convert value_cfs '{value_cfs_val}' to Decimal for run_id {run_id}. Storing as NULL.")
-        
-        params_for_row = (
+        params = (
             run_id,
             ensemble_member,
             dam_id,
             metric_id,
-            aware_valid_utc,
-            db_value,
-            created_at_ts
+            valid_ts.astimezone(timezone.utc),
+            Decimal(str(value_cfs)) if value_cfs is not None else None,
+            created_at,
         )
-        
         try:
-            # Adjust call to match execute_query(query, params=None, fetch_all=True)
-            # For a simple INSERT without RETURNING, we don't need to fetch rows.
-            # The commit is implicit. Default fetch_all=True is fine.
-            execute_query(sql_insert_row, params_for_row)
-            rows_written_count += 1
-        except Exception as e:
-            logger.error(f"Error writing a forecast row for run_id {run_id}, dam_id {dam_id}, valid_utc {aware_valid_utc}: {e}", exc_info=True)
+            _execute(sql, params, fetch_all=False)
+            rows_written += 1
+        except Exception:
+            # Error already logged in _execute
+            continue
 
-    if rows_written_count > 0:
-        logger.info(f"Successfully wrote {rows_written_count} forecast rows for run_id: {run_id}, dam_id: {dam_id}")
-    else:
-        logger.warning(f"No forecast rows were written for run_id: {run_id}, dam_id: {dam_id}. Input data count: {len(forecast_data)}")
+    logger.info("%s forecast rows written for run_id=%s (dam_id=%s)", rows_written, run_id, dam_id)

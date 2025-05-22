@@ -1368,6 +1368,7 @@ def get_dashboard_section_cards_data(request: https_fn.Request) -> https_fn.Resp
     memory=options.MemoryOption.GB_1, # 1GiB, as per ChatGPT's gcloud example
     min_instances=0 # Can scale to zero
 )
+
 def generate_inflow_forecast_v0(request: https_fn.Request) -> https_fn.Response:
     """
     HTTP-triggered Cloud Function to generate a deterministic inflow forecast.
