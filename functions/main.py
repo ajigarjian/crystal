@@ -2,7 +2,7 @@ import os
 import django
 from django.conf import settings
 import decimal # Add import for decimal
-from datetime import timezone # Import timezone
+import math # Add import for math
 
 # Set the DJANGO_SETTINGS_MODULE environment variable
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "factchecker.settings")
@@ -13,7 +13,7 @@ django.setup()
 from firebase_functions import https_fn, options
 from firebase_admin import initialize_app, firestore
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import firebase_admin
 import logging
 import time
@@ -67,6 +67,10 @@ from helpers.stream_search_datasets import stream_search_datasets_helper
 from helpers.stream_analyze import stream_analyze_helper, NumpyEncoder
 # Import the query evaluator at the top level
 from factchecker.search.query_processing.query_evaluator import evaluate_query
+
+# Import the new helper modules for the inflow forecast
+from helpers.forecast_db_utils import write_run_header, write_forecast_rows
+from helpers.inflow_model_v0 import run_inflow_forecast as run_inflow_forecast_v0
 
 
 # Configure logging
@@ -892,11 +896,11 @@ def create_dataset_progress_report(dataset_stats):
 @https_fn.on_request(
     cors=options.CorsOptions(
         cors_origins=[
-        "https://crystal-2f87e.web.app",
-        "https://askcrystal.info",
-        "https://www.askcrystal.info",
-        "http://localhost:3000",
-        "http://localhost:5173",
+            "https://crystal-2f87e.web.app",
+            "https://askcrystal.info",
+            "https://www.askcrystal.info",
+            "http://localhost:3000",
+            "http://localhost:5173",
         ],
         cors_methods=["get", "post", "options"]
     ),
@@ -1344,6 +1348,157 @@ def get_dashboard_section_cards_data(request: https_fn.Request) -> https_fn.Resp
         logger.error(traceback.format_exc())
         return https_fn.Response(
             json.dumps({"error": "An internal server error occurred.", "details": str(e)}),
+            status=500,
+            headers={"Content-Type": "application/json"}
+        )
+
+@https_fn.on_request(
+    cors=options.CorsOptions(
+        cors_origins=[
+            "https://crystal-2f87e.web.app",
+            "https://askcrystal.info",
+            "https://www.askcrystal.info",
+            "http://localhost:3000",
+            "http://localhost:5173",
+            # Add any other origins if needed, e.g., for Cloud Scheduler if invoked via authenticated HTTP
+        ],
+        cors_methods=["get", "post", "options"] # Allow POST if scheduler uses it
+    ),
+    timeout_sec=540,  # 9 minutes, as per ChatGPT's gcloud example
+    memory=options.MemoryOption.GB_1, # 1GiB, as per ChatGPT's gcloud example
+    min_instances=0 # Can scale to zero
+)
+def generate_inflow_forecast_v0(request: https_fn.Request) -> https_fn.Response:
+    """
+    HTTP-triggered Cloud Function to generate a deterministic inflow forecast.
+    Writes results to fact_forecast_run and fact_dam_forecast.
+    
+    Query Parameters:
+        dam_id (int, optional): The ID of the dam. Defaults to 1 (Grand Coulee).
+                                Note: V0 model is hardcoded for Grand Coulee.
+        model_id (int, optional): The ID of the model. Defaults to 1.
+        metric_id (int, optional): The ID of the metric. Defaults to 6 (inflow).
+        horizon_hours (int, optional): Forecast horizon in hours. Defaults to 120.
+    """
+    logger.info("Received request for generate_inflow_forecast_v0.")
+
+    # Handle warming requests
+    if request.method == 'POST': # Warming often sent as POST
+        try:
+            request_json = request.get_json(silent=True)
+            if request_json and request_json.get('warming'):
+                logger.info("Warming request received for generate_inflow_forecast_v0.")
+                return https_fn.Response(json.dumps({"status": "warmed"}), status=200, headers={"Content-Type": "application/json"})
+        except Exception:
+             # If JSON parsing fails or not a warming request, proceed normally
+            pass
+
+    try:
+        # --- Configuration ---
+        # dam_id: For V0, the model internally uses Grand Coulee data.
+        # The parameter is here for future expansion.
+        dam_id_to_process = int(request.args.get('dam_id', '1'))
+        
+        # model_id: As per your plan, placeholder for V0.
+        # This should correspond to an entry in dim_model.
+        model_id_to_use = int(request.args.get('model_id', '1'))
+        
+        # metric_id for inflow
+        metric_id_for_forecast = int(request.args.get('metric_id', '6')) # 6 for inflow
+        
+        # Forecast horizon
+        forecast_horizon_hours = int(request.args.get('horizon_hours', '120'))
+
+        # Ensemble member: -1 for deterministic forecasts
+        ensemble_member = -1
+
+        logger.info(f"Starting inflow forecast generation for dam_id: {dam_id_to_process}, model_id: {model_id_to_use}, horizon: {forecast_horizon_hours}h")
+
+        # 0. Bookkeeping - Get current time as issue time
+        # Ensure it's timezone-aware UTC
+        run_issued_utc = datetime.utcnow().replace(tzinfo=timezone.utc)
+
+        # 1. Run the inflow model
+        # The model will return a list of {'valid_utc': datetime, 'value_cfs': float}
+        # `run_inflow_forecast_v0` expects `current_utc_time` to be the issue time.
+        forecast_data = run_inflow_forecast_v0(
+            dam_id=dam_id_to_process, # Passed to model, though V0 is hardcoded
+            current_utc_time=run_issued_utc,
+            forecast_horizon_hours=forecast_horizon_hours
+        )
+
+        if not forecast_data:
+            logger.warning("Inflow model returned no forecast data.")
+            return https_fn.Response(
+                json.dumps({"status": "error", "message": "Inflow model returned no data."}),
+                status=500,
+                headers={"Content-Type": "application/json"}
+            )
+
+        # 2. Write header row to fact_forecast_run
+        # Determine forecast_start_utc and forecast_end_utc from the data
+        # Ensure these are also timezone-aware UTC
+        forecast_start_utc = forecast_data[0]['valid_utc']
+        forecast_end_utc = forecast_data[-1]['valid_utc']
+        
+        if forecast_start_utc.tzinfo is None: # Ensure UTC
+             forecast_start_utc = forecast_start_utc.replace(tzinfo=timezone.utc)
+        if forecast_end_utc.tzinfo is None: # Ensure UTC
+            forecast_end_utc = forecast_end_utc.replace(tzinfo=timezone.utc)
+
+        # Calculate actual horizon and lead time from data and issue time
+        # Horizon is duration from first forecast point to last.
+        actual_horizon_duration = forecast_end_utc - forecast_start_utc
+        # Add 1 because if start and end are 1 hour apart, it's 2 data points covering 1 full hour interval + start point.
+        # Or, more simply, it's the number of forecast points if they are contiguous hourly.
+        # Let's use the number of points if they are hourly.
+        # A more robust way for horizon: ((forecast_end_utc - forecast_start_utc).total_seconds() / 3600) + 1
+        actual_horizon_hours = math.ceil(actual_horizon_duration.total_seconds() / 3600) + 1
+        
+        # Lead time is duration from issue to first forecast point.
+        lead_time_duration = forecast_start_utc - run_issued_utc
+        actual_lead_time_hours = lead_time_duration.total_seconds() / 3600
+
+        run_id = write_run_header(
+            model_id=model_id_to_use,
+            run_issued_utc=run_issued_utc,
+            forecast_start_utc=forecast_start_utc,
+            forecast_end_utc=forecast_end_utc,
+            horizon_hours=actual_horizon_hours, # Use calculated horizon
+            lead_time_hours=actual_lead_time_hours, # Use calculated lead time
+            note={"source": "generate_inflow_forecast_v0_cloud_function", "dam_id_processed": dam_id_to_process}
+        )
+
+        if run_id is None:
+            logger.error("Failed to write forecast run header. Aborting.")
+            return https_fn.Response(
+                json.dumps({"status": "error", "message": "Failed to write forecast run header."}),
+                status=500,
+                headers={"Content-Type": "application/json"}
+            )
+
+        # 3. Write the forecast value rows to fact_dam_forecast
+        write_forecast_rows(
+            run_id=run_id,
+            dam_id=dam_id_to_process,
+            metric_id=metric_id_for_forecast,
+            ensemble_member=ensemble_member,
+            forecast_data=forecast_data
+        )
+
+        success_message = f"Successfully generated and stored inflow forecast. run_id: {run_id}, rows: {len(forecast_data)}"
+        logger.info(success_message)
+        return https_fn.Response(
+            json.dumps({"status": "success", "message": success_message, "run_id": run_id, "rows_written": len(forecast_data)}),
+            status=200,
+            headers={"Content-Type": "application/json"}
+        )
+
+    except Exception as e:
+        logger.error(f"Error in generate_inflow_forecast_v0: {e}", exc_info=True)
+        # Consider if traceback.format_exc() is too verbose for client
+        return https_fn.Response(
+            json.dumps({"status": "error", "message": "An internal server error occurred.", "details": str(e)}),
             status=500,
             headers={"Content-Type": "application/json"}
         )
