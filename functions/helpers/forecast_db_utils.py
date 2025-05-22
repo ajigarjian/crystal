@@ -8,6 +8,9 @@ import psycopg2
 from psycopg2 import pool, OperationalError
 from psycopg2.extras import RealDictCursor
 
+# Import the centralized connection pool from db_utils
+from .db_utils import get_connection_pool
+
 """forecast_db_utils.py – *stand‑alone* helpers for writing forecast metadata
 and rows to PostgreSQL / Cloud SQL.
 
@@ -30,75 +33,6 @@ Usage::
 
 logger = logging.getLogger(__name__)
 
-# 🚨  Hard-coded fallback
-_HARDCODED_DB = {
-    "NAME": "crystal",
-    "USER": "postgres",
-    "PASSWORD": "A$icV~t||V7RT-",
-    "INSTANCE": "crystal-2f87e:us-east4:crystal-sql",  # leave empty if using TCP
-    "HOST": "",     # e.g. "34.48.13.135"  • leave "" to prefer Unix socket
-    "PORT": 5432,
-}
-# ----
-
-# ------------------------------------------------------------
-# Connection handling
-# ------------------------------------------------------------
-_pool: Optional[pool.ThreadedConnectionPool] = None
-
-def _create_pool(min_conn: int = 1, max_conn: int = 10) -> pool.ThreadedConnectionPool:
-    """Create a connection pool.
-
-    Preference order:
-        1. Unix‑domain socket at /cloudsql/<instance>
-        2. TCP using DB_HOST / DB_PORT (public or private IP)
-    """
-    db_name     = os.getenv("DB_NAME",     _HARDCODED_DB["NAME"])
-    db_user     = os.getenv("DB_USER",     _HARDCODED_DB["USER"])
-    db_pwd      = os.getenv("DB_PASSWORD", _HARDCODED_DB["PASSWORD"])
-    db_instance = os.getenv("DB_INSTANCE", _HARDCODED_DB["INSTANCE"])
-    db_host     = os.getenv("DB_HOST",     _HARDCODED_DB["HOST"])
-    db_port     = int(os.getenv("DB_PORT", str(_HARDCODED_DB["PORT"])))
-
-    # 1️⃣  Unix‑socket (Cloud Functions Gen 1/2 with --set-cloudsql-instances / --connections)
-    if db_instance and not db_host:
-        socket_dir = os.getenv("DB_SOCKET_DIR", "/cloudsql")
-        socket_path = f"{socket_dir}/{db_instance}"
-        try:
-            logger.info("Connecting to Cloud SQL over Unix socket %s", socket_path)
-            return pool.ThreadedConnectionPool(
-                min_conn,
-                max_conn,
-                dbname=db_name,
-                user=db_user,
-                password=db_pwd,
-                host=socket_path,
-            )
-        except OperationalError as err:
-            logger.warning("Unix‑socket connection failed – %s", err)
-
-    # 2️⃣  TCP (public / private address)
-    host = db_host or "127.0.0.1"
-    logger.info("Connecting to PostgreSQL over TCP %s:%s", host, db_port)
-    return pool.ThreadedConnectionPool(
-        min_conn,
-        max_conn,
-        dbname=db_name,
-        user=db_user,
-        password=db_pwd,
-        host=host,
-        port=db_port,
-        sslmode="require" if os.getenv("DB_SSL", "true").lower() in {"1", "true", "yes"} else "prefer",
-    )
-
-
-def _get_pool() -> pool.ThreadedConnectionPool:
-    global _pool
-    if _pool is None:
-        _pool = _create_pool()
-    return _pool
-
-
 # ------------------------------------------------------------
 # Low‑level helper
 # ------------------------------------------------------------
@@ -111,8 +45,10 @@ def _execute(query: str, params: tuple | None = None, fetch_all: bool = True) ->
     """
     conn = None
     cur = None
+    # Use the imported get_connection_pool
+    current_pool = get_connection_pool() 
     try:
-        conn = _get_pool().getconn()
+        conn = current_pool.getconn()
         cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute(query, params)
         if cur.description:  # SELECT / RETURNING
@@ -130,7 +66,7 @@ def _execute(query: str, params: tuple | None = None, fetch_all: bool = True) ->
         if cur:
             cur.close()
         if conn:
-            _get_pool().putconn(conn)
+            current_pool.putconn(conn)
 
 
 # ------------------------------------------------------------
