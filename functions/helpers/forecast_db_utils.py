@@ -1,7 +1,7 @@
 import logging
 from datetime import datetime, timezone
 from decimal import Decimal
-from .db_utils import execute_query # Assuming execute_query is in db_utils.py
+from .db_utils import execute_query # Assuming this is your existing helper
 
 logger = logging.getLogger(__name__)
 
@@ -28,20 +28,22 @@ def write_run_header(model_id: int, run_issued_utc: datetime, forecast_start_utc
     )
     
     try:
-        # execute_query will handle connection and cursor
-        # fetch_one=True because RETURNING run_id returns one row
-        # commit=True because this is an INSERT statement
-        result_dict = execute_query(sql, params, fetch_one=True, commit=True)
+        # Adjust call to match execute_query(query, params=None, fetch_all=True)
+        # To fetch one row (for RETURNING run_id), set fetch_all=False.
+        # The commit is implicit in the version of execute_query being called.
+        result_dict = execute_query(sql, params, fetch_all=False)
         
         if result_dict and 'run_id' in result_dict:
             run_id = result_dict['run_id']
             logger.info(f"Successfully wrote forecast run header. run_id: {run_id}")
             return run_id
         else:
-            logger.warning("Write run header did not return a run_id.")
+            logger.warning("Write run header did not return a run_id or result was not a dict as expected.")
+            # Log the actual result type and content for debugging if it's not None
+            if result_dict is not None:
+                logger.debug(f"Actual result from execute_query: {result_dict} (type: {type(result_dict)})")
             return None
     except Exception as e:
-        # execute_query should raise exceptions from db_utils, which can be caught here
         logger.error(f"Error writing forecast run header using execute_query: {e}", exc_info=True)
         return None
 
@@ -66,7 +68,6 @@ def write_forecast_rows(run_id: int, dam_id: int, metric_id: int, ensemble_membe
             logger.error(f"Invalid valid_utc type: {type(valid_utc_val)}. Skipping row: {row_data} for run_id {run_id}")
             continue
         
-        # Ensure datetime is timezone-aware UTC
         aware_valid_utc = valid_utc_val.astimezone(timezone.utc) if valid_utc_val.tzinfo is None else valid_utc_val
 
         db_value = None
@@ -87,13 +88,13 @@ def write_forecast_rows(run_id: int, dam_id: int, metric_id: int, ensemble_membe
         )
         
         try:
-            # Each INSERT is a separate call to execute_query and a separate commit
-            execute_query(sql_insert_row, params_for_row, commit=True)
+            # Adjust call to match execute_query(query, params=None, fetch_all=True)
+            # For a simple INSERT without RETURNING, we don't need to fetch rows.
+            # The commit is implicit. Default fetch_all=True is fine.
+            execute_query(sql_insert_row, params_for_row)
             rows_written_count += 1
         except Exception as e:
             logger.error(f"Error writing a forecast row for run_id {run_id}, dam_id {dam_id}, valid_utc {aware_valid_utc}: {e}", exc_info=True)
-            # Continue to try writing other rows, or you might choose to break/return here
-            # depending on desired error handling (e.g., if one fails, should all fail?)
 
     if rows_written_count > 0:
         logger.info(f"Successfully wrote {rows_written_count} forecast rows for run_id: {run_id}, dam_id: {dam_id}")
