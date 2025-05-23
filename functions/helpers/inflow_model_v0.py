@@ -21,7 +21,7 @@ GRAND_COULEE_POINTS = [
 # Model parameters (these can be tuned or made configurable)
 RUNOFF_COEFF = 0.4
 SNOWMELT_COEFF = 0.35
-SCALING_FACTOR = 2.0  # Original script's scaling factor
+SCALING_FACTOR = 48.0
 SNOWMELT_THRESH_TEMP_C = 1.0 # Temperature (Celsius) above which snowmelt occurs
 HOURLY_ROLLING_AVG_WINDOW_SNOWMELT = 7 * 24 # 7 days in hours
 
