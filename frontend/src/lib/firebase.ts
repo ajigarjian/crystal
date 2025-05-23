@@ -462,7 +462,8 @@ export const warmFunctions = async () => {
       'submit_feedback',
       'evaluate_search_query', // Add the new function
       'get_dashboard_section_cards_data', // Added new function here
-      'get_inflow_timeseries' // Add new inflow timeseries function
+      'get_inflow_timeseries', // Add new inflow timeseries function
+      'get_dam_locations' // Add new dam locations function
     ];
     
     // Warm each function with a minimal payload
