@@ -32,7 +32,8 @@ def fetch_hourly_weather(lat, lon, start_date_str: str, end_date_str: str) -> tu
         f"https://api.open-meteo.com/v1/forecast?"
         f"latitude={lat}&longitude={lon}&start_date={start_date_str}&end_date={end_date_str}"
         f"&hourly=precipitation,temperature_2m"
-        f"&timezone=UTC" # Request data in UTC
+        f"&timezone=UTC"
+        f"&models=gfs_seamless"
     )
     try:
         response = requests.get(url, timeout=30) # Added timeout
