@@ -32,7 +32,7 @@ export const getFirebaseAnalytics = () => {
   return null;
 };
 
-export const trackDwellTimeStart = (pageName) => {
+export const trackDwellTimeStart = (pageName: string) => {
   const analytics = getFirebaseAnalytics();
   if (analytics) {
     console.log(`Tracking dwell time start for: ${pageName}`);
@@ -53,11 +53,11 @@ export const trackDwellTimeStart = (pageName) => {
   }
 };
 
-export const trackDwellTimeEnd = (pageName, startTime) => {
+export const trackDwellTimeEnd = (pageName: string, startTime: Date) => {
   const analytics = getFirebaseAnalytics();
   if (analytics) {
     const endTime = new Date();
-    const durationSeconds = Math.floor((endTime - startTime) / 1000);
+    const durationSeconds = Math.floor((endTime.getTime() - startTime.getTime()) / 1000);
     logEvent(analytics, 'dwell_time_end', { 
       page_name: pageName,
       duration_seconds: durationSeconds
@@ -460,7 +460,10 @@ export const warmFunctions = async () => {
       'stream_search_datasets',
       'stream_analyze',
       'submit_feedback',
-      'evaluate_search_query' // Add the new function
+      'evaluate_search_query', // Add the new function
+      'get_dashboard_section_cards_data', // Added new function here
+      'get_inflow_timeseries', // Add new inflow timeseries function
+      'get_dam_locations' // Add new dam locations function
     ];
     
     // Warm each function with a minimal payload
@@ -491,7 +494,7 @@ export const warmFunctions = async () => {
 export const streamAnalyzeDatasets = async (
   data: {
     query: string;
-    datasets?: Dataset[];     // Support datasets array
+    datasets?: any[];     // Support datasets array - Using any[] to resolve linter error
     dataset_ids?: string[];   // Support dataset_ids array
   },
   onChunk?: (chunk: any) => void
@@ -613,5 +616,166 @@ export const streamAnalyzeDatasets = async (
   } catch (error: any) {
     console.error('Error calling stream_analyze:', error);
     throw new Error(error.message || 'Failed to analyze datasets');
+  }
+};
+
+// Define the expected structure of a single card's data from the backend
+export interface SectionCardData {
+  id: string; // metric_id will be used as id
+  title: string;
+  value: string; // e.g., "123.45 ft" or "N/A %"
+  timestamp: string; // ISO string format from the backend
+  trend: 'up' | 'down' | 'neutral'; // Current placeholder, will be 'neutral'
+  trendDescription: string; // Default description from backend config
+  footerNote: string;
+}
+
+// Export a helper for calling the new dashboard card data function
+export const getDashboardSectionCards = async (damId: number): Promise<SectionCardData[]> => {
+  const region = functions.region || 'us-central1';
+  const projectId = firebaseConfig.projectId;
+  let baseUrl = '';
+
+  if (process.env.NODE_ENV === 'development') {
+    baseUrl = `http://localhost:5001/${projectId}/${region}`;
+  } else {
+    baseUrl = `https://${region}-${projectId}.cloudfunctions.net`;
+  }
+
+  // The name of the new Python Cloud Function
+  const url = `${baseUrl}/get_dashboard_section_cards_data?dam_id=${damId}`;
+
+  try {
+    // This is a GET request to fetch data
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      let errorData = { error: "Failed to fetch section card data" };
+      try {
+        errorData = await response.json();
+      } catch (e) {
+        // If parsing error response fails, use the default error
+        console.error("Failed to parse error response from getDashboardSectionCards: ", e);
+      }
+      console.error('Error fetching section card data:', response.status, errorData);
+      throw new Error(errorData.error || `Failed to fetch section card data. Status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data as SectionCardData[];
+  } catch (error: any) {
+    console.error('Error calling getDashboardSectionCards function:', error);
+    // Return an empty array in case of error so the UI can handle it gracefully
+    // Or re-throw if you have a higher-level error boundary in Next.js
+    return []; 
+    // throw new Error(error.message || 'Failed to fetch section card data');
+  }
+};
+
+// Define the expected structure for a single data point from the inflow timeseries
+export interface InflowDataPoint {
+  ts_utc: string; // ISO string from backend
+  value_num: number;
+}
+
+// Define the new time range options type here as well to be used by the function
+export type TimeRangeOption = "mtd" | "14d" | "7d";
+
+// Export a helper for calling the new inflow timeseries data function
+// Updated to accept new TimeRangeOption types and damId
+export const getInflowTimeseries = async (range: TimeRangeOption, damId: number): Promise<InflowDataPoint[]> => {
+  const region = functions.region || 'us-central1';
+  const projectId = firebaseConfig.projectId;
+  let baseUrl = '';
+
+  if (process.env.NODE_ENV === 'development') {
+    baseUrl = `http://localhost:5001/${projectId}/${region}`;
+  } else {
+    baseUrl = `https://${region}-${projectId}.cloudfunctions.net`;
+  }
+
+  // The name of the new Python Cloud Function
+  // Append dam_id to the query parameters
+  const url = `${baseUrl}/get_inflow_timeseries?range=${range}&dam_id=${damId}`;
+
+  try {
+    // This is a GET request to fetch data
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      let errorData = { error: "Failed to fetch inflow timeseries data" };
+      try {
+        errorData = await response.json();
+      } catch (e) {
+        console.error("Failed to parse error response from getInflowTimeseries: ", e);
+      }
+      console.error('Error fetching inflow timeseries data:', response.status, errorData);
+      throw new Error(errorData.error || `Failed to fetch inflow timeseries data. Status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data as InflowDataPoint[];
+  } catch (error: any) {
+    console.error('Error calling getInflowTimeseries function:', error);
+    return []; 
+  }
+};
+
+// Define the expected structure for a single dam location
+export interface DamLocation {
+  id: number | string; // Should match the type of dam_id from your DB
+  name: string;
+  latitude: number;
+  longitude: number;
+}
+
+// Export a helper for calling the new dam locations function
+export const getDamLocations = async (): Promise<DamLocation[]> => {
+  const region = functions.region || 'us-central1';
+  const projectId = firebaseConfig.projectId;
+  let baseUrl = '';
+
+  if (process.env.NODE_ENV === 'development') {
+    baseUrl = `http://localhost:5001/${projectId}/${region}`;
+  } else {
+    baseUrl = `https://${region}-${projectId}.cloudfunctions.net`;
+  }
+
+  const url = `${baseUrl}/get_dam_locations`; // Name of your Python Cloud Function
+
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      let errorData = { error: "Failed to fetch dam locations" };
+      try {
+        errorData = await response.json();
+      } catch (e) {
+        console.error("Failed to parse error response from getDamLocations: ", e);
+      }
+      console.error('Error fetching dam locations:', response.status, errorData);
+      throw new Error(errorData.error || `Failed to fetch dam locations. Status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data as DamLocation[];
+  } catch (error: any) {
+    console.error('Error calling getDamLocations function:', error);
+    return []; // Return empty array for graceful error handling in UI
   }
 }; 

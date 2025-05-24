@@ -1,6 +1,8 @@
 import os
 import django
 from django.conf import settings
+import decimal # Add import for decimal
+import math # Add import for math
 
 # Set the DJANGO_SETTINGS_MODULE environment variable
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "factchecker.settings")
@@ -11,7 +13,7 @@ django.setup()
 from firebase_functions import https_fn, options
 from firebase_admin import initialize_app, firestore
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import firebase_admin
 import logging
 import time
@@ -66,6 +68,10 @@ from helpers.stream_analyze import stream_analyze_helper, NumpyEncoder
 # Import the query evaluator at the top level
 from factchecker.search.query_processing.query_evaluator import evaluate_query
 
+# Import the new helper modules for the inflow forecast
+from helpers.forecast_db_utils import write_run_header, write_forecast_rows
+from helpers.inflow_model_v0 import run_inflow_forecast as run_inflow_forecast_v0
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -73,6 +79,113 @@ logger = logging.getLogger(__name__)
 
 # Initialize Firebase app
 firebase_admin.initialize_app()
+
+# Metric configuration for the dashboard cards
+# Maps card titles to their corresponding metric_id in the fact_dam_ops table
+# and a default unit/trend description.
+METRICS_CONFIG = {
+    "Headroom": {"metric_id": 3, "unit": "ft", "default_trend_desc": "Stable"},
+    "Reservoir Fill": {"metric_id": 5, "unit": "%", "default_trend_desc": "Steady"},
+    "Inflow": {"metric_id": 6, "unit": "cfs", "default_trend_desc": "Constant"},
+    "Spill %": {"metric_id": 9, "unit": "%", "default_trend_desc": "No change"}, # Changed from Spill to Spill % to match ID
+    "Spill": {"metric_id": 8, "unit": "cfs", "default_trend_desc": "None"}, # Changed from Spill % to Spill
+    "Gates Open": {"metric_id": 10, "unit": "gates", "default_trend_desc": "Unchanged"}
+}
+
+@https_fn.on_request(
+    cors=options.CorsOptions(
+        cors_origins=[
+            "https://crystal-2f87e.web.app",
+            "https://askcrystal.info",
+            "https://www.askcrystal.info",
+            "http://localhost:3000",
+            "http://localhost:5173",
+        ],
+        cors_methods=["get", "options"] # Primarily a GET request
+    ),
+    timeout_sec=30,
+    memory=options.MemoryOption.MB_512
+)
+def get_dam_locations(request: https_fn.Request) -> https_fn.Response:
+    logger.info("Received request for dam locations.")
+
+    # Handle warming requests (optional but good practice)
+    if request.method == 'POST': # Warming often sent as POST
+        try:
+            request_json = request.get_json(silent=True)
+            if request_json and request_json.get('warming'):
+                logger.info("Warming request received for get_dam_locations.")
+                return https_fn.Response(json.dumps({"status": "warmed"}), status=200, headers={"Content-Type": "application/json"})
+        except Exception:
+             # If JSON parsing fails or not a warming request, proceed normally
+            pass
+
+    try:
+        pool = get_connection_pool()
+        conn = pool.getconn()
+        dam_locations_list = []
+        try:
+            with conn.cursor() as cursor:
+                # Query to get dam_id, dam_name, latitude, and longitude from dim_dam
+                # Filters out rows where latitude or longitude is NULL
+                query_sql = """
+                    SELECT dam_id, dam_name, latitude, longitude 
+                    FROM dim_dam 
+                    WHERE latitude IS NOT NULL AND longitude IS NOT NULL;
+                """
+                cursor.execute(query_sql)
+                rows = cursor.fetchall()
+                
+                for row_data in rows:
+                    dam_id, dam_name_val, lat_val, lon_val = row_data
+                    
+                    current_dam_lat = None
+                    current_dam_lon = None
+                    
+                    try:
+                        # Ensure latitude and longitude are converted to float
+                        if lat_val is not None:
+                            current_dam_lat = float(lat_val)
+                        if lon_val is not None:
+                            current_dam_lon = float(lon_val)
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"Could not convert lat/lon for dam_id {dam_id} (name: {dam_name_val}). Error: {e}. Skipping this dam.")
+                        continue # Skip this dam if coordinates are invalid
+                    
+                    # Only add if both latitude and longitude are valid numbers
+                    if current_dam_lat is not None and current_dam_lon is not None:
+                        dam_locations_list.append({
+                            "id": dam_id,
+                            "name": dam_name_val,
+                            "latitude": current_dam_lat,
+                            "longitude": current_dam_lon
+                        })
+            
+            return https_fn.Response(
+                json.dumps(dam_locations_list),
+                status=200,
+                headers={"Content-Type": "application/json"}
+            )
+        except Exception as db_error:
+            logger.error(f"Database error in get_dam_locations: {db_error}")
+            logger.error(traceback.format_exc())
+            if conn: conn.rollback() # Rollback in case of error during transaction
+            return https_fn.Response(
+                json.dumps({"error": "A database error occurred.", "details": str(db_error)}),
+                status=500,
+                headers={"Content-Type": "application/json"}
+            )
+        finally:
+            if conn:
+                pool.putconn(conn) # Return connection to the pool
+    except Exception as e:
+        logger.error(f"General error in get_dam_locations: {e}")
+        logger.error(traceback.format_exc())
+        return https_fn.Response(
+            json.dumps({"error": "An internal server error occurred.", "details": str(e)}),
+            status=500,
+            headers={"Content-Type": "application/json"}
+        )
 
 @https_fn.on_request(
     cors=options.CorsOptions(
@@ -470,12 +583,12 @@ def register_waitlist(request):
     cors=options.CorsOptions(
         cors_origins=[
         "https://crystal-2f87e.web.app",
-        "https://www.askcrystal.info",
         "https://askcrystal.info",
+        "https://www.askcrystal.info",
         "http://localhost:3000",
         "http://localhost:5173",
         ],
-        cors_methods=["get", "post", "options"],
+        cors_methods=["get", "post", "options"]
     ),
     memory=options.MemoryOption.GB_2,
     timeout_sec=300
@@ -783,11 +896,11 @@ def create_dataset_progress_report(dataset_stats):
 @https_fn.on_request(
     cors=options.CorsOptions(
         cors_origins=[
-        "https://crystal-2f87e.web.app",
-        "https://askcrystal.info",
-        "https://www.askcrystal.info",
-        "http://localhost:3000",
-        "http://localhost:5173",
+            "https://crystal-2f87e.web.app",
+            "https://askcrystal.info",
+            "https://www.askcrystal.info",
+            "http://localhost:3000",
+            "http://localhost:5173",
         ],
         cors_methods=["get", "post", "options"]
     ),
@@ -937,6 +1050,458 @@ def submit_feedback(request):
         logger.error(traceback.format_exc())
         return https_fn.Response(
             json.dumps({"status": "error", "message": f"Failed to submit feedback: {str(e)}"}),
+            status=500,
+            headers={"Content-Type": "application/json"}
+        )
+
+@https_fn.on_request(
+    cors=options.CorsOptions(
+        cors_origins=[
+            "https://crystal-2f87e.web.app",
+            "https://askcrystal.info",
+            "https://www.askcrystal.info",
+            "http://localhost:3000",
+            "http://localhost:5173",
+        ],
+        cors_methods=["get", "post", "options"]
+    ),
+    timeout_sec=30,
+    memory=options.MemoryOption.MB_512
+)
+def get_inflow_timeseries(request: https_fn.Request) -> https_fn.Response:
+    """
+    Minimal Cloud Function to fetch inflow (metric_id=6) timeseries for a given dam_id.
+    Accepts query params 'range' (e.g., '7d', '14d', 'mtd') and 'dam_id'.
+    Returns an array of { ts_utc, value_num } objects for the chart.
+    """
+    logger.info("Received request for inflow timeseries data.")
+
+    # Parse query params for range
+    range_param = request.args.get('range', '7d')  # Default to last 7 days
+
+    # Parse query params for dam_id
+    dam_id_param = request.args.get('dam_id', '1')  # Default to '1' (Grand Coulee Dam)
+    try:
+        dam_id_to_query = int(dam_id_param)
+    except ValueError:
+        logger.warning(f"Invalid dam_id parameter: '{dam_id_param}'. Defaulting to dam_id 1.")
+        dam_id_to_query = 1
+    
+    logger.info(f"Processing inflow request for dam_id: {dam_id_to_query}, range: {range_param}")
+
+    # Calculate date filter
+    now_utc = datetime.utcnow()
+    if range_param == 'today': # This case will no longer be hit from frontend
+        start_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+    elif range_param == 'mtd': # New: Month to Date
+        start_utc = now_utc.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    elif range_param == '14d': # New: Last 14 days
+        # Ensure it's 14 days including today, so subtract 13 days from today's start
+        start_of_today_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+        start_utc = start_of_today_utc - timedelta(days=13)
+    elif range_param == '7d': # Existing: Last 7 days
+        # Ensure it's 7 days including today, so subtract 6 days from today's start
+        start_of_today_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+        start_utc = start_of_today_utc - timedelta(days=6)
+    else: # Default fallback if an unexpected range is passed (e.g., '7d')
+        logger.warning(f"Unexpected range_param: {range_param}, defaulting to 7d logic.")
+        start_of_today_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+        start_utc = start_of_today_utc - timedelta(days=6)
+
+    try:
+        pool = get_connection_pool()
+        conn = pool.getconn()
+        try:
+            with conn.cursor() as cursor:
+                # Query all inflow rows for dam_id=1, metric_id=6, in the date range
+                query_sql = """
+                    SELECT ts_utc, value_num
+                    FROM fact_dam_ops
+                    WHERE dam_id = %s AND metric_id = %s AND ts_utc >= %s
+                    ORDER BY ts_utc ASC;
+                """
+                cursor.execute(query_sql, (dam_id_to_query, 6, start_utc))
+                rows = cursor.fetchall()
+                
+                result = []
+                for row in rows:
+                    # Ensure the datetime is in UTC and then format with 'Z'
+                    # If row[0] is already timezone-aware and UTC, this is fine.
+                    # If it's naive, it assumes UTC. If aware and not UTC, it converts.
+                    ts_utc_val_dt = row[0].astimezone(timezone.utc) # Convert to UTC
+                    ts_utc_val = ts_utc_val_dt.strftime('%Y-%m-%dT%H:%M:%SZ') # Format as YYYY-MM-DDTHH:MM:SSZ
+
+                    value_num_val = None
+                    if row[1] is not None:
+                        if isinstance(row[1], decimal.Decimal):
+                            value_num_val = float(row[1])
+                        elif isinstance(row[1], (int, float)):
+                            value_num_val = row[1] # Already a compatible number
+                        else:
+                            # Fallback or log if it's an unexpected type
+                            try:
+                                value_num_val = float(row[1])
+                            except (ValueError, TypeError):
+                                logger.error(f"Could not convert value_num {row[1]} of type {type(row[1])} to float.")
+                                continue # Skip this row if conversion fails
+                    
+                    if value_num_val is not None:
+                        result.append({"ts_utc": ts_utc_val, "value_num": value_num_val})
+
+                # valid_result is now just result as filtering is done during construction
+                return https_fn.Response(
+                    json.dumps(result), # Use result directly
+                    status=200,
+                    headers={"Content-Type": "application/json"}
+                )
+        except Exception as db_error:
+            logger.error(f"Database error in get_inflow_timeseries: {db_error}")
+            logger.error(traceback.format_exc())
+            if conn:
+                conn.rollback()
+            return https_fn.Response(
+                json.dumps({"error": "A database error occurred.", "details": str(db_error)}),
+                status=500,
+                headers={"Content-Type": "application/json"}
+            )
+        finally:
+            if conn:
+                pool.putconn(conn)
+    except Exception as e:
+        logger.error(f"General error in get_inflow_timeseries: {e}")
+        logger.error(traceback.format_exc())
+        return https_fn.Response(
+            json.dumps({"error": "An internal server error occurred.", "details": str(e)}),
+            status=500,
+            headers={"Content-Type": "application/json"}
+        )
+
+@https_fn.on_request(
+    cors=options.CorsOptions(
+        cors_origins=[
+        "https://crystal-2f87e.web.app",
+        "https://askcrystal.info",
+        "https://www.askcrystal.info",
+        "http://localhost:3000",  # For Next.js local dev
+        "http://localhost:5173",  # For Vite local dev (if used)
+        ],
+        cors_methods=["get", "post", "options"]
+    ),
+    timeout_sec=60, # Standard timeout
+    memory=options.MemoryOption.MB_512, # Standard memory
+    min_instances=0 # Allow scale to zero for cost-effectiveness
+)
+
+def get_dashboard_section_cards_data(request: https_fn.Request) -> https_fn.Response:
+    """
+    HTTP Cloud Function to fetch the latest operational data for dashboard section cards.
+    Accepts a 'dam_id' query parameter (defaults to 1).
+    Queries the 'fact_dam_ops' table for the given dam_id and specific metric_ids.
+    """
+    logger.info("Received request for dashboard section cards data.")
+
+    # Handle warming requests if sent via POST with a specific body
+    if request.method == 'POST':
+        try:
+            request_json = request.get_json(silent=True)
+            if request_json and request_json.get('warming'):
+                logger.info("Warming request received for get_dashboard_section_cards_data.")
+                return https_fn.Response(
+                    json.dumps({"status": "warmed"}),
+                    status=200,
+                    headers={"Content-Type": "application/json"}
+                )
+        except Exception: # pylint: disable=broad-except
+            # If JSON parsing fails for a POST, it's not a valid warming request, proceed
+            pass
+    
+    # For actual data fetching, typically a GET request is used.
+    # No specific request body is expected for this data retrieval.
+
+    # Parse query params for dam_id
+    dam_id_param = request.args.get('dam_id', '1')  # Default to '1' (Grand Coulee Dam)
+    try:
+        dam_id_to_query = int(dam_id_param)
+    except ValueError:
+        logger.warning(f"Invalid dam_id parameter for section cards: '{dam_id_param}'. Defaulting to dam_id 1.")
+        dam_id_to_query = 1
+    
+    logger.info(f"Processing section cards request for dam_id: {dam_id_to_query}")
+
+    try:
+        pool = get_connection_pool()
+        conn = pool.getconn()
+        card_data_list = []
+        
+        # Dam ID is now dynamically set from the request parameter
+        # dam_id_to_query = 1 # This line is replaced by the parsing logic above
+
+        try:
+            with conn.cursor() as cursor:
+                for card_title, config in METRICS_CONFIG.items():
+                    metric_id_to_query = config["metric_id"]
+                    
+                    # SQL to get the most recent record for the given dam_id and metric_id
+                    # It uses a subquery to find the MAX(ts_utc) for the specific metric and dam
+                    # and then joins back to get the corresponding value_num.
+                    query_sql = """
+                        SELECT f.ts_utc, f.value_num
+                        FROM fact_dam_ops f
+                        INNER JOIN (
+                            SELECT metric_id, MAX(ts_utc) as max_ts_utc
+                            FROM fact_dam_ops
+                            WHERE dam_id = %s AND metric_id = %s
+                            GROUP BY metric_id
+                        ) latest_f ON f.metric_id = latest_f.metric_id AND f.ts_utc = latest_f.max_ts_utc
+                        WHERE f.dam_id = %s AND f.metric_id = %s;
+                    """
+                    
+                    cursor.execute(query_sql, (dam_id_to_query, metric_id_to_query, dam_id_to_query, metric_id_to_query))
+                    row = cursor.fetchone()
+                    
+                    # Initialize defaults
+                    value_display = f"N/A {config['unit']}" 
+                    timestamp_iso = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ') 
+                    trend_val = "neutral" 
+                    
+                    if row: # If a record was found
+                        db_ts_utc, db_value_num = row[0], row[1]
+
+                        if db_ts_utc is not None:
+                            # Ensure the database timestamp is UTC and correctly formatted
+                            if db_ts_utc.tzinfo is None:
+                                # If naive, assume it's UTC and make it aware
+                                aware_utc_datetime = db_ts_utc.replace(tzinfo=timezone.utc)
+                            else:
+                                # If already aware, convert to UTC to be certain
+                                aware_utc_datetime = db_ts_utc.astimezone(timezone.utc)
+                            # Ensure Z (Zulu) suffix for UTC timestamps
+                            timestamp_iso = aware_utc_datetime.strftime('%Y-%m-%dT%H:%M:%SZ')
+                        # If db_ts_utc is None, timestamp_iso remains the current UTC time default (already formatted with Z)
+
+                        if db_value_num is not None:
+                            numeric_value_for_processing = None
+                            if isinstance(db_value_num, decimal.Decimal):
+                                numeric_value_for_processing = float(db_value_num)
+                            elif isinstance(db_value_num, (int, float)):
+                                numeric_value_for_processing = db_value_num
+                            else:
+                                try:
+                                    numeric_value_for_processing = float(str(db_value_num))
+                                    logger.info(f"Successfully converted db_value_num '{db_value_num}' (type {type(db_value_num)}) to float for metric_id {metric_id_to_query}.")
+                                except (ValueError, TypeError):
+                                    logger.warning(f"Value for metric_id {metric_id_to_query} ('{db_value_num}' type: {type(db_value_num)}) is not a recognized number and could not be converted. Defaulting to N/A.")
+                                    # value_display will use the default "N/A {config['unit']}"
+
+                            if numeric_value_for_processing is not None:
+                                temp_value = numeric_value_for_processing
+
+                                if card_title == "Reservoir Fill":
+                                    temp_value *= 100
+                                
+                                formatted_num_str = "{:,.1f}".format(temp_value)
+                                if formatted_num_str.endswith(".0"):
+                                    formatted_num_str = formatted_num_str[:-2]
+                                value_display = f"{formatted_num_str} {config['unit']}"
+                            # If conversion failed or numeric_value_for_processing is None,
+                            # value_display retains its default "N/A {config['unit']}"
+                        # else (if db_value_num is None), value_display remains "N/A {config['unit']}"
+                    # else (if row is None), defaults for value_display and timestamp_iso are used.
+
+                    logger.info(f"DEBUG: Card: {card_title}, Formatted Timestamp: {timestamp_iso}") # <--- ADD THIS
+
+                    card_data_list.append({
+                        "id": str(metric_id_to_query), # Use metric_id as a unique ID for the card
+                        "title": card_title,
+                        "value": value_display,
+                        "timestamp": timestamp_iso,
+                        "trend": trend_val, # Placeholder
+                        "trendDescription": config["default_trend_desc"], # Placeholder
+                        "footerNote": f"Latest reading for {card_title.lower()}"
+                    })
+
+            # Ensure consistent ordering of cards based on METRICS_CONFIG keys
+            ordered_card_data_list = sorted(card_data_list, key=lambda x: list(METRICS_CONFIG.keys()).index(x["title"]))
+
+            return https_fn.Response(
+                json.dumps(ordered_card_data_list), # Use default=str for datetime if not already string
+                status=200,
+                headers={"Content-Type": "application/json"}
+            )
+
+        except Exception as db_error: # pylint: disable=broad-except
+            logger.error(f"Database error in get_dashboard_section_cards_data: {db_error}")
+            logger.error(traceback.format_exc())
+            if conn: # conn might not be None if getconn() succeeded but cursor failed
+                conn.rollback()
+            return https_fn.Response(
+                json.dumps({"error": "A database error occurred.", "details": str(db_error)}),
+                status=500,
+                headers={"Content-Type": "application/json"}
+            )
+        finally:
+            if conn: # conn should exist if pool.getconn() was successful
+                pool.putconn(conn)
+
+    except Exception as e: # pylint: disable=broad-except
+        logger.error(f"General error in get_dashboard_section_cards_data: {e}")
+        logger.error(traceback.format_exc())
+        return https_fn.Response(
+            json.dumps({"error": "An internal server error occurred.", "details": str(e)}),
+            status=500,
+            headers={"Content-Type": "application/json"}
+        )
+
+@https_fn.on_request(
+    cors=options.CorsOptions(
+        cors_origins=[
+            "https://crystal-2f87e.web.app",
+            "https://askcrystal.info",
+            "https://www.askcrystal.info",
+            "http://localhost:3000",
+            "http://localhost:5173",
+            # Add any other origins if needed, e.g., for Cloud Scheduler if invoked via authenticated HTTP
+        ],
+        cors_methods=["get", "post", "options"] # Allow POST if scheduler uses it
+    ),
+    timeout_sec=540,  # 9 minutes, as per ChatGPT's gcloud example
+    memory=options.MemoryOption.GB_1, # 1GiB, as per ChatGPT's gcloud example
+    min_instances=0 # Can scale to zero
+)
+
+def generate_inflow_forecast_v0(request: https_fn.Request) -> https_fn.Response:
+    """
+    HTTP-triggered Cloud Function to generate a deterministic inflow forecast.
+    Writes results to fact_forecast_run and fact_dam_forecast.
+    
+    Query Parameters:
+        dam_id (int, optional): The ID of the dam. Defaults to 1 (Grand Coulee).
+                                Note: V0 model is hardcoded for Grand Coulee.
+        model_id (int, optional): The ID of the model. Defaults to 1.
+        metric_id (int, optional): The ID of the metric. Defaults to 6 (inflow).
+        horizon_hours (int, optional): Forecast horizon in hours. Defaults to 120.
+    """
+    logger.info("Received request for generate_inflow_forecast_v0.")
+
+    # Handle warming requests
+    if request.method == 'POST': # Warming often sent as POST
+        try:
+            request_json = request.get_json(silent=True)
+            if request_json and request_json.get('warming'):
+                logger.info("Warming request received for generate_inflow_forecast_v0.")
+                return https_fn.Response(json.dumps({"status": "warmed"}), status=200, headers={"Content-Type": "application/json"})
+        except Exception:
+             # If JSON parsing fails or not a warming request, proceed normally
+            pass
+
+    try:
+        # --- Configuration ---
+        # dam_id: For V0, the model internally uses Grand Coulee data.
+        # The parameter is here for future expansion.
+        dam_id_to_process = int(request.args.get('dam_id', '1'))
+        
+        # model_id: As per your plan, placeholder for V0.
+        # This should correspond to an entry in dim_model.
+        model_id_to_use = int(request.args.get('model_id', '1'))
+        
+        # metric_id for inflow
+        metric_id_for_forecast = int(request.args.get('metric_id', '6')) # 6 for inflow
+        
+        # Forecast horizon
+        forecast_horizon_hours = int(request.args.get('horizon_hours', '120'))
+
+        # Ensemble member: -1 for deterministic forecasts
+        ensemble_member = -1
+
+        logger.info(f"Starting inflow forecast generation for dam_id: {dam_id_to_process}, model_id: {model_id_to_use}, horizon: {forecast_horizon_hours}h")
+
+        # 0. Bookkeeping - Get current time as issue time
+        # Ensure it's timezone-aware UTC
+        run_issued_utc = datetime.utcnow().replace(tzinfo=timezone.utc)
+
+        # 1. Run the inflow model
+        # The model will return a list of {'valid_utc': datetime, 'value_cfs': float}
+        # `run_inflow_forecast_v0` expects `current_utc_time` to be the issue time.
+        forecast_data = run_inflow_forecast_v0(
+            dam_id=dam_id_to_process, # Passed to model, though V0 is hardcoded
+            current_utc_time=run_issued_utc,
+            forecast_horizon_hours=forecast_horizon_hours
+        )
+
+        if not forecast_data:
+            logger.warning("Inflow model returned no forecast data.")
+            return https_fn.Response(
+                json.dumps({"status": "error", "message": "Inflow model returned no data."}),
+                status=500,
+                headers={"Content-Type": "application/json"}
+            )
+
+        # 2. Write header row to fact_forecast_run
+        # Determine forecast_start_utc and forecast_end_utc from the data
+        # Ensure these are also timezone-aware UTC
+        forecast_start_utc = forecast_data[0]['valid_utc']
+        forecast_end_utc = forecast_data[-1]['valid_utc']
+        
+        if forecast_start_utc.tzinfo is None: # Ensure UTC
+             forecast_start_utc = forecast_start_utc.replace(tzinfo=timezone.utc)
+        if forecast_end_utc.tzinfo is None: # Ensure UTC
+            forecast_end_utc = forecast_end_utc.replace(tzinfo=timezone.utc)
+
+        # Calculate actual horizon and lead time from data and issue time
+        # Horizon is duration from first forecast point to last.
+        actual_horizon_duration = forecast_end_utc - forecast_start_utc
+        # Add 1 because if start and end are 1 hour apart, it's 2 data points covering 1 full hour interval + start point.
+        # Or, more simply, it's the number of forecast points if they are contiguous hourly.
+        # Let's use the number of points if they are hourly.
+        # A more robust way for horizon: ((forecast_end_utc - forecast_start_utc).total_seconds() / 3600) + 1
+        actual_horizon_hours = math.ceil(actual_horizon_duration.total_seconds() / 3600) + 1
+        
+        # Lead time is duration from issue to first forecast point.
+        lead_time_duration = forecast_start_utc - run_issued_utc
+        actual_lead_time_hours = lead_time_duration.total_seconds() / 3600
+
+        # Construct a simple string for the note
+        run_note = f"Source: generate_inflow_forecast_v0_cloud_function, Dam ID processed: {dam_id_to_process}, Horizon: {forecast_horizon_hours}h"
+
+        run_id = write_run_header(
+            model_id=model_id_to_use,
+            run_issued_utc=run_issued_utc,
+            forecast_start_utc=forecast_start_utc,
+            forecast_end_utc=forecast_end_utc,
+            horizon_hours=actual_horizon_hours, # Use calculated horizon
+            lead_time_hours=actual_lead_time_hours, # Use calculated lead time
+            note=run_note # Pass the simple string here
+        )
+
+        if run_id is None:
+            logger.error("Failed to write forecast run header. Aborting.")
+            return https_fn.Response(
+                json.dumps({"status": "error", "message": "Failed to write forecast run header."}),
+                status=500,
+                headers={"Content-Type": "application/json"}
+            )
+
+        # 3. Write the forecast value rows to fact_dam_forecast
+        write_forecast_rows(
+            run_id=run_id,
+            dam_id=dam_id_to_process,
+            ensemble_member=ensemble_member,
+            forecast_data=forecast_data
+        )
+
+        success_message = f"Successfully generated and stored inflow forecast. run_id: {run_id}, rows: {len(forecast_data)}"
+        logger.info(success_message)
+        return https_fn.Response(
+            json.dumps({"status": "success", "message": success_message, "run_id": run_id, "rows_written": len(forecast_data)}),
+            status=200,
+            headers={"Content-Type": "application/json"}
+        )
+
+    except Exception as e:
+        logger.error(f"Error in generate_inflow_forecast_v0: {e}", exc_info=True)
+        # Consider if traceback.format_exc() is too verbose for client
+        return https_fn.Response(
+            json.dumps({"status": "error", "message": "An internal server error occurred.", "details": str(e)}),
             status=500,
             headers={"Content-Type": "application/json"}
         )
