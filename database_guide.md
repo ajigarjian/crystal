@@ -26,7 +26,6 @@
 | `metric_id` **PK** | Surrogate key                    | `6`     |
 | `metric_name`   | Short id                             | `inflow_cfs` |
 | `units`         | Canonical units                      | `cfs`   |
-| `description`   | Longer text                          | “Mean river flow entering dam.” |
 
 *Purpose:* single lookup row for each physical quantity.
 
@@ -37,10 +36,8 @@
 | Column             | Description                        | Example            |
 |--------------------|------------------------------------|--------------------|
 | `source_id` **PK** | Surrogate key                      | `2`                |
-| `source_name`      | “USACE-CWMS”, “USGS-NWIS”, “Derived”… | `USACE-CWMS`       |
-| `contact_url`      | Data-provider link                 | `https://…`        |
+| `source_name`      | “USACE-CWMS”, “USGS-NWIS”, “Derived”… | `USACE-CWMS`    |
 | `latency_minutes`  | Typical delay vs real time         | `45`               |
-| `is_authoritative` | `TRUE/FALSE`                       | `TRUE`             |
 
 *Purpose:* provenance / lineage & quality scoring.
 
@@ -54,7 +51,6 @@
 | `model_name`      | Friendly tag                                  | `GC_AI_Lite`          |
 | `version_tag`     | SemVer / git SHA                              | `v1.3.2`              |
 | `author`          | Owner / contact                               | `data-team`           |
-| `training_data_url` | Where weights came from                     | `s3://…/chkpt.pt`     |
 | `description`     | Free-text                                     |                       |
 
 *Purpose:* lets multiple forecast engines/version live side-by-side.
