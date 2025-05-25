@@ -681,7 +681,7 @@ export const getDashboardSectionCards = async (damId: number): Promise<SectionCa
 export interface InflowDataPoint {
   ts_utc: string;
   value_num: number;
-  data_type: 'observed' | 'forecast';
+  data_type: 'observed' | 'forecast' | 'historical';
 }
 
 // Define the new time range options type here as well to be used by the function
@@ -732,12 +732,26 @@ export const getInflowTimeseries = async (range: TimeRangeOption, damId: number)
   }
 };
 
-// Define the expected structure for a single dam location
+// Define the expected structure for a single dam location with comprehensive metadata
 export interface DamLocation {
   id: number | string; // Should match the type of dam_id from your DB
   name: string;
   latitude: number;
   longitude: number;
+  owner_name?: string;
+  operator_agency?: string;
+  river?: string;
+  city?: string;
+  county?: string;
+  state?: string;
+  structural_height_ft?: number;
+  hydraulic_height_ft?: number;
+  dam_length_ft?: number;
+  storage_max_acft?: number;
+  capacity_mw?: number;
+  year_completed?: number;
+  gate_count?: number;
+  gate_type?: string;
 }
 
 // Export a helper for calling the new dam locations function

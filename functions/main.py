@@ -107,7 +107,7 @@ METRICS_CONFIG = {
     memory=options.MemoryOption.MB_512
 )
 def get_dam_locations(request: https_fn.Request) -> https_fn.Response:
-    logger.info("Received request for dam locations.")
+    logger.info("Received request for dam locations with metadata.")
 
     # Handle warming requests (optional but good practice)
     if request.method == 'POST': # Warming often sent as POST
@@ -126,10 +126,27 @@ def get_dam_locations(request: https_fn.Request) -> https_fn.Response:
         dam_locations_list = []
         try:
             with conn.cursor() as cursor:
-                # Query to get dam_id, dam_name, latitude, and longitude from dim_dam
-                # Filters out rows where latitude or longitude is NULL
+                # Query to get comprehensive dam data including metadata
                 query_sql = """
-                    SELECT dam_id, dam_name, latitude, longitude 
+                    SELECT 
+                        dam_id, 
+                        dam_name, 
+                        latitude, 
+                        longitude,
+                        owner_name,
+                        operator_agency,
+                        river,
+                        city,
+                        county,
+                        state,
+                        structural_height_ft,
+                        hydraulic_height_ft,
+                        dam_length_ft,
+                        storage_max_acft,
+                        capacity_mw,
+                        year_completed,
+                        gate_count,
+                        gate_type
                     FROM dim_dam 
                     WHERE latitude IS NOT NULL AND longitude IS NOT NULL;
                 """
@@ -137,7 +154,10 @@ def get_dam_locations(request: https_fn.Request) -> https_fn.Response:
                 rows = cursor.fetchall()
                 
                 for row_data in rows:
-                    dam_id, dam_name_val, lat_val, lon_val = row_data
+                    (dam_id, dam_name_val, lat_val, lon_val, owner_name, operator_agency, 
+                     river, city, county, state, structural_height_ft, hydraulic_height_ft,
+                     dam_length_ft, storage_max_acft, capacity_mw, year_completed, 
+                     gate_count, gate_type) = row_data
                     
                     current_dam_lat = None
                     current_dam_lon = None
@@ -154,11 +174,36 @@ def get_dam_locations(request: https_fn.Request) -> https_fn.Response:
                     
                     # Only add if both latitude and longitude are valid numbers
                     if current_dam_lat is not None and current_dam_lon is not None:
+                        # Helper function to safely convert to appropriate type
+                        def safe_convert_number(value, convert_to=float):
+                            if value is None:
+                                return None
+                            try:
+                                if isinstance(value, decimal.Decimal):
+                                    return convert_to(value)
+                                return convert_to(value)
+                            except (ValueError, TypeError):
+                                return None
+                        
                         dam_locations_list.append({
                             "id": dam_id,
                             "name": dam_name_val,
                             "latitude": current_dam_lat,
-                            "longitude": current_dam_lon
+                            "longitude": current_dam_lon,
+                            "owner_name": owner_name,
+                            "operator_agency": operator_agency,
+                            "river": river,
+                            "city": city,
+                            "county": county,
+                            "state": state,
+                            "structural_height_ft": safe_convert_number(structural_height_ft),
+                            "hydraulic_height_ft": safe_convert_number(hydraulic_height_ft),
+                            "dam_length_ft": safe_convert_number(dam_length_ft),
+                            "storage_max_acft": safe_convert_number(storage_max_acft),
+                            "capacity_mw": safe_convert_number(capacity_mw),
+                            "year_completed": safe_convert_number(year_completed, int),
+                            "gate_count": safe_convert_number(gate_count, int),
+                            "gate_type": gate_type
                         })
             
             return https_fn.Response(
@@ -1070,8 +1115,8 @@ def submit_feedback(request):
 )
 def get_inflow_timeseries(request: https_fn.Request) -> https_fn.Response:
     """
-    Fetch inflow timeseries combining observed (quality='R') and forecast (quality='F') data.
-    Returns observed data up to current time and forecast data from current time forward.
+    Fetch inflow timeseries combining observed (quality='R'), forecast (quality='F'), 
+    and historical data from the same period last year.
     """
     logger.info("Received request for inflow timeseries data.")
 
@@ -1101,12 +1146,24 @@ def get_inflow_timeseries(request: https_fn.Request) -> https_fn.Response:
         start_of_today_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
         start_utc = start_of_today_utc - timedelta(days=7)
 
+    # Calculate forecast end time (extend 2 weeks into future)
+    forecast_end_utc = now_utc + timedelta(days=14)
+    
+    # Calculate historical date range (same period, previous year)
+    try:
+        historical_start_utc = start_utc.replace(year=start_utc.year - 1)
+        historical_end_utc = forecast_end_utc.replace(year=forecast_end_utc.year - 1)
+    except ValueError:
+        # Handle leap year edge case (Feb 29 -> Feb 28)
+        historical_start_utc = start_utc.replace(year=start_utc.year - 1, month=start_utc.month, day=28 if start_utc.month == 2 and start_utc.day == 29 else start_utc.day)
+        historical_end_utc = forecast_end_utc.replace(year=forecast_end_utc.year - 1, month=forecast_end_utc.month, day=28 if forecast_end_utc.month == 2 and forecast_end_utc.day == 29 else forecast_end_utc.day)
+
     try:
         pool = get_connection_pool()
         conn = pool.getconn()
         try:
             with conn.cursor() as cursor:
-                # Combined query for both observed and forecast data
+                # Combined query for observed, forecast, and historical data
                 query_sql = """
                     -- Get observed data (quality = 'R') up to current time
                     SELECT ts_utc, value_num, 'observed' as data_type
@@ -1134,17 +1191,59 @@ def get_inflow_timeseries(request: https_fn.Request) -> https_fn.Response:
                 """
                 
                 cursor.execute(query_sql, (
-                    dam_id_to_query, 6, start_utc, now_utc,  # observed data params
-                    dam_id_to_query, 6,                       # latest forecast subquery params
-                    dam_id_to_query, 6, now_utc              # forecast data params
+                    dam_id_to_query, 6, start_utc, now_utc,           # observed data params
+                    dam_id_to_query, 6,                               # latest forecast subquery params  
+                    dam_id_to_query, 6, now_utc                      # forecast data params
                 ))
-                rows = cursor.fetchall()
-                
+                current_data_rows = cursor.fetchall()
+
+                # Find the actual date range from our current data
+                if current_data_rows:
+                    # Get min and max timestamps from the current data
+                    current_timestamps = [row[0] for row in current_data_rows]
+                    actual_start_utc = min(current_timestamps)
+                    actual_end_utc = max(current_timestamps)
+                    
+                    # Calculate equivalent historical period
+                    try:
+                        historical_start_utc = actual_start_utc.replace(year=actual_start_utc.year - 1)
+                        historical_end_utc = actual_end_utc.replace(year=actual_end_utc.year - 1)
+                    except ValueError:
+                        # Handle leap year edge case (Feb 29 -> Feb 28)
+                        historical_start_utc = actual_start_utc.replace(
+                            year=actual_start_utc.year - 1, 
+                            day=28 if actual_start_utc.month == 2 and actual_start_utc.day == 29 else actual_start_utc.day
+                        )
+                        historical_end_utc = actual_end_utc.replace(
+                            year=actual_end_utc.year - 1,
+                            day=28 if actual_end_utc.month == 2 and actual_end_utc.day == 29 else actual_end_utc.day
+                        )
+                    
+                    # Now get historical data for the equivalent period
+                    historical_query_sql = """
+                        SELECT ts_utc, value_num, 'historical' as data_type
+                        FROM fact_dam_ops
+                        WHERE dam_id = %s AND metric_id = %s AND quality = 'R'
+                          AND ts_utc >= %s AND ts_utc <= %s
+                        ORDER BY ts_utc ASC;
+                    """
+                    
+                    cursor.execute(historical_query_sql, (
+                        dam_id_to_query, 6, historical_start_utc, historical_end_utc
+                    ))
+                    historical_rows = cursor.fetchall()
+                    
+                    # Combine all results
+                    all_rows = current_data_rows + historical_rows
+                else:
+                    all_rows = current_data_rows
+
+                # Process all rows (current + historical)
                 result = []
-                for row in rows:
+                for row in all_rows:
                     ts_utc_val_dt = row[0].astimezone(timezone.utc)
                     ts_utc_val = ts_utc_val_dt.strftime('%Y-%m-%dT%H:%M:%SZ')
-                    data_type = row[2]  # 'observed' or 'forecast'
+                    data_type = row[2]  # 'observed', 'forecast', or 'historical'
 
                     value_num_val = None
                     if row[1] is not None:
@@ -1160,6 +1259,18 @@ def get_inflow_timeseries(request: https_fn.Request) -> https_fn.Response:
                                 continue
                     
                     if value_num_val is not None:
+                        # For historical data, adjust the timestamp to current year for proper x-axis alignment
+                        if data_type == 'historical':
+                            # Convert historical timestamp to equivalent current year timestamp
+                            historical_dt = datetime.fromisoformat(ts_utc_val.replace('Z', '+00:00'))
+                            try:
+                                current_year_dt = historical_dt.replace(year=now_utc.year)
+                            except ValueError:
+                                # Handle Feb 29 on non-leap years
+                                current_year_dt = historical_dt.replace(year=now_utc.year, day=28)
+                            
+                            ts_utc_val = current_year_dt.strftime('%Y-%m-%dT%H:%M:%SZ')
+                        
                         result.append({
                             "ts_utc": ts_utc_val, 
                             "value_num": value_num_val,

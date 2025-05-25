@@ -79,6 +79,46 @@ export default function Page() {
     loadDamMapData();
   }, []); // Empty dependency array means this runs once on mount
 
+  // Handle "Go to Dam" from map tooltip
+  const handleGoToDam = React.useCallback((damId: string | number) => {
+    // Convert damId to number if it's a string
+    const numericDamId = typeof damId === 'string' ? parseInt(damId, 10) : damId;
+    
+    // Find the dam in AVAILABLE_DAMS
+    const targetDam = AVAILABLE_DAMS.find(dam => dam.id === numericDamId);
+    
+    if (targetDam) {
+      setSelectedDam(targetDam);
+    } else {
+      console.warn(`Dam with ID ${damId} not found in available dams`);
+    }
+  }, []);
+
+  // Convert DamLocation to MapMarker format for the InteractiveMap
+  const mapMarkers = React.useMemo(() => {
+    return damMarkers.map(dam => ({
+      id: dam.id,
+      name: dam.name,
+      latitude: dam.latitude,
+      longitude: dam.longitude,
+      // Pass through all the metadata
+      owner_name: dam.owner_name,
+      operator_agency: dam.operator_agency,
+      river: dam.river,
+      city: dam.city,
+      county: dam.county,
+      state: dam.state,
+      structural_height_ft: dam.structural_height_ft,
+      hydraulic_height_ft: dam.hydraulic_height_ft,
+      dam_length_ft: dam.dam_length_ft,
+      storage_max_acft: dam.storage_max_acft,
+      capacity_mw: dam.capacity_mw,
+      year_completed: dam.year_completed,
+      gate_count: dam.gate_count,
+      gate_type: dam.gate_type,
+    }));
+  }, [damMarkers]);
+
   return (
     <SidebarProvider
       defaultOpen={false}
@@ -118,7 +158,8 @@ export default function Page() {
                         <InteractiveMap 
                           mapboxAccessToken={mapboxToken} 
                           height="100%" 
-                          markers={damMarkers} 
+                          markers={mapMarkers}
+                          onGoToDam={handleGoToDam}
                         />
                       ) : (
                         <div className="flex h-full items-center justify-center rounded-xl border border-dashed bg-muted/50 p-4 text-center">
