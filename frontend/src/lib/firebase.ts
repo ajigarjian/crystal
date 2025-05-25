@@ -679,8 +679,9 @@ export const getDashboardSectionCards = async (damId: number): Promise<SectionCa
 
 // Define the expected structure for a single data point from the inflow timeseries
 export interface InflowDataPoint {
-  ts_utc: string; // ISO string from backend
+  ts_utc: string;
   value_num: number;
+  data_type: 'observed' | 'forecast';
 }
 
 // Define the new time range options type here as well to be used by the function

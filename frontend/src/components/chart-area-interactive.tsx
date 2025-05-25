@@ -36,8 +36,9 @@ import { InflowDataPoint, getInflowTimeseries, TimeRangeOption } from "@/lib/fir
 // type TimeRangeOption = "mtd" | "14d" | "7d"; // Already in firebase.ts, no need to redefine if imported
 
 interface ProcessedChartData {
-  date: string // Will store UTC date string, e.g., "YYYY-MM-DD HH:mm"
-  inflow: number // Value in cfs, truncated
+  date: string;
+  inflow: number;
+  type: 'observed' | 'forecast';
 }
 
 // Temporarily removed PACIFIC_TIMEZONE constant
@@ -45,8 +46,16 @@ interface ProcessedChartData {
 
 const chartConfig = {
   inflow: {
-    label: "Inflow (cfs) - UTC", // Updated label to cfs
+    label: "Inflow (cfs) - UTC",
     color: "hsl(var(--chart-1))", 
+  },
+  observed: {
+    label: "Observed Inflow", 
+    color: "lime",
+  },
+  forecast: {
+    label: "Forecast Inflow",
+    color: "#ff1493",
   },
 } satisfies ChartConfig
 
@@ -57,8 +66,19 @@ const formatUtcDate = (isoString: string, range: TimeRangeOption): string => {
   if (String(dateObj) === "Invalid Date") {
     return "Invalid Date (UTC)"; 
   }
-  // Show only the day number (UTC)
-  return dateObj.getUTCDate().toString();
+  
+  // For different ranges, show different levels of detail
+  if (range === "7d") {
+    // For 7 days, show day and abbreviated month
+    return dateObj.toLocaleDateString('en-US', { 
+      day: 'numeric', 
+      month: 'short',
+      timeZone: 'UTC' 
+    });
+  } else {
+    // For longer ranges, just show the day
+    return dateObj.getUTCDate().toString();
+  }
 };
 
 const formatUtcDateForDisplay = (isoString: string): string => {
@@ -70,6 +90,23 @@ const formatUtcDateForDisplay = (isoString: string): string => {
 interface ChartAreaInteractiveProps {
   selectedDamId: number;
 }
+
+// Add this helper function before the component
+const generateDailyTicks = (dataMin: number, dataMax: number): number[] => {
+  const ticks: number[] = [];
+  const startDate = new Date(dataMin);
+  const endDate = new Date(dataMax);
+  
+  // Start from the beginning of the first day
+  const currentDate = new Date(startDate.getUTCFullYear(), startDate.getUTCMonth(), startDate.getUTCDate());
+  
+  while (currentDate <= endDate) {
+    ticks.push(currentDate.getTime());
+    currentDate.setUTCDate(currentDate.getUTCDate() + 1); // Move to next day
+  }
+  
+  return ticks;
+};
 
 export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProps) {
   const isMobile = useIsMobile()
@@ -90,15 +127,17 @@ export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProp
     const fetchData = async () => {
       setIsLoading(true)
       try {
-        // Pass selectedDamId to getInflowTimeseries
         const rawData: InflowDataPoint[] = await getInflowTimeseries(timeRange, selectedDamId)
         
         const transformed = rawData.map(point => {
-          // Using UTC date directly
+          const timestamp = new Date(point.ts_utc).getTime() // Convert to timestamp
           return {
-            // Store full ISO string for potential time display on X-axis for 'today' view
-            date: point.ts_utc, // Keep as ISO string for now, format in XAxis tickFormatter
-            inflow: Math.trunc(point.value_num), // Value is now cfs, just truncate
+            date: point.ts_utc, // Keep original for tooltip
+            timestamp: timestamp, // Add timestamp for X-axis
+            observed: point.data_type === 'observed' ? Math.trunc(point.value_num) : null,
+            forecast: point.data_type === 'forecast' ? Math.trunc(point.value_num) : null,
+            inflow: Math.trunc(point.value_num),
+            type: point.data_type
           }
         })
         setProcessedChartData(transformed)
@@ -110,16 +149,27 @@ export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProp
       }
     }
     fetchData()
-  }, [timeRange, selectedDamId]) // Add selectedDamId to dependency array
+  }, [timeRange, selectedDamId])
 
   return (
     <Card className="@container/card shadow-none">
       <CardHeader>
-        <CardTitle>Inflow History</CardTitle> {/* Title updated to cfs */}
+        <CardTitle>Inflows</CardTitle> {/* Title updated to cfs */}
         <CardDescription>
           <span className="hidden @[540px]/card:block">
             {processedChartData.length > 0 ? (
-              `Latest Observation: ${processedChartData[processedChartData.length - 1].inflow.toLocaleString()} cfs ${new Date(processedChartData[processedChartData.length - 1].date).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })} ${new Date(processedChartData[processedChartData.length - 1].date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' })} UTC`
+              (() => {
+                // Find the latest observed data point
+                const latestObserved = processedChartData
+                  .filter(d => d.type === 'observed')
+                  .slice(-1)[0]; // Get the last observed point
+                
+                if (latestObserved) {
+                  return `Latest Observation: ${latestObserved.inflow.toLocaleString()} cfs ${new Date(latestObserved.date).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })} ${new Date(latestObserved.date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' })} UTC`;
+                } else {
+                  return "No observed data available for the selected period.";
+                }
+              })()
             ) : (
               "Daily inflow (cubic feet per second) for the selected period (times in UTC)."
             )}
@@ -191,13 +241,21 @@ export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProp
             <LineChart data={processedChartData} margin={{ left: 30, right: 10, top: 5, bottom: 0 }}>
               <CartesianGrid vertical={false} />
               <XAxis
-                dataKey="date" // This will be the full ISO string
+                dataKey="timestamp"
+                type="number"
+                scale="time"
+                domain={['dataMin', 'dataMax']}
                 tickLine={false}
                 axisLine={false}
                 tickMargin={8}
-                minTickGap={16} // Set to 32 as all ranges are multi-day
-                tickFormatter={(value) => formatUtcDate(value, timeRange) // Use new UTC formatter
-                }
+                ticks={processedChartData.length > 0 ? generateDailyTicks(
+                  Math.min(...processedChartData.map(d => d.timestamp)),
+                  Math.max(...processedChartData.map(d => d.timestamp))
+                ) : []}
+                tickFormatter={(timestamp) => {
+                  const date = new Date(timestamp);
+                  return date.getUTCDate().toString();
+                }}
               />
               <YAxis 
                 tickLine={false}
@@ -209,12 +267,10 @@ export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProp
                   }
                   return String(value);
                 }}
-                // Dynamically set the domain based on data, with padding
                 domain={[
-                  (dataMin: number) => (Math.floor((dataMin * 0.95) / 5000) * 5000), // Pad 5% below, rounded to nearest 5000
-                  (dataMax: number) => (Math.ceil((dataMax * 1.05) / 5000) * 5000)  // Pad 5% above, rounded to nearest 5000
+                  (dataMin: number) => (Math.floor((dataMin * 0.95) / 5000) * 5000),
+                  (dataMax: number) => (Math.ceil((dataMax * 1.05) / 5000) * 5000)
                 ]}
-                tickCount={6} // Reduced tickCount to aim for one less grid line
               >
                 <Label 
                   value="Inflow (cfs)" 
@@ -230,23 +286,26 @@ export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProp
                 content={
                   <ChartTooltipContent
                     labelFormatter={(value, payload) => {
-                      // console.log("[Chart] Tooltip labelFormatter - Value:", value); // REMOVED
                       if (payload && payload.length > 0 && payload[0].payload.date) {
                          const dateStringFromPayload = payload[0].payload.date;
-                         // console.log("[Chart] Tooltip labelFormatter - Date string from payload:", dateStringFromPayload); // REMOVED
                          const dateObj = new Date(dateStringFromPayload);
-                         // console.log("[Chart] Tooltip labelFormatter - Parsed dateObj:", dateObj); // REMOVED
+                         const dataType = payload[0].payload.type;
                          if (String(dateObj) === "Invalid Date") {
                             return "Invalid Date UTC"; 
                          }
-                         return dateObj.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }) + " UTC";
+                         const formattedDate = dateObj.toLocaleDateString('en-US', { 
+                           year: 'numeric', month: 'short', day: 'numeric', 
+                           hour: '2-digit', minute: '2-digit', timeZone: 'UTC' 
+                         }) + " UTC";
+                         return `${formattedDate} (${dataType})`;
                       }
-                      // console.warn("[Chart] Tooltip labelFormatter - Payload or date missing"); // REMOVED
                       return "Inflow (UTC)";
                     }}
                     formatter={(value, name, props) => {
+                       const dataType = props.payload.type;
+                       const typeLabel = dataType === 'forecast' ? 'Forecast' : 'Observed';
                        return [
-                         `${props.payload.inflow.toLocaleString()} cfs` // Add toLocaleString for tooltip value too
+                         `${props.payload.inflow.toLocaleString()} cfs (${typeLabel})`
                        ];
                     }}
                     indicator="dot" 
@@ -254,16 +313,23 @@ export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProp
                 }
               />
               <Line
-                dataKey="inflow"
-                type="monotone" 
+                dataKey="observed"
+                type="linear" 
                 stroke="lime"
                 strokeWidth={2}
-                dot={{
-                  r: 4, 
-                }}
-                activeDot={{
-                  r: 6, 
-                }}
+                dot={false}
+                activeDot={{ r: 6 }}
+                connectNulls={false}
+              />
+              <Line
+                dataKey="forecast"
+                type="linear" 
+                stroke="#ff1493"
+                strokeWidth={2}
+                strokeDasharray="5 5"
+                dot={false}
+                activeDot={{ r: 6, fill: "#ff1493" }}
+                connectNulls={false}
               />
             </LineChart>
           )}

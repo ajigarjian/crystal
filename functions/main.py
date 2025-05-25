@@ -1070,17 +1070,14 @@ def submit_feedback(request):
 )
 def get_inflow_timeseries(request: https_fn.Request) -> https_fn.Response:
     """
-    Minimal Cloud Function to fetch inflow (metric_id=6) timeseries for a given dam_id.
-    Accepts query params 'range' (e.g., '7d', '14d', 'mtd') and 'dam_id'.
-    Returns an array of { ts_utc, value_num } objects for the chart.
+    Fetch inflow timeseries combining observed (quality='R') and forecast (quality='F') data.
+    Returns observed data up to current time and forecast data from current time forward.
     """
     logger.info("Received request for inflow timeseries data.")
 
-    # Parse query params for range
-    range_param = request.args.get('range', '7d')  # Default to last 7 days
-
-    # Parse query params for dam_id
-    dam_id_param = request.args.get('dam_id', '1')  # Default to '1' (Grand Coulee Dam)
+    # Parse query params
+    range_param = request.args.get('range', '7d')
+    dam_id_param = request.args.get('dam_id', '1')
     try:
         dam_id_to_query = int(dam_id_param)
     except ValueError:
@@ -1089,68 +1086,88 @@ def get_inflow_timeseries(request: https_fn.Request) -> https_fn.Response:
     
     logger.info(f"Processing inflow request for dam_id: {dam_id_to_query}, range: {range_param}")
 
-    # Calculate date filter
+    # Calculate date filter for historical data
     now_utc = datetime.utcnow()
-    if range_param == 'today': # This case will no longer be hit from frontend
-        start_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
-    elif range_param == 'mtd': # New: Month to Date
-        start_utc = now_utc.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    elif range_param == '14d': # New: Last 14 days
-        # Ensure it's 14 days including today, so subtract 13 days from today's start
+    if range_param == 'mtd':
+        start_utc = now_utc.replace(day=1, hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
+    elif range_param == '14d':
         start_of_today_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
-        start_utc = start_of_today_utc - timedelta(days=13)
-    elif range_param == '7d': # Existing: Last 7 days
-        # Ensure it's 7 days including today, so subtract 6 days from today's start
+        start_utc = start_of_today_utc - timedelta(days=14)
+    elif range_param == '7d':
         start_of_today_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
-        start_utc = start_of_today_utc - timedelta(days=6)
-    else: # Default fallback if an unexpected range is passed (e.g., '7d')
+        start_utc = start_of_today_utc - timedelta(days=7)
+    else:
         logger.warning(f"Unexpected range_param: {range_param}, defaulting to 7d logic.")
         start_of_today_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
-        start_utc = start_of_today_utc - timedelta(days=6)
+        start_utc = start_of_today_utc - timedelta(days=7)
 
     try:
         pool = get_connection_pool()
         conn = pool.getconn()
         try:
             with conn.cursor() as cursor:
-                # Query all inflow rows for dam_id=1, metric_id=6, in the date range
+                # Combined query for both observed and forecast data
                 query_sql = """
-                    SELECT ts_utc, value_num
+                    -- Get observed data (quality = 'R') up to current time
+                    SELECT ts_utc, value_num, 'observed' as data_type
                     FROM fact_dam_ops
-                    WHERE dam_id = %s AND metric_id = %s AND ts_utc >= %s
+                    WHERE dam_id = %s AND metric_id = %s AND quality = 'R' 
+                      AND ts_utc >= %s AND ts_utc <= %s
+                    
+                    UNION ALL
+                    
+                    -- Get most recent forecast data (quality = 'F') from current time forward
+                    SELECT f.ts_utc, f.value_num, 'forecast' as data_type
+                    FROM fact_dam_ops f
+                    INNER JOIN (
+                        -- Get the most recent forecast run for this dam
+                        SELECT dam_id, metric_id, MAX(ts_utc) as latest_forecast_time
+                        FROM fact_dam_ops
+                        WHERE dam_id = %s AND metric_id = %s AND quality = 'F'
+                        GROUP BY dam_id, metric_id
+                    ) latest ON f.dam_id = latest.dam_id 
+                              AND f.metric_id = latest.metric_id
+                    WHERE f.dam_id = %s AND f.metric_id = %s AND f.quality = 'F'
+                      AND f.ts_utc > %s
+                    
                     ORDER BY ts_utc ASC;
                 """
-                cursor.execute(query_sql, (dam_id_to_query, 6, start_utc))
+                
+                cursor.execute(query_sql, (
+                    dam_id_to_query, 6, start_utc, now_utc,  # observed data params
+                    dam_id_to_query, 6,                       # latest forecast subquery params
+                    dam_id_to_query, 6, now_utc              # forecast data params
+                ))
                 rows = cursor.fetchall()
                 
                 result = []
                 for row in rows:
-                    # Ensure the datetime is in UTC and then format with 'Z'
-                    # If row[0] is already timezone-aware and UTC, this is fine.
-                    # If it's naive, it assumes UTC. If aware and not UTC, it converts.
-                    ts_utc_val_dt = row[0].astimezone(timezone.utc) # Convert to UTC
-                    ts_utc_val = ts_utc_val_dt.strftime('%Y-%m-%dT%H:%M:%SZ') # Format as YYYY-MM-DDTHH:MM:SSZ
+                    ts_utc_val_dt = row[0].astimezone(timezone.utc)
+                    ts_utc_val = ts_utc_val_dt.strftime('%Y-%m-%dT%H:%M:%SZ')
+                    data_type = row[2]  # 'observed' or 'forecast'
 
                     value_num_val = None
                     if row[1] is not None:
                         if isinstance(row[1], decimal.Decimal):
                             value_num_val = float(row[1])
                         elif isinstance(row[1], (int, float)):
-                            value_num_val = row[1] # Already a compatible number
+                            value_num_val = row[1]
                         else:
-                            # Fallback or log if it's an unexpected type
                             try:
                                 value_num_val = float(row[1])
                             except (ValueError, TypeError):
-                                logger.error(f"Could not convert value_num {row[1]} of type {type(row[1])} to float.")
-                                continue # Skip this row if conversion fails
+                                logger.error(f"Could not convert value_num {row[1]} to float.")
+                                continue
                     
                     if value_num_val is not None:
-                        result.append({"ts_utc": ts_utc_val, "value_num": value_num_val})
+                        result.append({
+                            "ts_utc": ts_utc_val, 
+                            "value_num": value_num_val,
+                            "data_type": data_type
+                        })
 
-                # valid_result is now just result as filtering is done during construction
                 return https_fn.Response(
-                    json.dumps(result), # Use result directly
+                    json.dumps(result),
                     status=200,
                     headers={"Content-Type": "application/json"}
                 )
@@ -1241,20 +1258,32 @@ def get_dashboard_section_cards_data(request: https_fn.Request) -> https_fn.Resp
                 for card_title, config in METRICS_CONFIG.items():
                     metric_id_to_query = config["metric_id"]
                     
-                    # SQL to get the most recent record for the given dam_id and metric_id
-                    # It uses a subquery to find the MAX(ts_utc) for the specific metric and dam
-                    # and then joins back to get the corresponding value_num.
-                    query_sql = """
-                        SELECT f.ts_utc, f.value_num
-                        FROM fact_dam_ops f
-                        INNER JOIN (
-                            SELECT metric_id, MAX(ts_utc) as max_ts_utc
-                            FROM fact_dam_ops
-                            WHERE dam_id = %s AND metric_id = %s
-                            GROUP BY metric_id
-                        ) latest_f ON f.metric_id = latest_f.metric_id AND f.ts_utc = latest_f.max_ts_utc
-                        WHERE f.dam_id = %s AND f.metric_id = %s;
-                    """
+                    # Special handling for Inflow metric to get only observed data (quality = 'R')
+                    if metric_id_to_query == 6:  # Inflow metric
+                        query_sql = """
+                            SELECT f.ts_utc, f.value_num
+                            FROM fact_dam_ops f
+                            INNER JOIN (
+                                SELECT metric_id, MAX(ts_utc) as max_ts_utc
+                                FROM fact_dam_ops
+                                WHERE dam_id = %s AND metric_id = %s AND quality = 'R'
+                                GROUP BY metric_id
+                            ) latest_f ON f.metric_id = latest_f.metric_id AND f.ts_utc = latest_f.max_ts_utc
+                            WHERE f.dam_id = %s AND f.metric_id = %s AND f.quality = 'R';
+                        """
+                    else:
+                        # Default query for other metrics (no quality filter)
+                        query_sql = """
+                            SELECT f.ts_utc, f.value_num
+                            FROM fact_dam_ops f
+                            INNER JOIN (
+                                SELECT metric_id, MAX(ts_utc) as max_ts_utc
+                                FROM fact_dam_ops
+                                WHERE dam_id = %s AND metric_id = %s
+                                GROUP BY metric_id
+                            ) latest_f ON f.metric_id = latest_f.metric_id AND f.ts_utc = latest_f.max_ts_utc
+                            WHERE f.dam_id = %s AND f.metric_id = %s;
+                        """
                     
                     cursor.execute(query_sql, (dam_id_to_query, metric_id_to_query, dam_id_to_query, metric_id_to_query))
                     row = cursor.fetchone()
