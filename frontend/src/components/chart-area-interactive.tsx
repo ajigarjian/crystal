@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Line, LineChart, CartesianGrid, XAxis, YAxis, Label } from "recharts"
+import { Line, LineChart, CartesianGrid, XAxis, YAxis, Label, Legend } from "recharts"
 // import { toZonedTime, format as formatDate } from "date-fns-tz" // Temporarily removed for UTC display
 
 import { useIsMobile } from "@/hooks/use-mobile"
@@ -51,11 +51,11 @@ const chartConfig = {
   },
   observed: {
     label: "Observed Inflow", 
-    color: "lime",
+    color: "hsl(120, 50%, 30%)", // Darker green
   },
   forecast: {
     label: "Forecast Inflow",
-    color: "#ff1493",
+    color: "hsl(340, 50%, 40%)", // Darker red
   },
 } satisfies ChartConfig
 
@@ -281,6 +281,19 @@ export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProp
                   offset={-20}
                 />
               </YAxis>
+              <Legend 
+                verticalAlign="top" 
+                align="center" 
+                wrapperStyle={{
+                  paddingBottom: 10,
+                  color: 'hsl(0, 0%, 40%)', // Neutral gray color
+                  fontSize: '0.9rem',
+                }}
+                payload={[
+                  { value: 'NOAA Observed', type: 'line', color: 'hsl(120, 50%, 30%)' },
+                  { value: 'NOAA Forecast', type: 'line', color: 'hsl(340, 50%, 40%)' }
+                ]}
+              />
               <ChartTooltip
                 cursor={true} 
                 content={
@@ -315,7 +328,7 @@ export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProp
               <Line
                 dataKey="observed"
                 type="linear" 
-                stroke="lime"
+                stroke="hsl(120, 50%, 30%)" // Darker green
                 strokeWidth={2}
                 dot={false}
                 activeDot={{ r: 6 }}
@@ -324,11 +337,11 @@ export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProp
               <Line
                 dataKey="forecast"
                 type="linear" 
-                stroke="#ff1493"
+                stroke="hsl(340, 50%, 40%)" // Darker red
                 strokeWidth={2}
                 strokeDasharray="5 5"
                 dot={false}
-                activeDot={{ r: 6, fill: "#ff1493" }}
+                activeDot={{ r: 6, fill: "hsl(340, 50%, 40%)" }}
                 connectNulls={false}
               />
             </LineChart>
