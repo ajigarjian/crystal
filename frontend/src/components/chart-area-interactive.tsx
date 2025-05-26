@@ -38,7 +38,7 @@ import { InflowDataPoint, getInflowTimeseries, TimeRangeOption } from "@/lib/fir
 interface ProcessedChartData {
   date: string;
   inflow: number;
-  type: 'observed' | 'forecast';
+  type: 'observed' | 'forecast' | 'historical';
 }
 
 // Temporarily removed PACIFIC_TIMEZONE constant
@@ -56,6 +56,10 @@ const chartConfig = {
   forecast: {
     label: "Forecast Inflow",
     color: "hsl(340, 50%, 40%)", // Darker red
+  },
+  historical: {
+    label: "Historical (Last Year)",
+    color: "#94a3b8", // muted gray
   },
 } satisfies ChartConfig
 
@@ -136,6 +140,7 @@ export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProp
             timestamp: timestamp, // Add timestamp for X-axis
             observed: point.data_type === 'observed' ? Math.trunc(point.value_num) : null,
             forecast: point.data_type === 'forecast' ? Math.trunc(point.value_num) : null,
+            historical: point.data_type === 'historical' ? Math.trunc(point.value_num) : null,
             inflow: Math.trunc(point.value_num),
             type: point.data_type
           }
@@ -306,17 +311,28 @@ export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProp
                          if (String(dateObj) === "Invalid Date") {
                             return "Invalid Date UTC"; 
                          }
-                         const formattedDate = dateObj.toLocaleDateString('en-US', { 
+                         
+                         let formattedDate = dateObj.toLocaleDateString('en-US', { 
                            year: 'numeric', month: 'short', day: 'numeric', 
                            hour: '2-digit', minute: '2-digit', timeZone: 'UTC' 
                          }) + " UTC";
-                         return `${formattedDate} (${dataType})`;
+                         
+                         // Add year context for historical data
+                         if (dataType === 'historical') {
+                           const historicalYear = dateObj.getUTCFullYear() - 1;
+                           formattedDate = formattedDate.replace(dateObj.getUTCFullYear().toString(), `${historicalYear} (Historical)`);
+                         }
+                         
+                         const typeLabel = dataType === 'forecast' ? 'Forecast' : 
+                                          dataType === 'historical' ? 'Historical' : 'Observed';
+                         return `${formattedDate} (${typeLabel})`;
                       }
                       return "Inflow (UTC)";
                     }}
                     formatter={(value, name, props) => {
                        const dataType = props.payload.type;
-                       const typeLabel = dataType === 'forecast' ? 'Forecast' : 'Observed';
+                       const typeLabel = dataType === 'forecast' ? 'Forecast' : 
+                                        dataType === 'historical' ? 'Historical' : 'Observed';
                        return [
                          `${props.payload.inflow.toLocaleString()} cfs (${typeLabel})`
                        ];
@@ -343,6 +359,17 @@ export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProp
                 dot={false}
                 activeDot={{ r: 6, fill: "hsl(340, 50%, 40%)" }}
                 connectNulls={false}
+              />
+              <Line
+                dataKey="historical"
+                type="linear" 
+                stroke="#94a3b8"
+                strokeWidth={1.5}
+                strokeDasharray="2 4"
+                dot={false}
+                activeDot={{ r: 6, fill: "#94a3b8" }}
+                connectNulls={false}
+                opacity={0.7}
               />
             </LineChart>
           )}
