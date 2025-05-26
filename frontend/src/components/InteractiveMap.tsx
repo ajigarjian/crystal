@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import ReactMapGL, { Marker, Popup, NavigationControl, ViewStateChangeEvent } from 'react-map-gl/mapbox';
-import { cn } from "@/lib/utils";
+import 'mapbox-gl/dist/mapbox-gl.css';
 import { MapSkeleton } from "@/components/MapSkeleton";
 
 interface MapMarker {
@@ -80,8 +80,6 @@ export function InteractiveMap({
     >
       <ReactMapGL
         {...viewport}
-        width="100%"
-        height="100%"
         mapboxAccessToken={mapboxAccessToken}
         mapStyle={mapStyle}
         onMove={(evt: ViewStateChangeEvent) => setViewport(evt.viewState)}
