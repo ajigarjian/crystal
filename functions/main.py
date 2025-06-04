@@ -95,16 +95,16 @@ METRICS_CONFIG = {
 @https_fn.on_request(
     cors=options.CorsOptions(
         cors_origins=[
-            "https://crystal-2f87e.web.app",
-            "https://askcrystal.info",
-            "https://www.askcrystal.info",
-            "http://localhost:3000",
-            "http://localhost:5173",
+        "https://crystal-2f87e.web.app",
+        "https://askcrystal.info",
+        "https://www.askcrystal.info",
+        "http://localhost:3000",
+        "http://localhost:5173",
         ],
-        cors_methods=["get", "options"] # Primarily a GET request
+        cors_methods=["get", "post", "options"]
     ),
-    timeout_sec=30,
-    memory=options.MemoryOption.MB_512
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=300
 )
 def get_dam_locations(request: https_fn.Request) -> https_fn.Response:
     logger.info("Received request for dam locations.")

@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from 'react';
-import ReactMapGL, { Marker, Popup, NavigationControl, ViewStateChangeEvent } from 'react-map-gl/mapbox';
+import ReactMapGL, { Marker, Popup, NavigationControl, ViewStateChangeEvent, Source, Layer } from 'react-map-gl/mapbox';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { MapSkeleton } from "@/components/MapSkeleton";
 
@@ -17,24 +17,26 @@ interface InteractiveMapProps {
   initialLongitude?: number;
   initialZoom?: number;
   markers?: MapMarker[];
-  mapStyle?: string;
   mapboxAccessToken: string; 
   height?: string | number;
   onMarkerClick?: (marker: MapMarker) => void;
 }
 
-const DEFAULT_LATITUDE = 47.0; // Centered more on Washington/Oregon
-const DEFAULT_LONGITUDE = -120.5; // Centered more on Washington/Oregon
-const DEFAULT_ZOOM = 5.5;
+// Focus on Columbia River basin area - covering the basins you mentioned
+const DEFAULT_LATITUDE = 47.8; // Columbia River focus
+const DEFAULT_LONGITUDE = -119.5; // Columbia River focus  
+const DEFAULT_ZOOM = 6.8;
+
+// Use monochrome style as base - everything will be grey
+const BASE_STYLE = "mapbox://styles/mapbox/light-v11";
 
 export function InteractiveMap({
   initialLatitude = DEFAULT_LATITUDE,
   initialLongitude = DEFAULT_LONGITUDE,
   initialZoom = DEFAULT_ZOOM,
   markers = [],
-  mapStyle = "mapbox://styles/mapbox/outdoors-v12",
   mapboxAccessToken,
-  height = "300px", // Default height, can be overridden by props
+  height = "300px",
   onMarkerClick,
 }: InteractiveMapProps) {
   const [viewport, setViewport] = React.useState({
@@ -44,12 +46,13 @@ export function InteractiveMap({
   });
   const [selectedMarker, setSelectedMarker] = React.useState<MapMarker | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
+  const [isFullScreen, setIsFullScreen] = React.useState(false);
 
   React.useEffect(() => {
     // Simulate map loading delay
     const timer = setTimeout(() => {
       setIsLoading(false);
-    }, 1500); // Adjust delay as needed
+    }, 1500);
     return () => clearTimeout(timer);
   }, []);
 
@@ -69,30 +72,92 @@ export function InteractiveMap({
     }
   };
 
+  const toggleFullScreen = () => {
+    setIsFullScreen(!isFullScreen);
+  };
+
+  const handleEscapeKey = React.useCallback((event: KeyboardEvent) => {
+    if (event.key === 'Escape' && isFullScreen) {
+      setIsFullScreen(false);
+    }
+  }, [isFullScreen]);
+
+  React.useEffect(() => {
+    if (isFullScreen) {
+      document.addEventListener('keydown', handleEscapeKey);
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.removeEventListener('keydown', handleEscapeKey);
+      document.body.style.overflow = 'unset';
+    }
+    
+    return () => {
+      document.removeEventListener('keydown', handleEscapeKey);
+      document.body.style.overflow = 'unset';
+    };
+  }, [isFullScreen, handleEscapeKey]);
+
   if (isLoading) {
     return <MapSkeleton style={{ height, width: '100%' }} />;
   }
 
-  return (
-    <div 
-      style={{ height, width: '100%' }} 
-      className="rounded-xl border bg-card text-card-foreground shadow-sm overflow-hidden"
-    >
+  const mapComponent = (
+    <div className="relative w-full h-full">
       <ReactMapGL
         {...viewport}
         mapboxAccessToken={mapboxAccessToken}
-        mapStyle={mapStyle}
+        mapStyle={BASE_STYLE}
         onMove={(evt: ViewStateChangeEvent) => setViewport(evt.viewState)}
-        // minZoom={4} // Optional: restrict zoom
-        // maxZoom={15} // Optional: restrict zoom
+        minZoom={4}
+        maxZoom={12}
+        style={{
+          filter: 'grayscale(0.6) contrast(0.7) brightness(1.1)',
+          transition: 'filter 0.3s ease'
+        }}
       >
         <NavigationControl position="top-right" />
+        
+        {/* Blue water overlay - makes all water features blue */}
+        <Source
+          id="water-overlay"
+          type="vector"
+          url="mapbox://mapbox.mapbox-streets-v8"
+        >
+          {/* Water bodies (lakes, rivers, etc.) */}
+          <Layer
+            id="water-bodies-blue"
+            type="fill"
+            source-layer="water"
+            paint={{
+              "fill-color": "#1976d2",
+              "fill-opacity": 0.9
+            }}
+          />
+          {/* Waterways (rivers, streams) */}
+          <Layer
+            id="waterways-blue"
+            type="line"
+            source-layer="waterway"
+            paint={{
+              "line-color": "#1565c0",
+              "line-width": [
+                "interpolate",
+                ["linear"],
+                ["zoom"],
+                5, ["case", ["==", ["get", "class"], "river"], 4, 2],
+                8, ["case", ["==", ["get", "class"], "river"], 6, 3],
+                12, ["case", ["==", ["get", "class"], "river"], 10, 4]
+              ],
+              "line-opacity": 0.95
+            }}
+          />
+        </Source>
+        
         {markers.map((marker) => (
           <Marker
             key={`marker-${marker.id}`}
             latitude={marker.latitude}
             longitude={marker.longitude}
-            // anchor="bottom" // To make the pin's bottom point at the coordinate
           >
             <button
               onClick={(e) => {
@@ -104,23 +169,36 @@ export function InteractiveMap({
                 background: 'transparent',
                 cursor: 'pointer',
                 padding: 0,
+                zIndex: 1000,
               }}
               aria-label={`View details for ${marker.name || 'marker'}`}
             >
-              {/* Basic SVG pin - can be customized heavily */}
-              <svg 
-                height="20" 
-                viewBox="0 0 24 24" 
-                style={{
-                  fill: "hsl(var(--primary))", // Use theme primary color
-                  stroke: "hsl(var(--background))", // Use theme background for outline
-                  strokeWidth: "1.5",
-                  transform: "translateY(-10px)" // Offset to make bottom point at location
-                }}
-              >
-                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
-                <circle cx="12" cy="10" r="3" fill="hsl(var(--primary-foreground))"></circle> 
-              </svg>
+              {/* Columbia River Basin Dam Marker */}
+              <div className="relative">
+                <svg 
+                  height="28" 
+                  viewBox="0 0 24 24" 
+                  style={{
+                    fill: "#f44336",
+                    stroke: "#ffffff",
+                    strokeWidth: "2.5",
+                    transform: "translateY(-14px)",
+                    filter: "drop-shadow(0 3px 6px rgba(244,67,54,0.4))"
+                  }}
+                >
+                  <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                  <circle cx="12" cy="10" r="3" fill="#ffffff"></circle> 
+                </svg>
+                {/* Basin indicator */}
+                <div 
+                  className="absolute -bottom-1 left-1/2 transform -translate-x-1/2 w-3 h-3 rounded-full"
+                  style={{
+                    backgroundColor: "#d32f2f",
+                    border: "2px solid #ffffff",
+                    boxShadow: "0 1px 3px rgba(0,0,0,0.3)"
+                  }}
+                />
+              </div>
             </button>
           </Marker>
         ))}
@@ -132,20 +210,100 @@ export function InteractiveMap({
             onClose={() => setSelectedMarker(null)}
             closeButton={true}
             closeOnClick={false}
-            // anchor="top"
-            // offset={10}
-            style={{ fontFamily: 'var(--font-sans)' }} // Use theme font
+            style={{ fontFamily: 'var(--font-sans)' }}
           >
-            <div style={{ padding: '4px' }}>
-              <h3 style={{ margin: '0 0 4px 0', fontSize: '1rem', fontWeight: 600 }}>
-                {selectedMarker.name || 'Location'}
+            <div style={{ padding: '12px', minWidth: '200px' }}>
+              <h3 style={{ 
+                margin: '0 0 8px 0', 
+                fontSize: '1.1rem', 
+                fontWeight: 600, 
+                color: '#d32f2f',
+                borderBottom: '2px solid #ffebee',
+                paddingBottom: '4px'
+              }}>
+                {selectedMarker.name || 'Dam Location'}
               </h3>
-              {/* Add more details here if needed */}
-              {/* <p>Lat: {selectedMarker.latitude.toFixed(4)}, Lon: {selectedMarker.longitude.toFixed(4)}</p> */}
+              <div style={{ margin: '8px 0' }}>
+                <p style={{ margin: '4px 0', fontSize: '0.875rem', color: '#666' }}>
+                  <strong>Basin:</strong> Columbia River System
+                </p>
+                <p style={{ margin: '4px 0', fontSize: '0.875rem', color: '#666' }}>
+                  <strong>Region:</strong> Pacific Northwest
+                </p>
+                <p style={{ margin: '4px 0', fontSize: '0.875rem', color: '#888' }}>
+                  Coordinates: {selectedMarker.latitude.toFixed(3)}°, {selectedMarker.longitude.toFixed(3)}°
+                </p>
+              </div>
             </div>
           </Popup>
         ) : null}
       </ReactMapGL>
+      
+      {/* Columbia River System Label Overlay with Full Screen Button */}
+      <div 
+        className="absolute top-4 left-4 bg-white/95 backdrop-blur-sm rounded-lg px-3 py-2 shadow-lg border"
+        style={{ zIndex: 400 }}
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h4 className="text-sm font-semibold text-blue-900 mb-1">Columbia River Basin</h4>
+            <p className="text-xs text-gray-600">Water Features Highlighted</p>
+          </div>
+          <button
+            onClick={toggleFullScreen}
+            className="flex items-center justify-center w-8 h-8 rounded-md bg-blue-100 hover:bg-blue-200 transition-colors"
+            aria-label={isFullScreen ? "Exit full screen" : "Enter full screen"}
+            title={isFullScreen ? "Exit full screen (ESC)" : "View full screen"}
+          >
+            {isFullScreen ? (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-blue-700">
+                <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/>
+              </svg>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-blue-700">
+                <path d="M3 7V5a2 2 0 0 1 2-2h2m10 0h2a2 2 0 0 1 2 2v2m0 10v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/>
+              </svg>
+            )}
+          </button>
+        </div>
+      </div>
+      
+      {/* Legend */}
+      <div 
+        className="absolute bottom-4 right-4 bg-white/95 backdrop-blur-sm rounded-lg px-3 py-2 shadow-lg border"
+        style={{ zIndex: 400 }}
+      >
+        <div className="flex items-center space-x-4 text-xs">
+          <div className="flex items-center space-x-1">
+            <div className="w-3 h-3 rounded bg-blue-600"></div>
+            <span className="text-gray-700">Water</span>
+          </div>
+          <div className="flex items-center space-x-1">
+            <div className="w-3 h-3 rounded bg-gray-400"></div>
+            <span className="text-gray-700">Land</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div 
+      style={{ height, width: '100%' }} 
+      className="rounded-xl border bg-card text-card-foreground shadow-sm overflow-hidden"
+    >
+      {isFullScreen ? (
+        <div 
+          className="fixed inset-0 bg-black z-[9999] flex items-center justify-center"
+          style={{ height: '100vh', width: '100vw' }}
+        >
+          <div className="w-full h-full">
+            {mapComponent}
+          </div>
+        </div>
+      ) : (
+        mapComponent
+      )}
     </div>
   );
 }

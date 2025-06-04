@@ -3,7 +3,6 @@
 import * as React from "react";
 import { AppSidebar } from "@/components/app-sidebar"
 import { ChartAreaInteractive } from "@/components/chart-area-interactive"
-import { DataTable } from "@/components/data-table"
 import { SectionCards } from "@/components/section-cards"
 import { SectionCardSkeleton } from "@/components/SectionCardSkeleton"
 import { SiteHeader } from "@/components/site-header"
@@ -19,7 +18,6 @@ import {
 } from "@/components/ui/tabs"
 import { InteractiveMap } from "@/components/InteractiveMap"
 
-import data from "./data.json"
 import { getDashboardSectionCards, SectionCardData, getDamLocations, DamLocation } from "@/lib/firebase"
 
 export interface DamInfo {
@@ -39,7 +37,6 @@ export default function Page() {
   const [currentSectionCardData, setCurrentSectionCardData] = React.useState<SectionCardData[]>([]);
   const [isLoadingCards, setIsLoadingCards] = React.useState<boolean>(true);
   const [damMarkers, setDamMarkers] = React.useState<DamLocation[]>([]);
-  const [isLoadingMapMarkers, setIsLoadingMapMarkers] = React.useState<boolean>(true);
 
   const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
 
@@ -65,7 +62,6 @@ export default function Page() {
   // Fetch dam locations for the map
   React.useEffect(() => {
     async function loadDamMapData() {
-      setIsLoadingMapMarkers(true);
       try {
         const locations = await getDamLocations();
         setDamMarkers(locations);
@@ -73,7 +69,6 @@ export default function Page() {
         console.error("Failed to load dam locations for map:", error);
         setDamMarkers([]); 
       }
-      setIsLoadingMapMarkers(false);
     }
   
     loadDamMapData();
