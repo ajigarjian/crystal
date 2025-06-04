@@ -20,6 +20,7 @@ interface InteractiveMapProps {
   mapboxAccessToken: string; 
   height?: string | number;
   onMarkerClick?: (marker: MapMarker) => void;
+  selectedMarkerId?: string | number;
 }
 
 // Focus on Columbia River basin area - covering the basins you mentioned
@@ -38,6 +39,7 @@ export function InteractiveMap({
   mapboxAccessToken,
   height = "300px",
   onMarkerClick,
+  selectedMarkerId,
 }: InteractiveMapProps) {
   const [viewport, setViewport] = React.useState({
     latitude: initialLatitude,
@@ -179,11 +181,13 @@ export function InteractiveMap({
                   height="28" 
                   viewBox="0 0 24 24" 
                   style={{
-                    fill: "#f44336",
+                    fill: String(marker.id) === String(selectedMarkerId) ? "#2196f3" : "#f44336",
                     stroke: "#ffffff",
                     strokeWidth: "2.5",
                     transform: "translateY(-14px)",
-                    filter: "drop-shadow(0 3px 6px rgba(244,67,54,0.4))"
+                    filter: String(marker.id) === String(selectedMarkerId) 
+                      ? "drop-shadow(0 3px 6px rgba(33,150,243,0.6))" 
+                      : "drop-shadow(0 3px 6px rgba(244,67,54,0.4))"
                   }}
                 >
                   <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
@@ -193,7 +197,7 @@ export function InteractiveMap({
                 <div 
                   className="absolute -bottom-1 left-1/2 transform -translate-x-1/2 w-3 h-3 rounded-full"
                   style={{
-                    backgroundColor: "#d32f2f",
+                    backgroundColor: String(marker.id) === String(selectedMarkerId) ? "#1976d2" : "#d32f2f",
                     border: "2px solid #ffffff",
                     boxShadow: "0 1px 3px rgba(0,0,0,0.3)"
                   }}

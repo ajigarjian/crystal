@@ -10,12 +10,6 @@ import {
   SidebarInset,
   SidebarProvider,
 } from "@/components/ui/sidebar"
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs"
 import { InteractiveMap } from "@/components/InteractiveMap"
 
 import { getDashboardSectionCards, SectionCardData, getDamLocations, DamLocation } from "@/lib/firebase"
@@ -77,6 +71,17 @@ export default function Page() {
     loadDamMapData();
   }, []); // Empty dependency array means this runs once on mount
 
+  // Handle map marker clicks to update selected dam
+  const handleMapMarkerClick = (marker: { id: string | number; name?: string; latitude: number; longitude: number }) => {
+    // Find the corresponding dam in AVAILABLE_DAMS by matching the ID
+    const clickedDam = AVAILABLE_DAMS.find(dam => dam.id === Number(marker.id));
+    if (clickedDam) {
+      setSelectedDam(clickedDam);
+    } else {
+      console.warn(`No matching dam found for marker ID: ${marker.id}`);
+    }
+  };
+
   return (
     <SidebarProvider
       defaultOpen={false}
@@ -94,66 +99,57 @@ export default function Page() {
           selectedDam={selectedDam}
           onDamChange={setSelectedDam}
         />
-        <Tabs defaultValue="operational" className="flex flex-1 flex-col pt-4">
-          <div className="px-4 lg:px-6">
-            <TabsList>
-              <TabsTrigger value="operational">Operational</TabsTrigger>
-              <TabsTrigger value="weather">Weather</TabsTrigger>
-              <TabsTrigger value="data-curve">Data Curve</TabsTrigger>
-              <TabsTrigger value="environmental">Environmental</TabsTrigger>
-            </TabsList>
-          </div>
-          <TabsContent value="operational" className="flex flex-1 flex-col">
-            <div className="flex flex-1 flex-col">
-              <div className="@container/main flex flex-1 flex-col gap-2">
-                <div className="flex flex-col gap-4 pt-2 pb-4 md:gap-6 md:pb-6">
-                  <div className="flex grid grid-cols-3 gap-4 px-4 lg:px-6">
-                    <div className="col-span-2">
+        <div className="flex flex-1 flex-col pt-4">
+          <div className="flex flex-1 flex-col">
+            <div className="@container/main flex flex-1 flex-col gap-2">
+              <div className="flex flex-col gap-4 pt-2 pb-4 md:gap-6 md:pb-6 min-h-[calc(100vh-200px)]">
+                <div className="flex grid grid-cols-3 gap-4 px-4 lg:px-6 flex-1">
+                  <div className="col-span-2 min-h-[600px]">
+                    {mapboxToken ? (
+                      <InteractiveMap 
+                        mapboxAccessToken={mapboxToken} 
+                        height="100%" 
+                        markers={damMarkers} 
+                        onMarkerClick={handleMapMarkerClick}
+                        selectedMarkerId={selectedDam.id}
+                      />
+                    ) : (
+                      <div className="flex h-full items-center justify-center rounded-xl border border-dashed bg-muted/50 p-4 text-center">
+                        <p className="text-sm text-muted-foreground">
+                          Map cannot be displayed. <br />
+                          (Mapbox token not configured)
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                  <div className="col-span-1 flex flex-col gap-6">
+                    <div className="min-h-[300px] flex-shrink-0">
                       <ChartAreaInteractive selectedDamId={selectedDam.id} />
                     </div>
-                    <div className="col-span-1 h-full">
-                      {mapboxToken ? (
-                        <InteractiveMap 
-                          mapboxAccessToken={mapboxToken} 
-                          height="100%" 
-                          markers={damMarkers} 
-                        />
-                      ) : (
-                        <div className="flex h-full items-center justify-center rounded-xl border border-dashed bg-muted/50 p-4 text-center">
-                          <p className="text-sm text-muted-foreground">
-                            Map cannot be displayed. <br />
-                            (Mapbox token not configured)
-                          </p>
-                        </div>
-                      )}
-                    </div>
+                    {/* Section cards in right column */}
+                    {isLoadingCards ? (
+                      <div className="grid grid-cols-2 gap-3">
+                        {Array.from({ length: 6 }).map((_, index) => (
+                          <SectionCardSkeleton key={index} />
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-3">
+                        {currentSectionCardData.map((card, index) => (
+                          <div key={index} className="p-3 rounded-lg border bg-card text-card-foreground shadow-sm">
+                            <div className="text-sm font-medium text-muted-foreground mb-1">{card.title}</div>
+                            <div className="text-lg font-bold">{card.value}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  {/* Pass currentSectionCardData to SectionCards */}
-                  {/* Optionally, show a loading state for cards */}
-                  {isLoadingCards ? (
-                    <div className="grid grid-cols-1 gap-4 px-4 sm:grid-cols-2 lg:grid-cols-3 lg:px-6">
-                      {Array.from({ length: 6 }).map((_, index) => (
-                        <SectionCardSkeleton key={index} />
-                      ))}
-                    </div>
-                  ) : (
-                    <SectionCards data={currentSectionCardData} />
-                  )}
-                  {/* <DataTable data={data} /> */}
                 </div>
+                {/* <DataTable data={data} /> */}
               </div>
             </div>
-          </TabsContent>
-          <TabsContent value="weather" className="flex flex-1 flex-col p-4 lg:p-6">
-            <p>Weather data will go here.</p>
-          </TabsContent>
-          <TabsContent value="data-curve" className="flex flex-1 flex-col p-4 lg:p-6">
-            <p>Data Curve information will go here.</p>
-          </TabsContent>
-          <TabsContent value="environmental" className="flex flex-1 flex-col p-4 lg:p-6">
-            <p>Environmental details will go here.</p>
-          </TabsContent>
-        </Tabs>
+          </div>
+        </div>
       </SidebarInset>
     </SidebarProvider>
   )

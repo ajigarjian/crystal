@@ -39,6 +39,9 @@ interface ProcessedChartData {
   date: string;
   inflow: number;
   type: 'observed' | 'forecast';
+  timestamp: number;
+  observed: number | null;
+  forecast: number | null;
 }
 
 // Temporarily removed PACIFIC_TIMEZONE constant
@@ -92,7 +95,7 @@ interface ChartAreaInteractiveProps {
 }
 
 // Add this helper function before the component
-const generateDailyTicks = (dataMin: number, dataMax: number): number[] => {
+const generateEveryOtherDayTicks = (dataMin: number, dataMax: number): number[] => {
   const ticks: number[] = [];
   const startDate = new Date(dataMin);
   const endDate = new Date(dataMax);
@@ -102,7 +105,7 @@ const generateDailyTicks = (dataMin: number, dataMax: number): number[] => {
   
   while (currentDate <= endDate) {
     ticks.push(currentDate.getTime());
-    currentDate.setUTCDate(currentDate.getUTCDate() + 1); // Move to next day
+    currentDate.setUTCDate(currentDate.getUTCDate() + 2); // Move to every other day
   }
   
   return ticks;
@@ -248,7 +251,7 @@ export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProp
                 tickLine={false}
                 axisLine={false}
                 tickMargin={8}
-                ticks={processedChartData.length > 0 ? generateDailyTicks(
+                ticks={processedChartData.length > 0 ? generateEveryOtherDayTicks(
                   Math.min(...processedChartData.map(d => d.timestamp)),
                   Math.max(...processedChartData.map(d => d.timestamp))
                 ) : []}
@@ -281,19 +284,6 @@ export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProp
                   offset={-20}
                 />
               </YAxis>
-              <Legend 
-                verticalAlign="top" 
-                align="center" 
-                wrapperStyle={{
-                  paddingBottom: 10,
-                  color: 'hsl(0, 0%, 40%)', // Neutral gray color
-                  fontSize: '0.9rem',
-                }}
-                payload={[
-                  { value: 'NOAA Observed', type: 'line', color: 'hsl(120, 50%, 30%)' },
-                  { value: 'NOAA Forecast', type: 'line', color: 'hsl(340, 50%, 40%)' }
-                ]}
-              />
               <ChartTooltip
                 cursor={true} 
                 content={
