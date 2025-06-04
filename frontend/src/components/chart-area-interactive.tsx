@@ -168,7 +168,7 @@ export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProp
                   .slice(-1)[0]; // Get the last observed point
                 
                 if (latestObserved) {
-                  return `Latest Observation: ${latestObserved.inflow.toLocaleString()} cfs ${new Date(latestObserved.date).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })} ${new Date(latestObserved.date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' })} UTC`;
+                  return `${latestObserved.inflow.toLocaleString()} cfs ${new Date(latestObserved.date).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })} ${new Date(latestObserved.date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' })} UTC`;
                 } else {
                   return "No observed data available for the selected period.";
                 }
