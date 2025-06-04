@@ -26,7 +26,7 @@ interface InteractiveMapProps {
 // Focus on Columbia River basin area - covering the basins you mentioned
 const DEFAULT_LATITUDE = 47.8; // Columbia River focus
 const DEFAULT_LONGITUDE = -119.5; // Columbia River focus  
-const DEFAULT_ZOOM = 6.8;
+const DEFAULT_ZOOM = 5.8;
 
 // Use monochrome style as base - everything will be grey
 const BASE_STYLE = "mapbox://styles/mapbox/light-v11";
