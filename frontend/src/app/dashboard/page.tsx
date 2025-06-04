@@ -30,6 +30,9 @@ const AVAILABLE_DAMS: DamInfo[] = [
   { id: 2, name: "Chief Joseph Dam" },
   { id: 3, name: "Wells Dam" },
   { id: 4, name: "Rocky Reach Dam" },
+  { id: 6, name: "The Dalles Lock and Dam" },
+  { id: 7, name: "Bonneville Locks and Dam"}
+
 ];
 
 export default function Page() {
