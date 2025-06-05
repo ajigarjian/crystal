@@ -4,6 +4,7 @@ import * as React from 'react';
 import ReactMapGL, { Marker, Popup, NavigationControl, ViewStateChangeEvent, Source, Layer } from 'react-map-gl/mapbox';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { MapSkeleton } from "@/components/MapSkeleton";
+import { getPowerInfrastructure, PowerInfrastructureData } from "@/lib/firebase";
 
 interface MapMarker {
   latitude: number;
@@ -49,6 +50,7 @@ export function InteractiveMap({
   const [selectedMarker, setSelectedMarker] = React.useState<MapMarker | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isFullScreen, setIsFullScreen] = React.useState(false);
+  const [powerInfrastructureData, setPowerInfrastructureData] = React.useState<PowerInfrastructureData | null>(null);
 
   React.useEffect(() => {
     // Simulate map loading delay
@@ -98,6 +100,20 @@ export function InteractiveMap({
       document.body.style.overflow = 'unset';
     };
   }, [isFullScreen, handleEscapeKey]);
+
+  React.useEffect(() => {
+    async function loadPowerInfrastructure() {
+      try {
+        const data = await getPowerInfrastructure();
+        setPowerInfrastructureData(data);
+      } catch (error) {
+        console.error("Failed to load power infrastructure data:", error);
+        setPowerInfrastructureData(null);
+      }
+    }
+    
+    loadPowerInfrastructure();
+  }, []);
 
   if (isLoading) {
     return <MapSkeleton style={{ height, width: '100%' }} />;
@@ -155,6 +171,142 @@ export function InteractiveMap({
           />
         </Source>
         
+        {/* Power Infrastructure Layers */}
+        {powerInfrastructureData && (
+          <Source
+            id="power-infrastructure"
+            type="geojson"
+            data={powerInfrastructureData}
+          >
+            {/* Power lines (transmission lines) */}
+            <Layer
+              id="power-lines"
+              type="line"
+              filter={["==", ["get", "geometry_type"], "ST_LineString"]}
+              paint={{
+                "line-color": [
+                  "case",
+                  ["has", "voltage", ["get", "properties"]],
+                  [
+                    "case",
+                    ["in", "500", ["get", "voltage"]],
+                    "#ff4444", // High voltage - red
+                    ["in", "230", ["get", "voltage"]],
+                    "#ff8800", // Medium-high voltage - orange
+                    ["in", "115", ["get", "voltage"]],
+                    "#ffcc00", // Medium voltage - yellow
+                    "#666666"  // Unknown/low voltage - gray
+                  ],
+                  "#666666" // Default gray if no voltage
+                ],
+                "line-width": [
+                  "interpolate",
+                  ["linear"],
+                  ["zoom"],
+                  5, 1,
+                  8, [
+                    "case",
+                    ["has", "voltage", ["get", "properties"]],
+                    [
+                      "case",
+                      ["in", "500", ["get", "voltage"]],
+                      3, // Thick for high voltage
+                      ["in", "230", ["get", "voltage"]],
+                      2.5,
+                      ["in", "115", ["get", "voltage"]],
+                      2,
+                      1.5 // Default thickness
+                    ],
+                    1.5
+                  ],
+                  12, [
+                    "case",
+                    ["has", "voltage", ["get", "properties"]],
+                    [
+                      "case",
+                      ["in", "500", ["get", "voltage"]],
+                      6, // Thick for high voltage
+                      ["in", "230", ["get", "voltage"]],
+                      5,
+                      ["in", "115", ["get", "voltage"]],
+                      4,
+                      3 // Default thickness
+                    ],
+                    3
+                  ]
+                ],
+                "line-opacity": 0.8
+              }}
+              layout={{
+                "line-cap": "round",
+                "line-join": "round"
+              }}
+            />
+
+            {/* Power stations and plants (polygons) */}
+            <Layer
+              id="power-polygons"
+              type="fill"
+              filter={["in", ["get", "geometry_type"], ["literal", ["ST_Polygon", "ST_MultiPolygon"]]]}
+              paint={{
+                "fill-color": [
+                  "case",
+                  ["==", ["get", "power_type"], "plant"],
+                  "#4CAF50", // Green for power plants
+                  ["==", ["get", "power_type"], "station"],
+                  "#2196F3", // Blue for substations
+                  "#9C27B0"  // Purple for other facilities
+                ],
+                "fill-opacity": 0.6,
+                "fill-outline-color": "#333333"
+              }}
+            />
+
+            {/* Power station and plant outlines */}
+            <Layer
+              id="power-polygon-outlines"
+              type="line"
+              filter={["in", ["get", "geometry_type"], ["literal", ["ST_Polygon", "ST_MultiPolygon"]]]}
+              paint={{
+                "line-color": "#333333",
+                "line-width": 1,
+                "line-opacity": 0.8
+              }}
+            />
+
+            {/* Power infrastructure points (substations, etc.) */}
+            <Layer
+              id="power-points"
+              type="circle"
+              filter={["==", ["get", "geometry_type"], "ST_Point"]}
+              paint={{
+                "circle-color": [
+                  "case",
+                  ["==", ["get", "power_type"], "substation"],
+                  "#2196F3", // Blue for substations
+                  ["==", ["get", "power_type"], "station"],
+                  "#FF9800", // Orange for stations
+                  ["==", ["get", "power_type"], "plant"],
+                  "#4CAF50", // Green for plants
+                  "#757575"  // Gray for other types
+                ],
+                "circle-radius": [
+                  "interpolate",
+                  ["linear"],
+                  ["zoom"],
+                  5, 2,
+                  8, 4,
+                  12, 6
+                ],
+                "circle-opacity": 0.8,
+                "circle-stroke-color": "#333333",
+                "circle-stroke-width": 1
+              }}
+            />
+          </Source>
+        )}
+        
+        {/* Existing dam markers */}
         {markers.map((marker) => (
           <Marker
             key={`marker-${marker.id}`}
@@ -277,15 +429,59 @@ export function InteractiveMap({
         className="absolute bottom-4 right-4 bg-white/95 backdrop-blur-sm rounded-lg px-3 py-2 shadow-lg border"
         style={{ zIndex: 400 }}
       >
-        <div className="flex items-center space-x-4 text-xs">
-          <div className="flex items-center space-x-1">
-            <div className="w-3 h-3 rounded bg-blue-600"></div>
-            <span className="text-gray-700">Water</span>
+        <div className="text-xs space-y-2">
+          <div className="font-medium text-gray-800 mb-2">Legend</div>
+          
+          {/* Water and Land */}
+          <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-1">
+              <div className="w-3 h-3 rounded bg-blue-600"></div>
+              <span className="text-gray-700">Water</span>
+            </div>
+            <div className="flex items-center space-x-1">
+              <div className="w-3 h-3 rounded bg-gray-400"></div>
+              <span className="text-gray-700">Land</span>
+            </div>
           </div>
+          
+          {/* Dams */}
           <div className="flex items-center space-x-1">
-            <div className="w-3 h-3 rounded bg-gray-400"></div>
-            <span className="text-gray-700">Land</span>
+            <svg height="12" viewBox="0 0 24 24" className="fill-red-500">
+              <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+            </svg>
+            <span className="text-gray-700">Dams</span>
           </div>
+          
+          {/* Power Infrastructure */}
+          {powerInfrastructureData && (
+            <>
+              <div className="border-t pt-2">
+                <div className="font-medium text-gray-800 mb-1">Power Infrastructure</div>
+                <div className="space-y-1">
+                  <div className="flex items-center space-x-1">
+                    <div className="w-3 h-0.5 bg-red-500"></div>
+                    <span className="text-gray-600">500kV Lines</span>
+                  </div>
+                  <div className="flex items-center space-x-1">
+                    <div className="w-3 h-0.5 bg-orange-500"></div>
+                    <span className="text-gray-600">230kV Lines</span>
+                  </div>
+                  <div className="flex items-center space-x-1">
+                    <div className="w-3 h-0.5 bg-yellow-500"></div>
+                    <span className="text-gray-600">115kV Lines</span>
+                  </div>
+                  <div className="flex items-center space-x-1">
+                    <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+                    <span className="text-gray-600">Substations</span>
+                  </div>
+                  <div className="flex items-center space-x-1">
+                    <div className="w-2 h-2 rounded bg-green-500"></div>
+                    <span className="text-gray-600">Power Plants</span>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>

@@ -779,4 +779,65 @@ export const getDamLocations = async (): Promise<DamLocation[]> => {
     console.error('Error calling getDamLocations function:', error);
     return []; // Return empty array for graceful error handling in UI
   }
+};
+
+export interface PowerInfrastructureFeature {
+  type: "Feature";
+  id: number;
+  geometry: any; // GeoJSON geometry
+  properties: {
+    gid: number;
+    name: string;
+    operator: string;
+    power_type: string;
+    voltage: string;
+    geometry_type: string;
+  };
+}
+
+export interface PowerInfrastructureData {
+  type: "FeatureCollection";
+  features: PowerInfrastructureFeature[];
+}
+
+/**
+ * Fetch BPA power infrastructure data as GeoJSON
+ * @param bbox Optional bounding box in format "minLng,minLat,maxLng,maxLat"
+ */
+export const getPowerInfrastructure = async (bbox?: string): Promise<PowerInfrastructureData> => {
+  const region = functions.region || 'us-central1';
+  const projectId = firebaseConfig.projectId;
+  
+  let baseUrl = '';
+  if (process.env.NODE_ENV === 'development') {
+    baseUrl = `http://localhost:5001/${projectId}/${region}`;
+  } else {
+    baseUrl = `https://${region}-${projectId}.cloudfunctions.net`;
+  }
+  
+  let url = `${baseUrl}/get_power_infrastructure`;
+  if (bbox) {
+    url += `?bbox=${encodeURIComponent(bbox)}`;
+  }
+  
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Error fetching power infrastructure:', errorText);
+      throw new Error(`Failed to fetch power infrastructure: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error('Error in getPowerInfrastructure:', error);
+    throw error;
+  }
 }; 
