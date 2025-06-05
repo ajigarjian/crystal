@@ -104,6 +104,134 @@ METRICS_CONFIG = {
         cors_methods=["get", "post", "options"]
     ),
     memory=options.MemoryOption.MB_512,
+    timeout_sec=30
+)
+def get_power_infrastructure(request: https_fn.Request) -> https_fn.Response:
+    """
+    HTTP Cloud Function to fetch BPA power infrastructure data as GeoJSON.
+    Supports optional bbox parameter for spatial filtering.
+    """
+    logger.info("Received request for power infrastructure data.")
+
+    # Handle warming requests
+    if request.method == 'POST':
+        try:
+            request_json = request.get_json(silent=True)
+            if request_json and request_json.get('warming'):
+                logger.info("Warming request received for get_power_infrastructure.")
+                return https_fn.Response(
+                    json.dumps({"status": "warmed"}),
+                    status=200,
+                    headers={"Content-Type": "application/json"}
+                )
+        except Exception:
+            pass
+
+    # Optional bbox parameter for spatial filtering (format: "minLng,minLat,maxLng,maxLat")
+    bbox_param = request.args.get('bbox', None)
+    
+    try:
+        pool = get_connection_pool()
+        conn = pool.getconn()
+        
+        try:
+            with conn.cursor() as cursor:
+                # Base query to get power infrastructure as GeoJSON
+                base_query = """
+                    SELECT jsonb_build_object(
+                        'type', 'FeatureCollection',
+                        'features', jsonb_agg(feature)
+                    )
+                    FROM (
+                        SELECT jsonb_build_object(
+                            'type', 'Feature',
+                            'id', gid,
+                            'geometry', ST_AsGeoJSON(geom)::jsonb,
+                            'properties', jsonb_build_object(
+                                'gid', gid,
+                                'name', COALESCE(name, 'Unnamed'),
+                                'operator', operator,
+                                'power_type', power,
+                                'voltage', voltage,
+                                'geometry_type', ST_GeometryType(geom)
+                            )
+                        ) AS feature
+                        FROM power_infra
+                        WHERE geom IS NOT NULL
+                """
+                
+                # Add spatial filter if bbox is provided
+                if bbox_param:
+                    try:
+                        bbox_parts = [float(x.strip()) for x in bbox_param.split(',')]
+                        if len(bbox_parts) == 4:
+                            min_lng, min_lat, max_lng, max_lat = bbox_parts
+                            base_query += """
+                                AND ST_Intersects(
+                                    geom, 
+                                    ST_MakeEnvelope(%s, %s, %s, %s, 4326)
+                                )
+                            """
+                            cursor.execute(base_query + ") AS features;", (min_lng, min_lat, max_lng, max_lat))
+                        else:
+                            logger.warning(f"Invalid bbox format: {bbox_param}")
+                            cursor.execute(base_query + ") AS features;")
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"Error parsing bbox {bbox_param}: {e}")
+                        cursor.execute(base_query + ") AS features;")
+                else:
+                    cursor.execute(base_query + ") AS features;")
+                
+                result = cursor.fetchone()
+                geojson_data = result[0] if result and result[0] else {
+                    "type": "FeatureCollection", 
+                    "features": []
+                }
+                
+                return https_fn.Response(
+                    json.dumps(geojson_data),
+                    status=200,
+                    headers={
+                        "Content-Type": "application/json",
+                        "Cache-Control": "public, max-age=3600"  # Cache for 1 hour
+                    }
+                )
+                
+        except Exception as db_error:
+            logger.error(f"Database error in get_power_infrastructure: {db_error}")
+            logger.error(traceback.format_exc())
+            if conn:
+                conn.rollback()
+            return https_fn.Response(
+                json.dumps({"error": "A database error occurred.", "details": str(db_error)}),
+                status=500,
+                headers={"Content-Type": "application/json"}
+            )
+        finally:
+            if conn:
+                pool.putconn(conn)
+                
+    except Exception as e:
+        logger.error(f"General error in get_power_infrastructure: {e}")
+        logger.error(traceback.format_exc())
+        return https_fn.Response(
+            json.dumps({"error": "An internal server error occurred.", "details": str(e)}),
+            status=500,
+            headers={"Content-Type": "application/json"}
+        )
+
+@https_fn.on_request(
+    cors=options.CorsOptions(
+        cors_origins=[
+        "https://crystal-2f87e.web.app",
+        "https://askcrystal.info",
+        "https://www.askcrystal.info",
+        "http://localhost:3000",
+        "http://localhost:5173",
+        ],
+        cors_methods=["get", "post", "options"]
+    ),
+    memory=options.MemoryOption.MB_512,
     timeout_sec=300
 )
 def get_dam_locations(request: https_fn.Request) -> https_fn.Response:
@@ -1199,16 +1327,14 @@ def get_inflow_timeseries(request: https_fn.Request) -> https_fn.Response:
         "https://crystal-2f87e.web.app",
         "https://askcrystal.info",
         "https://www.askcrystal.info",
-        "http://localhost:3000",  # For Next.js local dev
-        "http://localhost:5173",  # For Vite local dev (if used)
+        "http://localhost:3000",
+        "http://localhost:5173",
         ],
         cors_methods=["get", "post", "options"]
     ),
-    timeout_sec=60, # Standard timeout
-    memory=options.MemoryOption.MB_512, # Standard memory
-    min_instances=0 # Allow scale to zero for cost-effectiveness
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=30
 )
-
 def get_dashboard_section_cards_data(request: https_fn.Request) -> https_fn.Response:
     """
     HTTP Cloud Function to fetch the latest operational data for dashboard section cards.
