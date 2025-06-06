@@ -129,7 +129,7 @@ export function InteractiveMap({
         minZoom={4}
         maxZoom={12}
         style={{
-          filter: 'grayscale(0.6) contrast(0.7) brightness(1.1)',
+          // filter: 'grayscale(0.6) contrast(0.7) brightness(1.1)',
           transition: 'filter 0.3s ease'
         }}
       >
@@ -159,14 +159,11 @@ export function InteractiveMap({
             paint={{
               "line-color": "#1565c0",
               "line-width": [
-                "interpolate",
-                ["linear"],
-                ["zoom"],
-                5, ["case", ["==", ["get", "class"], "river"], 4, 2],
-                8, ["case", ["==", ["get", "class"], "river"], 6, 3],
-                12, ["case", ["==", ["get", "class"], "river"], 10, 4]
+                "interpolate", ["linear"], ["zoom"],
+                5, 1,   // At zoom 5, line width is 1
+                12, 4  // At zoom 12, line width is 4
               ],
-              "line-opacity": 0.95
+              "line-opacity": 0.9
             }}
           />
         </Source>
@@ -184,57 +181,8 @@ export function InteractiveMap({
               type="line"
               filter={["==", ["get", "geometry_type"], "ST_LineString"]}
               paint={{
-                "line-color": [
-                  "case",
-                  ["has", "voltage", ["get", "properties"]],
-                  [
-                    "case",
-                    ["in", "500", ["get", "voltage"]],
-                    "#ff4444", // High voltage - red
-                    ["in", "230", ["get", "voltage"]],
-                    "#ff8800", // Medium-high voltage - orange
-                    ["in", "115", ["get", "voltage"]],
-                    "#ffcc00", // Medium voltage - yellow
-                    "#666666"  // Unknown/low voltage - gray
-                  ],
-                  "#666666" // Default gray if no voltage
-                ],
-                "line-width": [
-                  "interpolate",
-                  ["linear"],
-                  ["zoom"],
-                  5, 1,
-                  8, [
-                    "case",
-                    ["has", "voltage", ["get", "properties"]],
-                    [
-                      "case",
-                      ["in", "500", ["get", "voltage"]],
-                      3, // Thick for high voltage
-                      ["in", "230", ["get", "voltage"]],
-                      2.5,
-                      ["in", "115", ["get", "voltage"]],
-                      2,
-                      1.5 // Default thickness
-                    ],
-                    1.5
-                  ],
-                  12, [
-                    "case",
-                    ["has", "voltage", ["get", "properties"]],
-                    [
-                      "case",
-                      ["in", "500", ["get", "voltage"]],
-                      6, // Thick for high voltage
-                      ["in", "230", ["get", "voltage"]],
-                      5,
-                      ["in", "115", ["get", "voltage"]],
-                      4,
-                      3 // Default thickness
-                    ],
-                    3
-                  ]
-                ],
+                "line-color": "#666666",
+                "line-width": 1.5,
                 "line-opacity": 0.8
               }}
               layout={{
@@ -249,14 +197,7 @@ export function InteractiveMap({
               type="fill"
               filter={["in", ["get", "geometry_type"], ["literal", ["ST_Polygon", "ST_MultiPolygon"]]]}
               paint={{
-                "fill-color": [
-                  "case",
-                  ["==", ["get", "power_type"], "plant"],
-                  "#4CAF50", // Green for power plants
-                  ["==", ["get", "power_type"], "station"],
-                  "#2196F3", // Blue for substations
-                  "#9C27B0"  // Purple for other facilities
-                ],
+                "fill-color": "#9C27B0",
                 "fill-opacity": 0.6,
                 "fill-outline-color": "#333333"
               }}
@@ -280,24 +221,8 @@ export function InteractiveMap({
               type="circle"
               filter={["==", ["get", "geometry_type"], "ST_Point"]}
               paint={{
-                "circle-color": [
-                  "case",
-                  ["==", ["get", "power_type"], "substation"],
-                  "#2196F3", // Blue for substations
-                  ["==", ["get", "power_type"], "station"],
-                  "#FF9800", // Orange for stations
-                  ["==", ["get", "power_type"], "plant"],
-                  "#4CAF50", // Green for plants
-                  "#757575"  // Gray for other types
-                ],
-                "circle-radius": [
-                  "interpolate",
-                  ["linear"],
-                  ["zoom"],
-                  5, 2,
-                  8, 4,
-                  12, 6
-                ],
+                "circle-color": "#757575",
+                "circle-radius": 4,
                 "circle-opacity": 0.8,
                 "circle-stroke-color": "#333333",
                 "circle-stroke-width": 1
@@ -337,9 +262,9 @@ export function InteractiveMap({
                     stroke: "#ffffff",
                     strokeWidth: "2.5",
                     transform: "translateY(-14px)",
-                    filter: String(marker.id) === String(selectedMarkerId) 
-                      ? "drop-shadow(0 3px 6px rgba(33,150,243,0.6))" 
-                      : "drop-shadow(0 3px 6px rgba(244,67,54,0.4))"
+                    // filter: String(marker.id) === String(selectedMarkerId) 
+                    //   ? "drop-shadow(0 3px 6px rgba(33,150,243,0.6))" 
+                    //   : "drop-shadow(0 3px 6px rgba(244,67,54,0.4))"
                   }}
                 >
                   <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
@@ -397,7 +322,7 @@ export function InteractiveMap({
       
       {/* Columbia River System Label Overlay with Full Screen Button */}
       <div 
-        className="absolute top-4 left-4 bg-white/95 backdrop-blur-sm rounded-lg px-3 py-2 shadow-lg border"
+        className="absolute top-4 left-4 bg-white/95 rounded-lg px-3 py-2 shadow-lg border"
         style={{ zIndex: 400 }}
       >
         <div className="flex items-center justify-between gap-3">
@@ -426,7 +351,7 @@ export function InteractiveMap({
       
       {/* Legend */}
       <div 
-        className="absolute bottom-4 right-4 bg-white/95 backdrop-blur-sm rounded-lg px-3 py-2 shadow-lg border"
+        className="absolute bottom-4 right-4 bg-white/95 rounded-lg px-3 py-2 shadow-lg border"
         style={{ zIndex: 400 }}
       >
         <div className="text-xs space-y-2">
