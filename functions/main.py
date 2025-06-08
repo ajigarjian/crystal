@@ -350,7 +350,6 @@ def get_dam_locations(request: https_fn.Request) -> https_fn.Response:
         cors_methods=["get", "post", "options"]
     ),
     timeout_sec=20,  # Keep timeout short for responsiveness
-    min_instances=1,
     memory=options.MemoryOption.MB_512 # Increase memory
 )
 def evaluate_search_query(request):
@@ -459,8 +458,7 @@ def evaluate_search_query(request):
         cors_methods=["get", "post"]
     ),
     memory=options.MemoryOption.GB_1,
-    timeout_sec=180, # Let's increase timeout here to 3 mins.
-    min_instances=1
+    timeout_sec=180 # Let's increase timeout here to 3 mins.
 )
 def stream_search_datasets(request):
     """HTTP Cloud Function that streams dataset search results."""
@@ -1543,8 +1541,7 @@ def get_dashboard_section_cards_data(request: https_fn.Request) -> https_fn.Resp
         cors_methods=["get", "post", "options"] # Allow POST if scheduler uses it
     ),
     timeout_sec=540,  # 9 minutes, as per ChatGPT's gcloud example
-    memory=options.MemoryOption.GB_1, # 1GiB, as per ChatGPT's gcloud example
-    min_instances=0 # Can scale to zero
+    memory=options.MemoryOption.GB_1 # 1GiB, as per ChatGPT's gcloud example
 )
 
 def generate_inflow_forecast_v0(request: https_fn.Request) -> https_fn.Response:
