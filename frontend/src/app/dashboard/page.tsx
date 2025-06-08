@@ -95,9 +95,7 @@ export default function Page() {
       <AppSidebar variant="inset" />
       <SidebarInset>
         <SiteHeader
-          availableDams={AVAILABLE_DAMS}
           selectedDam={selectedDam}
-          onDamChange={setSelectedDam}
         />
         <div className="flex flex-1 flex-col pt-4">
           <div className="flex flex-1 flex-col">

@@ -20,9 +20,6 @@ export function SiteHeader({ selectedDam }: SiteHeaderProps) {
           <div className="text-base font-medium text-foreground">
             {selectedDam.name}
           </div>
-          <div className="text-xs text-muted-foreground">
-            (Click dams on map to switch)
-          </div>
         </div>
         <div className="ml-auto flex items-center gap-2">
           <Button variant="ghost" asChild size="sm" className="hidden sm:flex">
