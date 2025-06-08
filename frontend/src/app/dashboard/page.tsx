@@ -102,7 +102,7 @@ export default function Page() {
         <div className="flex flex-1 flex-col pt-4">
           <div className="flex flex-1 flex-col">
             <div className="@container/main flex flex-1 flex-col gap-2">
-              <div className="flex flex-col gap-4 pt-2 pb-4 md:gap-6 md:pb-6 min-h-[calc(100vh-200px)]">
+              <div className="flex flex-col gap-4 pt-2 md:gap-6 md:pb-6 min-h-[calc(100vh-200px)]">
                 <div className="flex grid grid-cols-3 gap-4 px-4 lg:px-6 flex-1">
                   <div className="col-span-2 min-h-[600px]">
                     {mapboxToken ? (
