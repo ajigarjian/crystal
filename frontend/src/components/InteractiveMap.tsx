@@ -222,7 +222,6 @@ export function InteractiveMap({
         minZoom={4}
         maxZoom={12}
         style={{
-          // filter: 'grayscale(0.6) contrast(0.7) brightness(1.1)',
           transition: 'filter 0.3s ease'
         }}
       >
@@ -234,32 +233,38 @@ export function InteractiveMap({
           type="vector"
           url="mapbox://mapbox.mapbox-streets-v8"
         >
-          {/* Water bodies (lakes, rivers, etc.) - consistent detail regardless of zoom */}
+          {/* Water bodies (lakes, rivers, etc.) - only show large bodies at default zoom */}
           <Layer
             id="water-bodies-blue"
             type="fill"
             source-layer="water"
             paint={{
               "fill-color": "#1976d2",
-              "fill-opacity": 0.7  // Keep consistent opacity
+              "fill-opacity": 0.7
             }}
             filter={[
-              ">=", ["get", "area"], 50000 // Only show water bodies above a certain size threshold
+              "all",
+              [">=", ["get", "area"], 100000], // Only show larger water bodies
+              ["<=", ["zoom"], 8] // Only show up to zoom level 8
             ]}
+            maxzoom={8}
           />
-          {/* Waterways (rivers, streams) - consistent detail regardless of zoom */}
+          {/* Waterways (rivers, streams) - only show major waterways at default zoom */}
           <Layer
             id="waterways-blue"
             type="line"
             source-layer="waterway"
             paint={{
               "line-color": "#1565c0",
-              "line-width": 1.5,  // Keep consistent width
-              "line-opacity": 0.8  // Keep consistent opacity
+              "line-width": 1.5,
+              "line-opacity": 0.8
             }}
             filter={[
-              "in", ["get", "class"], ["literal", ["river", "canal"]] // Only show major waterways
+              "all",
+              ["in", ["get", "class"], ["literal", ["river", "canal"]]], // Only show major waterways
+              ["<=", ["zoom"], 7] // Only show up to zoom level 7
             ]}
+            maxzoom={7}
           />
         </Source>
         
@@ -294,25 +299,35 @@ export function InteractiveMap({
               paint={{
                 "line-color": [
                   "case",
-                  // If this line is part of selected flowgate group, highlight in red
+                  // If this line is part of selected flowgate group, highlight in green
                   [
                     "any",
                     ["==", ["get", "flowgate"], selectedFlowgateGroup || ""],
                     ["==", ["get", "gid"], clickedLineId || -1]
                   ],
-                  "#ff0000",
-                  // Default color
-                  "#666666"
+                  "#00bcd4", // Green for selected flowgate or clicked line
+                  ["has", "voltage"],
+                  [
+                    "case",
+                    ["in", "500", ["to-string", ["get", "voltage"]]],  // String conversion + contains check
+                    "#ff4444", // High voltage - red
+                    ["in", "230", ["to-string", ["get", "voltage"]]],  // String conversion + contains check
+                    "#ff8800", // Medium-high voltage - orange
+                    ["in", "115", ["to-string", ["get", "voltage"]]],  // String conversion + contains check
+                    "#ffcc00", // Medium voltage - yellow
+                    "#666666"  // Unknown/low voltage - gray
+                  ],
+                  "#666666" // Default gray if no voltage
                 ],
                 "line-width": [
                   "case",
-                  // If this line is part of selected flowgate group, make it thicker
+                  // If this line is part of selected flowgate group, make it much thicker
                   [
                     "any",
                     ["==", ["get", "flowgate"], selectedFlowgateGroup || ""],
                     ["==", ["get", "gid"], clickedLineId || -1]
                   ],
-                  3,
+                  6,
                   // Default width
                   1.5
                 ],
