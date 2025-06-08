@@ -13,6 +13,15 @@ interface MapMarker {
   id: string | number;
 }
 
+interface SelectedPowerLine {
+  id: number;
+  name: string;
+  flowgate: string | null;
+  voltage: string;
+  operator: string;
+  associatedLines: string[];
+}
+
 interface InteractiveMapProps {
   initialLatitude?: number;
   initialLongitude?: number;
@@ -51,6 +60,10 @@ export function InteractiveMap({
   const [isLoading, setIsLoading] = React.useState(true);
   const [isFullScreen, setIsFullScreen] = React.useState(false);
   const [powerInfrastructureData, setPowerInfrastructureData] = React.useState<PowerInfrastructureData | null>(null);
+  const [selectedFlowgateGroup, setSelectedFlowgateGroup] = React.useState<string | null>(null);
+  const [clickedLineId, setClickedLineId] = React.useState<number | null>(null);
+  const [selectedPowerLine, setSelectedPowerLine] = React.useState<SelectedPowerLine | null>(null);
+  const [clickCoordinates, setClickCoordinates] = React.useState<{lat: number, lng: number} | null>(null);
 
   React.useEffect(() => {
     // Simulate map loading delay
@@ -71,10 +84,16 @@ export function InteractiveMap({
 
   const handleMarkerClick = (marker: MapMarker) => {
     setSelectedMarker(marker);
+    // Close any power line selections if open
+    setSelectedPowerLine(null);
+    setSelectedFlowgateGroup(null);
+    setClickedLineId(null);
+    setClickCoordinates(null);
     if (onMarkerClick) {
       onMarkerClick(marker);
     }
   };
+
 
   const toggleFullScreen = () => {
     setIsFullScreen(!isFullScreen);
@@ -105,6 +124,20 @@ export function InteractiveMap({
     async function loadPowerInfrastructure() {
       try {
         const data = await getPowerInfrastructure();
+        console.log("Power infrastructure data received:", data);
+        console.log("Number of features:", data?.features?.length);
+        
+        // Debug: Check first few features to see flowgate data
+        if (data?.features?.length > 0) {
+          console.log("First 5 features:", data.features.slice(0, 5));
+          
+          // Debug: Extract all unique flowgates to see what we're working with
+          const allFlowgates = data.features.map(f => f.properties.flowgate);
+          const uniqueFlowgates = Array.from(new Set(allFlowgates));
+          console.log("All flowgates found:", uniqueFlowgates);
+          console.log("Non-null flowgates:", uniqueFlowgates.filter(fg => fg && fg !== 'null'));
+        }
+        
         setPowerInfrastructureData(data);
       } catch (error) {
         console.error("Failed to load power infrastructure data:", error);
@@ -114,6 +147,7 @@ export function InteractiveMap({
     
     loadPowerInfrastructure();
   }, []);
+
 
   if (isLoading) {
     return <MapSkeleton style={{ height, width: '100%' }} />;
@@ -126,6 +160,65 @@ export function InteractiveMap({
         mapboxAccessToken={mapboxAccessToken}
         mapStyle={BASE_STYLE}
         onMove={(evt: ViewStateChangeEvent) => setViewport(evt.viewState)}
+        onClick={(event) => {
+          // Handle click events on power lines
+          const features = event.features;
+          if (features && features.length > 0) {
+            const powerLineFeature = features.find(f => f.source === 'power-infrastructure' && (f.layer?.id === 'power-lines' || f.layer?.id === 'power-lines-clickable'));
+            if (powerLineFeature && powerLineFeature.properties) {
+              const lineId = powerLineFeature.properties.gid;
+              const flowgate = powerLineFeature.properties.flowgate;
+              const lineName = powerLineFeature.properties.name;
+              const voltage = powerLineFeature.properties.voltage || 'Unknown';
+              const operator = powerLineFeature.properties.operator || 'Unknown';
+              
+              // Find all lines in the same flowgate group
+              const associatedLines = flowgate && powerInfrastructureData 
+                ? powerInfrastructureData.features
+                    .filter(f => f.properties.flowgate === flowgate && f.properties.gid !== lineId)
+                    .map(f => f.properties.name)
+                    .filter(name => name && name !== 'Unnamed')
+                : [];
+              
+              console.log('Clicked power line:', {
+                id: lineId,
+                name: lineName,
+                flowgate: flowgate,
+                associatedLines: associatedLines
+              });
+              
+              // Store click coordinates for popup placement
+              setClickCoordinates({
+                lat: event.lngLat.lat,
+                lng: event.lngLat.lng
+              });
+              
+              setClickedLineId(lineId);
+              
+              // Set selected power line info
+              setSelectedPowerLine({
+                id: lineId,
+                name: lineName,
+                flowgate: flowgate,
+                voltage: voltage,
+                operator: operator,
+                associatedLines: associatedLines
+              });
+              
+              if (flowgate) {
+                setSelectedFlowgateGroup(flowgate);
+                console.log('Selected flowgate group:', flowgate);
+              } else {
+                setSelectedFlowgateGroup(null);
+                console.log('No flowgate associated with this line');
+              }
+              
+              // Close any open popups
+              setSelectedMarker(null);
+            }
+          }
+        }}
+        interactiveLayerIds={['power-lines', 'power-lines-clickable']}
         minZoom={4}
         maxZoom={12}
         style={{
@@ -141,30 +234,32 @@ export function InteractiveMap({
           type="vector"
           url="mapbox://mapbox.mapbox-streets-v8"
         >
-          {/* Water bodies (lakes, rivers, etc.) */}
+          {/* Water bodies (lakes, rivers, etc.) - consistent detail regardless of zoom */}
           <Layer
             id="water-bodies-blue"
             type="fill"
             source-layer="water"
             paint={{
               "fill-color": "#1976d2",
-              "fill-opacity": 0.9
+              "fill-opacity": 0.7  // Keep consistent opacity
             }}
+            filter={[
+              ">=", ["get", "area"], 50000 // Only show water bodies above a certain size threshold
+            ]}
           />
-          {/* Waterways (rivers, streams) */}
+          {/* Waterways (rivers, streams) - consistent detail regardless of zoom */}
           <Layer
             id="waterways-blue"
             type="line"
             source-layer="waterway"
             paint={{
               "line-color": "#1565c0",
-              "line-width": [
-                "interpolate", ["linear"], ["zoom"],
-                5, 1,   // At zoom 5, line width is 1
-                12, 4  // At zoom 12, line width is 4
-              ],
-              "line-opacity": 0.9
+              "line-width": 1.5,  // Keep consistent width
+              "line-opacity": 0.8  // Keep consistent opacity
             }}
+            filter={[
+              "in", ["get", "class"], ["literal", ["river", "canal"]] // Only show major waterways
+            ]}
           />
         </Source>
         
@@ -175,14 +270,52 @@ export function InteractiveMap({
             type="geojson"
             data={powerInfrastructureData}
           >
-            {/* Power lines (transmission lines) */}
+            {/* Invisible wider power lines for easier clicking */}
+            <Layer
+              id="power-lines-clickable"
+              type="line"
+              filter={["==", ["get", "geometry_type"], "ST_LineString"]}
+              paint={{
+                "line-color": "transparent",
+                "line-width": 8, // Much wider invisible line for easier clicking
+                "line-opacity": 0
+              }}
+              layout={{
+                "line-cap": "round",
+                "line-join": "round"
+              }}
+            />
+            
+            {/* Visible power lines (transmission lines) */}
             <Layer
               id="power-lines"
               type="line"
               filter={["==", ["get", "geometry_type"], "ST_LineString"]}
               paint={{
-                "line-color": "#666666",
-                "line-width": 1.5,
+                "line-color": [
+                  "case",
+                  // If this line is part of selected flowgate group, highlight in red
+                  [
+                    "any",
+                    ["==", ["get", "flowgate"], selectedFlowgateGroup || ""],
+                    ["==", ["get", "gid"], clickedLineId || -1]
+                  ],
+                  "#ff0000",
+                  // Default color
+                  "#666666"
+                ],
+                "line-width": [
+                  "case",
+                  // If this line is part of selected flowgate group, make it thicker
+                  [
+                    "any",
+                    ["==", ["get", "flowgate"], selectedFlowgateGroup || ""],
+                    ["==", ["get", "gid"], clickedLineId || -1]
+                  ],
+                  3,
+                  // Default width
+                  1.5
+                ],
                 "line-opacity": 0.8
               }}
               layout={{
@@ -231,6 +364,7 @@ export function InteractiveMap({
           </Source>
         )}
         
+
         {/* Existing dam markers */}
         {markers.map((marker) => (
           <Marker
@@ -284,6 +418,73 @@ export function InteractiveMap({
           </Marker>
         ))}
 
+        {/* Power Line Popup */}
+        {selectedPowerLine && clickCoordinates ? (
+          <Popup
+            latitude={clickCoordinates.lat}
+            longitude={clickCoordinates.lng}
+            onClose={() => {
+              setSelectedPowerLine(null);
+              setSelectedFlowgateGroup(null);
+              setClickedLineId(null);
+              setClickCoordinates(null);
+            }}
+            closeButton={true}
+            closeOnClick={false}
+            style={{ fontFamily: 'var(--font-sans)' }}
+          >
+            <div style={{ padding: '12px', minWidth: '300px', maxWidth: '400px' }}>
+              <h3 style={{ 
+                margin: '0 0 8px 0', 
+                fontSize: '1.1rem', 
+                fontWeight: 600, 
+                color: '#ff0000',
+                borderBottom: '2px solid #ffebee',
+                paddingBottom: '4px'
+              }}>
+                {selectedPowerLine.name}
+              </h3>
+              <div style={{ margin: '8px 0' }}>
+                <p style={{ margin: '4px 0', fontSize: '0.875rem', color: '#666' }}>
+                  <strong>Voltage:</strong> {selectedPowerLine.voltage}
+                </p>
+                <p style={{ margin: '4px 0', fontSize: '0.875rem', color: '#666' }}>
+                  <strong>Operator:</strong> {selectedPowerLine.operator}
+                </p>
+                {selectedPowerLine.flowgate ? (
+                  <>
+                    <p style={{ margin: '4px 0', fontSize: '0.875rem', color: '#666' }}>
+                      <strong>Flowgate:</strong> <span style={{ fontFamily: 'monospace', background: '#f5f5f5', padding: '2px 4px', borderRadius: '3px' }}>{selectedPowerLine.flowgate}</span>
+                    </p>
+                    {selectedPowerLine.associatedLines.length > 0 && (
+                      <div style={{ marginTop: '8px' }}>
+                        <p style={{ margin: '4px 0', fontSize: '0.875rem', color: '#666', fontWeight: 600 }}>
+                          Associated Lines in this Flowgate:
+                        </p>
+                        <ul style={{ margin: '4px 0', fontSize: '0.8rem', color: '#888', paddingLeft: '16px' }}>
+                          {selectedPowerLine.associatedLines.slice(0, 5).map((lineName, index) => (
+                            <li key={index} style={{ margin: '2px 0' }}>{lineName}</li>
+                          ))}
+                          {selectedPowerLine.associatedLines.length > 5 && (
+                            <li style={{ margin: '2px 0', fontStyle: 'italic' }}>
+                              ... and {selectedPowerLine.associatedLines.length - 5} more
+                            </li>
+                          )}
+                        </ul>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <p style={{ margin: '4px 0', fontSize: '0.875rem', color: '#888' }}>
+                    <em>No flowgate association</em>
+                  </p>
+                )}
+              </div>
+            </div>
+          </Popup>
+        ) : null}
+        
+        
         {selectedMarker ? (
           <Popup
             latitude={selectedMarker.latitude}
@@ -349,6 +550,69 @@ export function InteractiveMap({
         </div>
       </div>
       
+      {/* Flowgate Selector Widget */}
+      <div 
+        className="absolute top-20 right-4 bg-white/95 rounded-lg px-3 py-2 shadow-lg border w-64"
+        style={{ zIndex: 400, maxHeight: '60vh', overflowY: 'auto' }}
+      >
+        <div className="text-sm font-medium text-gray-800 mb-2">Flowgate Selector</div>
+        <div className="space-y-1 max-h-48 overflow-y-auto">
+          {powerInfrastructureData && 
+            (() => {
+              // Debug: Log the flowgate extraction process
+              const allFlowgates = powerInfrastructureData.features.map(f => f.properties.flowgate);
+              const filteredFlowgates = allFlowgates.filter(flowgate => flowgate && flowgate !== 'null');
+              const uniqueFlowgates = Array.from(new Set(filteredFlowgates)).sort();
+              
+              console.log("Flowgate selector debug:");
+              console.log("- All flowgates:", allFlowgates);
+              console.log("- Filtered flowgates:", filteredFlowgates);
+              console.log("- Unique flowgates:", uniqueFlowgates);
+              
+              return uniqueFlowgates;
+            })().map((flowgate) => {
+              const isSelected = selectedFlowgateGroup === flowgate;
+              const lineCount = powerInfrastructureData.features
+                .filter(f => f.properties.flowgate === flowgate).length;
+              
+              return (
+                <button
+                  key={flowgate}
+                  onClick={() => {
+                    if (isSelected) {
+                      // Deselect if already selected
+                      setSelectedFlowgateGroup(null);
+                      setClickedLineId(null);
+                      setSelectedPowerLine(null);
+                      setClickCoordinates(null);
+                    } else {
+                      // Select this flowgate
+                      setSelectedFlowgateGroup(flowgate);
+                      setClickedLineId(null);
+                      setSelectedPowerLine(null);
+                      setClickCoordinates(null);
+                    }
+                  }}
+                  className={`w-full text-left px-2 py-1 rounded text-xs transition-colors ${
+                    isSelected 
+                      ? 'bg-red-100 text-red-800 border border-red-300' 
+                      : 'hover:bg-gray-100 text-gray-700'
+                  }`}
+                >
+                  <div className="font-mono text-xs truncate">{flowgate}</div>
+                  <div className="text-xs text-gray-500">{lineCount} lines</div>
+                </button>
+              );
+            })
+          }
+          {(!powerInfrastructureData || 
+            !powerInfrastructureData.features.some(f => f.properties.flowgate && f.properties.flowgate !== 'null')
+          ) && (
+            <div className="text-xs text-gray-500 italic">No flowgates available</div>
+          )}
+        </div>
+      </div>
+      
       {/* Legend */}
       <div 
         className="absolute bottom-4 right-4 bg-white/95 rounded-lg px-3 py-2 shadow-lg border"
@@ -356,6 +620,25 @@ export function InteractiveMap({
       >
         <div className="text-xs space-y-2">
           <div className="font-medium text-gray-800 mb-2">Legend</div>
+          
+          {/* Selected Flowgate Info */}
+          {selectedFlowgateGroup && (
+            <div className="border-b pb-2 mb-2">
+              <div className="font-medium text-red-600 mb-1">Selected Flowgate</div>
+              <div className="text-red-700 text-xs font-mono">{selectedFlowgateGroup}</div>
+              <button 
+                onClick={() => {
+                  setSelectedFlowgateGroup(null);
+                  setClickedLineId(null);
+                  setSelectedPowerLine(null);
+                  setClickCoordinates(null);
+                }}
+                className="text-xs text-gray-500 hover:text-gray-700 mt-1"
+              >
+                Clear selection
+              </button>
+            </div>
+          )}
           
           {/* Water and Land */}
           <div className="flex items-center space-x-4">
@@ -377,6 +660,7 @@ export function InteractiveMap({
             <span className="text-gray-700">Dams</span>
           </div>
           
+          
           {/* Power Infrastructure */}
           {powerInfrastructureData && (
             <>
@@ -384,8 +668,12 @@ export function InteractiveMap({
                 <div className="font-medium text-gray-800 mb-1">Power Infrastructure</div>
                 <div className="space-y-1">
                   <div className="flex items-center space-x-1">
+                    <div className="w-3 h-0.5 bg-gray-600"></div>
+                    <span className="text-gray-600">Power Lines</span>
+                  </div>
+                  <div className="flex items-center space-x-1">
                     <div className="w-3 h-0.5 bg-red-500"></div>
-                    <span className="text-gray-600">500kV Lines</span>
+                    <span className="text-gray-600">Selected Flowgate</span>
                   </div>
                   <div className="flex items-center space-x-1">
                     <div className="w-3 h-0.5 bg-orange-500"></div>
