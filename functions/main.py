@@ -136,28 +136,34 @@ def get_power_infrastructure(request: https_fn.Request) -> https_fn.Response:
         
         try:
             with conn.cursor() as cursor:
-                # Base query to get power infrastructure as GeoJSON
+                # Base query to get power infrastructure as GeoJSON with flowgate data
+                # Use DISTINCT ON to ensure only one row per power infrastructure item
+                # Priority: prefer non-NULL flowgate values over NULL ones
                 base_query = """
                     SELECT jsonb_build_object(
                         'type', 'FeatureCollection',
                         'features', jsonb_agg(feature)
                     )
                     FROM (
-                        SELECT jsonb_build_object(
+                        SELECT DISTINCT ON (pi.gid) jsonb_build_object(
                             'type', 'Feature',
-                            'id', gid,
-                            'geometry', ST_AsGeoJSON(geom)::jsonb,
+                            'id', pi.gid,
+                            'geometry', ST_AsGeoJSON(pi.geom)::jsonb,
                             'properties', jsonb_build_object(
-                                'gid', gid,
-                                'name', COALESCE(name, 'Unnamed'),
-                                'operator', operator,
-                                'power_type', power,
-                                'voltage', voltage,
-                                'geometry_type', ST_GeometryType(geom)
+                                'gid', pi.gid,
+                                'name', COALESCE(pi.name, 'Unnamed'),
+                                'operator', pi.operator,
+                                'power_type', pi.power,
+                                'voltage', pi.voltage,
+                                'geometry_type', ST_GeometryType(pi.geom),
+                                'flowgate', pfg.flowgate,
+                                'is_flowgate_line', CASE WHEN pfg.flowgate IS NOT NULL THEN true ELSE false END
                             )
                         ) AS feature
-                        FROM power_infra
-                        WHERE geom IS NOT NULL
+                        FROM power_infra pi
+                        LEFT JOIN power_flow_gates pfg ON pi.name = pfg.openinframaplinename
+                        WHERE pi.geom IS NOT NULL
+                        ORDER BY pi.gid, (pfg.flowgate IS NOT NULL) DESC, pfg.flowgate
                 """
                 
                 # Add spatial filter if bbox is provided
@@ -187,6 +193,23 @@ def get_power_infrastructure(request: https_fn.Request) -> https_fn.Response:
                     "type": "FeatureCollection", 
                     "features": []
                 }
+                
+                # Debug: Log flowgate data
+                if geojson_data and "features" in geojson_data:
+                    flowgates = [f["properties"].get("flowgate") for f in geojson_data["features"] if f["properties"].get("flowgate")]
+                    logger.info(f"Found {len(flowgates)} features with flowgates: {set(flowgates)}")
+                
+                # Debug: Log information about flowgates
+                if geojson_data and geojson_data.get("features"):
+                    total_features = len(geojson_data["features"])
+                    flowgate_features = [f for f in geojson_data["features"] if f.get("properties", {}).get("flowgate")]
+                    unique_flowgates = set()
+                    for f in geojson_data["features"]:
+                        fg = f.get("properties", {}).get("flowgate")
+                        if fg:
+                            unique_flowgates.add(fg)
+                    
+                    logger.info(f"Power infrastructure debug: {total_features} total features, {len(flowgate_features)} with flowgates, unique flowgates: {sorted(unique_flowgates)}")
                 
                 return https_fn.Response(
                     json.dumps(geojson_data),
@@ -327,7 +350,6 @@ def get_dam_locations(request: https_fn.Request) -> https_fn.Response:
         cors_methods=["get", "post", "options"]
     ),
     timeout_sec=20,  # Keep timeout short for responsiveness
-    min_instances=1,
     memory=options.MemoryOption.MB_512 # Increase memory
 )
 def evaluate_search_query(request):
@@ -436,8 +458,7 @@ def evaluate_search_query(request):
         cors_methods=["get", "post"]
     ),
     memory=options.MemoryOption.GB_1,
-    timeout_sec=180, # Let's increase timeout here to 3 mins.
-    min_instances=1
+    timeout_sec=180 # Let's increase timeout here to 3 mins.
 )
 def stream_search_datasets(request):
     """HTTP Cloud Function that streams dataset search results."""
@@ -1520,8 +1541,7 @@ def get_dashboard_section_cards_data(request: https_fn.Request) -> https_fn.Resp
         cors_methods=["get", "post", "options"] # Allow POST if scheduler uses it
     ),
     timeout_sec=540,  # 9 minutes, as per ChatGPT's gcloud example
-    memory=options.MemoryOption.GB_1, # 1GiB, as per ChatGPT's gcloud example
-    min_instances=0 # Can scale to zero
+    memory=options.MemoryOption.GB_1 # 1GiB, as per ChatGPT's gcloud example
 )
 
 def generate_inflow_forecast_v0(request: https_fn.Request) -> https_fn.Response:

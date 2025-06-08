@@ -792,6 +792,8 @@ export interface PowerInfrastructureFeature {
     power_type: string;
     voltage: string;
     geometry_type: string;
+    flowgate: string | null;
+    is_flowgate_line: boolean;
   };
 }
 
@@ -820,6 +822,8 @@ export const getPowerInfrastructure = async (bbox?: string): Promise<PowerInfras
     url += `?bbox=${encodeURIComponent(bbox)}`;
   }
   
+  console.log("Calling getPowerInfrastructure API at URL:", url);
+  
   try {
     const response = await fetch(url, {
       method: 'GET',
@@ -828,6 +832,8 @@ export const getPowerInfrastructure = async (bbox?: string): Promise<PowerInfras
       },
     });
 
+    console.log("API response status:", response.status);
+
     if (!response.ok) {
       const errorText = await response.text();
       console.error('Error fetching power infrastructure:', errorText);
@@ -835,6 +841,7 @@ export const getPowerInfrastructure = async (bbox?: string): Promise<PowerInfras
     }
 
     const data = await response.json();
+    console.log("Raw API response data:", data);
     return data;
   } catch (error) {
     console.error('Error in getPowerInfrastructure:', error);
