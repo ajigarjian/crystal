@@ -64,6 +64,18 @@ export function InteractiveMap({
   const [clickedLineId, setClickedLineId] = React.useState<number | null>(null);
   const [selectedPowerLine, setSelectedPowerLine] = React.useState<SelectedPowerLine | null>(null);
   const [clickCoordinates, setClickCoordinates] = React.useState<{lat: number, lng: number} | null>(null);
+  
+  // Visibility controls for legend items
+  const [showDams, setShowDams] = React.useState(true);
+  const [showPowerLines, setShowPowerLines] = React.useState(true);
+  const [showSubstations, setShowSubstations] = React.useState(false);
+  const [showPowerPlants, setShowPowerPlants] = React.useState(true);
+  
+  // Voltage-specific visibility controls
+  const [show500kV, setShow500kV] = React.useState(true);
+  const [show230kV, setShow230kV] = React.useState(true);
+  const [show115kV, setShow115kV] = React.useState(true);
+  const [showOtherVoltages, setShowOtherVoltages] = React.useState(true);
 
   React.useEffect(() => {
     // Simulate map loading delay
@@ -276,112 +288,152 @@ export function InteractiveMap({
             data={powerInfrastructureData}
           >
             {/* Invisible wider power lines for easier clicking */}
-            <Layer
-              id="power-lines-clickable"
-              type="line"
-              filter={["==", ["get", "geometry_type"], "ST_LineString"]}
-              paint={{
-                "line-color": "transparent",
-                "line-width": 8, // Much wider invisible line for easier clicking
-                "line-opacity": 0
-              }}
-              layout={{
-                "line-cap": "round",
-                "line-join": "round"
-              }}
-            />
+            {showPowerLines && (
+              <Layer
+                id="power-lines-clickable"
+                type="line"
+                filter={["==", ["get", "geometry_type"], "ST_LineString"]}
+                paint={{
+                  "line-color": "transparent",
+                  "line-width": 8, // Much wider invisible line for easier clicking
+                  "line-opacity": 0
+                }}
+                layout={{
+                  "line-cap": "round",
+                  "line-join": "round"
+                }}
+              />
+            )}
             
             {/* Visible power lines (transmission lines) */}
-            <Layer
-              id="power-lines"
-              type="line"
-              filter={["==", ["get", "geometry_type"], "ST_LineString"]}
-              paint={{
-                "line-color": [
-                  "case",
-                  // If this line is part of selected flowgate group, highlight in green
-                  [
-                    "any",
-                    ["==", ["get", "flowgate"], selectedFlowgateGroup || ""],
-                    ["==", ["get", "gid"], clickedLineId || -1]
-                  ],
-                  "#00bcd4", // Green for selected flowgate or clicked line
-                  ["has", "voltage"],
-                  [
+            {showPowerLines && (
+              <Layer
+                id="power-lines"
+                type="line"
+                filter={["==", ["get", "geometry_type"], "ST_LineString"]}
+                paint={{
+                  "line-color": [
                     "case",
-                    ["in", "500", ["to-string", ["get", "voltage"]]],  // String conversion + contains check
-                    "#ff4444", // High voltage - red
-                    ["in", "230", ["to-string", ["get", "voltage"]]],  // String conversion + contains check
-                    "#ff8800", // Medium-high voltage - orange
-                    ["in", "115", ["to-string", ["get", "voltage"]]],  // String conversion + contains check
-                    "#ffcc00", // Medium voltage - yellow
-                    "#666666"  // Unknown/low voltage - gray
+                    // If this line is part of selected flowgate group, highlight in green
+                    [
+                      "any",
+                      ["==", ["get", "flowgate"], selectedFlowgateGroup || ""],
+                      ["==", ["get", "gid"], clickedLineId || -1]
+                    ],
+                    "#00bcd4", // Green for selected flowgate or clicked line
+                    ["has", "voltage"],
+                    [
+                      "case",
+                      ["in", "500", ["to-string", ["get", "voltage"]]],  // String conversion + contains check
+                      "#ff4444", // High voltage - red
+                      ["in", "230", ["to-string", ["get", "voltage"]]],  // String conversion + contains check
+                      "#ff8800", // Medium-high voltage - orange
+                      ["in", "115", ["to-string", ["get", "voltage"]]],  // String conversion + contains check
+                      "#ffcc00", // Medium voltage - yellow
+                      "#666666"  // Unknown/low voltage - gray
+                    ],
+                    "#666666" // Default gray if no voltage
                   ],
-                  "#666666" // Default gray if no voltage
-                ],
-                "line-width": [
-                  "case",
-                  // If this line is part of selected flowgate group, make it much thicker
-                  [
-                    "any",
-                    ["==", ["get", "flowgate"], selectedFlowgateGroup || ""],
-                    ["==", ["get", "gid"], clickedLineId || -1]
+                  "line-opacity": [
+                    "case",
+                    // Hide lines based on voltage visibility settings
+                    [
+                      "all",
+                      ["in", "500", ["to-string", ["get", "voltage"]]],
+                      !show500kV
+                    ],
+                    0, // Hide 500kV lines if disabled
+                    [
+                      "all", 
+                      ["in", "230", ["to-string", ["get", "voltage"]]],
+                      !show230kV
+                    ],
+                    0, // Hide 230kV lines if disabled
+                    [
+                      "all",
+                      ["in", "115", ["to-string", ["get", "voltage"]]],
+                      !show115kV
+                    ],
+                    0, // Hide 115kV lines if disabled
+                    [
+                      "all",
+                      ["!", ["in", "500", ["to-string", ["get", "voltage"]]]],
+                      ["!", ["in", "230", ["to-string", ["get", "voltage"]]]],
+                      ["!", ["in", "115", ["to-string", ["get", "voltage"]]]],
+                      !showOtherVoltages
+                    ],
+                    0, // Hide other voltage lines if disabled
+                    0.8 // Default opacity
                   ],
-                  6,
-                  // Default width
-                  1.5
-                ],
-                "line-opacity": 0.8
-              }}
-              layout={{
-                "line-cap": "round",
-                "line-join": "round"
-              }}
-            />
+                  "line-width": [
+                    "case",
+                    // If this line is part of selected flowgate group, make it much thicker
+                    [
+                      "any",
+                      ["==", ["get", "flowgate"], selectedFlowgateGroup || ""],
+                      ["==", ["get", "gid"], clickedLineId || -1]
+                    ],
+                    6,
+                    // Default width
+                    1.5
+                  ]
+                }}
+                layout={{
+                  "line-cap": "round",
+                  "line-join": "round"
+                }}
+              />
+            )}
 
             {/* Power stations and plants (polygons) */}
-            <Layer
-              id="power-polygons"
-              type="fill"
-              filter={["in", ["get", "geometry_type"], ["literal", ["ST_Polygon", "ST_MultiPolygon"]]]}
-              paint={{
-                "fill-color": "#9C27B0",
-                "fill-opacity": 0.6,
-                "fill-outline-color": "#333333"
-              }}
-            />
+            {showPowerPlants && (
+              <Layer
+                id="power-polygons"
+                type="fill"
+                filter={["in", ["get", "geometry_type"], ["literal", ["ST_Polygon", "ST_MultiPolygon"]]]}
+                paint={{
+                  "fill-color": "#9C27B0",
+                  "fill-opacity": 0.6,
+                  "fill-outline-color": "#333333"
+                }}
+              />
+            )}
 
             {/* Power station and plant outlines */}
-            <Layer
-              id="power-polygon-outlines"
-              type="line"
-              filter={["in", ["get", "geometry_type"], ["literal", ["ST_Polygon", "ST_MultiPolygon"]]]}
-              paint={{
-                "line-color": "#333333",
-                "line-width": 1,
-                "line-opacity": 0.8
-              }}
-            />
+            {showPowerPlants && (
+              <Layer
+                id="power-polygon-outlines"
+                type="line"
+                filter={["in", ["get", "geometry_type"], ["literal", ["ST_Polygon", "ST_MultiPolygon"]]]}
+                paint={{
+                  "line-color": "#333333",
+                  "line-width": 1,
+                  "line-opacity": 0.8
+                }}
+              />
+            )}
 
             {/* Power infrastructure points (substations, etc.) */}
-            <Layer
-              id="power-points"
-              type="circle"
-              filter={["==", ["get", "geometry_type"], "ST_Point"]}
-              paint={{
-                "circle-color": "#757575",
-                "circle-radius": 4,
-                "circle-opacity": 0.8,
-                "circle-stroke-color": "#333333",
-                "circle-stroke-width": 1
-              }}
-            />
+            {showSubstations && (
+              <Layer
+                id="power-points"
+                type="circle"
+                filter={["==", ["get", "geometry_type"], "ST_Point"]}
+                paint={{
+                  "circle-color": "#757575",
+                  "circle-radius": 4,
+                  "circle-opacity": 0.8,
+                  "circle-stroke-color": "#333333",
+                  "circle-stroke-width": 1
+                }}
+              />
+            )}
           </Source>
         )}
         
 
         {/* Existing dam markers */}
-        {markers.map((marker) => (
+        {showDams && markers.map((marker) => (
           <Marker
             key={`marker-${marker.id}`}
             latitude={marker.latitude}
@@ -655,24 +707,20 @@ export function InteractiveMap({
             </div>
           )}
           
-          {/* Water and Land */}
-          <div className="flex items-center space-x-4">
-            <div className="flex items-center space-x-1">
-              <div className="w-3 h-3 rounded bg-blue-600"></div>
-              <span className="text-gray-700">Water</span>
-            </div>
-            <div className="flex items-center space-x-1">
-              <div className="w-3 h-3 rounded bg-gray-400"></div>
-              <span className="text-gray-700">Land</span>
-            </div>
-          </div>
-          
           {/* Dams */}
-          <div className="flex items-center space-x-1">
-            <svg height="12" viewBox="0 0 24 24" className="fill-red-500">
-              <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
-            </svg>
-            <span className="text-gray-700">Dams</span>
+          <div className="space-y-1">
+            <label className="flex items-center space-x-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={showDams}
+                onChange={(e) => setShowDams(e.target.checked)}
+                className="w-3 h-3"
+              />
+              <svg height="12" viewBox="0 0 24 24" className="fill-red-500">
+                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+              </svg>
+              <span className="text-gray-700 text-xs">Dams</span>
+            </label>
           </div>
           
           
@@ -680,32 +728,84 @@ export function InteractiveMap({
           {powerInfrastructureData && (
             <>
               <div className="border-t pt-2">
-                <div className="font-medium text-gray-800 mb-1">Power Infrastructure</div>
+                <div className="font-medium text-gray-800 mb-1 text-xs">Power Infrastructure</div>
                 <div className="space-y-1">
-                  <div className="flex items-center space-x-1">
+                  <label className="flex items-center space-x-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={showPowerLines}
+                      onChange={(e) => setShowPowerLines(e.target.checked)}
+                      className="w-3 h-3"
+                    />
                     <div className="w-3 h-0.5 bg-gray-600"></div>
-                    <span className="text-gray-600">Power Lines</span>
+                    <span className="text-gray-600 text-xs">All Power Lines</span>
+                  </label>
+                  <div className="ml-5 space-y-1">
+                    <div className="flex items-center space-x-1">
+                      <div className="w-3 h-0.5 bg-cyan-500"></div>
+                      <span className="text-gray-600 text-xs">Selected Flowgate</span>
+                    </div>
+                    <label className="flex items-center space-x-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={show500kV}
+                        onChange={(e) => setShow500kV(e.target.checked)}
+                        className="w-3 h-3"
+                      />
+                      <div className="w-3 h-0.5 bg-red-400"></div>
+                      <span className="text-gray-600 text-xs">500kV Lines</span>
+                    </label>
+                    <label className="flex items-center space-x-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={show230kV}
+                        onChange={(e) => setShow230kV(e.target.checked)}
+                        className="w-3 h-3"
+                      />
+                      <div className="w-3 h-0.5 bg-orange-500"></div>
+                      <span className="text-gray-600 text-xs">230kV Lines</span>
+                    </label>
+                    <label className="flex items-center space-x-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={show115kV}
+                        onChange={(e) => setShow115kV(e.target.checked)}
+                        className="w-3 h-3"
+                      />
+                      <div className="w-3 h-0.5 bg-yellow-500"></div>
+                      <span className="text-gray-600 text-xs">115kV Lines</span>
+                    </label>
+                    <label className="flex items-center space-x-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={showOtherVoltages}
+                        onChange={(e) => setShowOtherVoltages(e.target.checked)}
+                        className="w-3 h-3"
+                      />
+                      <div className="w-3 h-0.5 bg-gray-600"></div>
+                      <span className="text-gray-600 text-xs">Other Voltages</span>
+                    </label>
                   </div>
-                  <div className="flex items-center space-x-1">
-                    <div className="w-3 h-0.5 bg-red-500"></div>
-                    <span className="text-gray-600">Selected Flowgate</span>
-                  </div>
-                  <div className="flex items-center space-x-1">
-                    <div className="w-3 h-0.5 bg-orange-500"></div>
-                    <span className="text-gray-600">230kV Lines</span>
-                  </div>
-                  <div className="flex items-center space-x-1">
-                    <div className="w-3 h-0.5 bg-yellow-500"></div>
-                    <span className="text-gray-600">115kV Lines</span>
-                  </div>
-                  <div className="flex items-center space-x-1">
-                    <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-                    <span className="text-gray-600">Substations</span>
-                  </div>
-                  <div className="flex items-center space-x-1">
-                    <div className="w-2 h-2 rounded bg-green-500"></div>
-                    <span className="text-gray-600">Power Plants</span>
-                  </div>
+                  <label className="flex items-center space-x-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={showSubstations}
+                      onChange={(e) => setShowSubstations(e.target.checked)}
+                      className="w-3 h-3"
+                    />
+                    <div className="w-2 h-2 rounded-full bg-gray-500"></div>
+                    <span className="text-gray-600 text-xs">Substations</span>
+                  </label>
+                  <label className="flex items-center space-x-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={showPowerPlants}
+                      onChange={(e) => setShowPowerPlants(e.target.checked)}
+                      className="w-3 h-3"
+                    />
+                    <div className="w-2 h-2 rounded bg-purple-500"></div>
+                    <span className="text-gray-600 text-xs">Power Plants</span>
+                  </label>
                 </div>
               </div>
             </>
