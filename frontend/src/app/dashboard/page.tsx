@@ -17,6 +17,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
+import { TradingSummary } from "@/components/TradingSummary"
 
 import { getDashboardSectionCards, SectionCardData, getDamLocations, DamLocation } from "@/lib/firebase"
 
@@ -59,10 +61,7 @@ interface SearchableFeature {
 }
 
 export default function Page() {
-  const [selectedFeature, setSelectedFeature] = React.useState<SelectedFeature>({
-    type: 'dam',
-    data: AVAILABLE_DAMS[0]
-  });
+  const [selectedFeature, setSelectedFeature] = React.useState<SelectedFeature | null>(null);
   
   const [currentSectionCardData, setCurrentSectionCardData] = React.useState<SectionCardData[]>([]);
   const [isLoadingCards, setIsLoadingCards] = React.useState<boolean>(true);
@@ -75,19 +74,21 @@ export default function Page() {
 
   const [selectedFlowgate, setSelectedFlowgate] = React.useState<string | null>(null);
 
+  const [isTradingSummaryLoading, setIsTradingSummaryLoading] = React.useState(true);
+
   const getCurrentDam = (): DamInfo | null => {
-    return selectedFeature.type === 'dam' ? selectedFeature.data as DamInfo : null;
+    return selectedFeature?.type === 'dam' ? selectedFeature.data as DamInfo : null;
   };
 
   const getCurrentPowerLine = (): PowerLineInfo | null => {
-    return selectedFeature.type === 'powerline' ? selectedFeature.data as PowerLineInfo : null;
+    return selectedFeature?.type === 'powerline' ? selectedFeature.data as PowerLineInfo : null;
   };
 
   React.useEffect(() => {
     async function loadSectionCards() {
       setIsLoadingCards(true);
       try {
-        if (selectedFeature.type === 'dam') {
+        if (selectedFeature?.type === 'dam') {
           const damData = selectedFeature.data as DamInfo;
           const data = await getDashboardSectionCards(damData.id);
           setCurrentSectionCardData(data);
@@ -268,16 +269,14 @@ export default function Page() {
 
   // Helper function to get display info for selected feature
   const getSelectedFeatureDisplay = () => {
+    if (!selectedFeature) return null;
+    
     if (selectedFeature.type === 'dam') {
-      const damData = selectedFeature.data as DamInfo;
-      return {
-        name: damData.name
-      };
+      const dam = selectedFeature.data as DamInfo;
+      return dam.name;
     } else if (selectedFeature.type === 'powerline') {
-      const powerLineData = selectedFeature.data as PowerLineInfo;
-      return {
-        name: powerLineData.name
-      };
+      const powerLine = selectedFeature.data as PowerLineInfo;
+      return powerLine.name;
     }
     return null;
   };
@@ -312,7 +311,7 @@ export default function Page() {
             <div className="@container/main flex flex-1 flex-col gap-2">
               <div className="flex flex-col gap-4 pt-2 md:gap-6 min-h-[calc(100vh-200px)]">
                 <div className="flex grid grid-cols-3 gap-4 px-4 lg:px-6 flex-1">
-                  <div className="col-span-2 min-h-[600px]">
+                  <div className="col-span-2 min-h-[600px] h-[85vh] max-h-[85vh]">
                     {mapboxToken ? (
                       <InteractiveMap 
                         mapboxAccessToken={mapboxToken} 
@@ -342,19 +341,24 @@ export default function Page() {
                             <TooltipTrigger asChild>
                               <div className="min-w-0">
                                 <div className="text-lg font-semibold text-foreground truncate">
-                                  {selectedDisplay.name}
+                                  {selectedDisplay}
                                 </div>
                               </div>
                             </TooltipTrigger>
                             <TooltipContent side="bottom" align="start">
-                              <p className="max-w-xs break-words">{selectedDisplay.name}</p>
+                              <p className="max-w-xs break-words">{selectedDisplay}</p>
                             </TooltipContent>
                           </Tooltip>
                         </TooltipProvider>
                       </div>
                     )}
 
-                    {selectedFeature.type === 'dam' && currentDam && (
+                    {/* Trading Summary - shown when no feature is selected */}
+                    {!selectedFeature && (
+                      <TradingSummary />
+                    )}
+
+                    {selectedFeature?.type === 'dam' && currentDam && (
                       <>
                         <div className="min-h-[300px] flex-shrink-0">
                           <ChartAreaInteractive selectedDamId={currentDam.id} />
@@ -378,7 +382,7 @@ export default function Page() {
                       </>
                     )}
 
-                    {selectedFeature.type === 'powerline' && currentPowerLine && (
+                    {selectedFeature?.type === 'powerline' && currentPowerLine && (
                       <>
                         <div className="min-h-[300px] flex-shrink-0 p-4 rounded-lg border bg-card">
                           <div className="text-sm font-medium text-muted-foreground mb-2">Power Line Details</div>
