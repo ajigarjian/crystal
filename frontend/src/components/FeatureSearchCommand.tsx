@@ -214,6 +214,7 @@ export function FeatureSearchCommand({
               placeholder={`Type a ${activeFilter === 'all' ? 'feature' : activeFilter} name...`}
               value={search}
               onValueChange={setSearch}
+              autoFocus={true}
             />
             <CommandList>
               <CommandEmpty>
