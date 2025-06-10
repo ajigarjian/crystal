@@ -285,6 +285,24 @@ export default function Page() {
   const currentPowerLine = getCurrentPowerLine();
   const selectedDisplay = getSelectedFeatureDisplay();
 
+  // Add deselection handler
+  const handleDeselection = () => {
+    setSelectedFeature(null);
+    setSelectedFlowgate(null);
+  };
+
+  // Add ESC key handler
+  React.useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && selectedFeature) {
+        handleDeselection();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [selectedFeature]);
+
   return (
     <SidebarProvider
       defaultOpen={false}
@@ -311,7 +329,7 @@ export default function Page() {
             <div className="@container/main flex flex-1 flex-col gap-2">
               <div className="flex flex-col gap-4 pt-2 md:gap-6 min-h-[calc(100vh-200px)]">
                 <div className="flex grid grid-cols-3 gap-4 px-4 lg:px-6 flex-1">
-                  <div className="col-span-2 min-h-[600px] h-[85vh] max-h-[85vh]">
+                  <div className="col-span-2 min-h-[600px] max-h-[90vh]">
                     {mapboxToken ? (
                       <InteractiveMap 
                         mapboxAccessToken={mapboxToken} 
@@ -319,6 +337,7 @@ export default function Page() {
                         markers={damMarkers} 
                         onMarkerClick={handleMapMarkerClick}
                         onPowerLineClick={handlePowerLineClick}
+                        onEmptyMapClick={handleDeselection}
                         selectedMarkerId={currentDam?.id}
                         selectedPowerLineId={currentPowerLine?.id}
                         selectedFlowgate={selectedFlowgate}
@@ -333,13 +352,13 @@ export default function Page() {
                     )}
                   </div>
                   <div className="col-span-1 flex flex-col gap-6">
-                    {/* Selected Feature Header */}
+                    {/* Selected Feature Header with Clear Button */}
                     {selectedDisplay && (
-                      <div className="pb-2 border-b">
+                      <div className="pb-2 border-b flex items-center justify-between">
                         <TooltipProvider>
                           <Tooltip>
                             <TooltipTrigger asChild>
-                              <div className="min-w-0">
+                              <div className="min-w-0 flex-1">
                                 <div className="text-lg font-semibold text-foreground truncate">
                                   {selectedDisplay}
                                 </div>
@@ -347,6 +366,35 @@ export default function Page() {
                             </TooltipTrigger>
                             <TooltipContent side="bottom" align="start">
                               <p className="max-w-xs break-words">{selectedDisplay}</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                        {/* Clear Selection Button */}
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <button
+                                onClick={handleDeselection}
+                                className="ml-2 p-1 rounded-md hover:bg-muted transition-colors"
+                                aria-label="Clear selection"
+                              >
+                                <svg
+                                  className="w-4 h-4 text-muted-foreground hover:text-foreground"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  viewBox="0 0 24 24"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M6 18L18 6M6 6l12 12"
+                                  />
+                                </svg>
+                              </button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>Clear selection (ESC)</p>
                             </TooltipContent>
                           </Tooltip>
                         </TooltipProvider>

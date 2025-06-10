@@ -32,6 +32,7 @@ interface InteractiveMapProps {
   height?: string | number;
   onMarkerClick?: (marker: MapMarker) => void;
   onPowerLineClick?: (powerLineData: PowerLineClickData) => void;
+  onEmptyMapClick?: () => void;
   selectedMarkerId?: string | number;
   selectedPowerLineId?: number | null;
   selectedFlowgate?: string | null;
@@ -54,6 +55,7 @@ export function InteractiveMap({
   height = "300px",
   onMarkerClick,
   onPowerLineClick,
+  onEmptyMapClick,
   selectedMarkerId,
   selectedPowerLineId,
   selectedFlowgate,
@@ -183,6 +185,8 @@ export function InteractiveMap({
         onClick={(event) => {
           // Handle click events on power lines
           const features = event.features;
+          
+          // Check if we clicked on a power line
           if (features && features.length > 0) {
             const powerLineFeature = features.find(f => f.source === 'power-infrastructure' && (f.layer?.id === 'power-lines' || f.layer?.id === 'power-lines-clickable'));
             if (powerLineFeature && powerLineFeature.properties) {
@@ -233,7 +237,27 @@ export function InteractiveMap({
                   associatedLines: associatedLines
                 });
               }
+              
+              // Don't call empty map click since we clicked a power line
+              return;
             }
+          }
+
+          // Check if we clicked near a dam marker by checking the click coordinates
+          // against marker positions (with some tolerance for the marker size)
+          const clickLngLat = event.lngLat;
+          const clickedNearMarker = markers.some(marker => {
+            const distance = Math.sqrt(
+              Math.pow(clickLngLat.lng - marker.longitude, 2) + 
+              Math.pow(clickLngLat.lat - marker.latitude, 2)
+            );
+            // If click is within ~0.1 degrees of a marker, consider it a marker click
+            return distance < 0.1;
+          });
+
+          // Only call empty map click if we didn't click near any markers
+          if (!clickedNearMarker && onEmptyMapClick) {
+            onEmptyMapClick();
           }
         }}
         interactiveLayerIds={['power-lines', 'power-lines-clickable']}
@@ -448,6 +472,7 @@ export function InteractiveMap({
             <button
               onClick={(e) => {
                 e.preventDefault();
+                e.stopPropagation();
                 handleMarkerClick(marker);
               }}
               style={{
