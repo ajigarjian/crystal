@@ -32,55 +32,35 @@ export function SiteHeader({
   onPowerLineSelect,
   onFlowgateSelect
 }: SiteHeaderProps) {
-  // Get the display name based on feature type
-  const getDisplayName = (): string => {
-    if (selectedFeature.type === 'dam') {
-      const damData = selectedFeature.data as DamInfo;
-      return damData.name;
-    } else if (selectedFeature.type === 'powerline') {
-      const powerLineData = selectedFeature.data as PowerLineInfo;
-      return powerLineData.name;
-    }
-    return 'Unknown Feature';
-  };
-
-  // Get a visual indicator of feature type
-  const getFeatureTypeIndicator = (): string => {
-    return selectedFeature.type === 'dam' ? '🏗️' : '⚡';
-  };
-
   return (
     <header className="flex h-(--header-height) shrink-0 items-center gap-2 border-b transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-(--header-height)">
-      <div className="flex w-full items-center gap-1 px-4 lg:gap-2 lg:px-6">
-        <SidebarTrigger className="-ml-1" />
-        <Separator
-          orientation="vertical"
-          className="mx-2 data-[orientation=vertical]:h-4"
-        />
-        
-        {/* Current Feature Display */}
+      <div className="flex w-full items-center gap-4 px-4 lg:px-6">
+        {/* Left side - Navigation */}
         <div className="flex items-center gap-2">
-          <span className="text-lg" title={`Selected ${selectedFeature.type}`}>
-            {getFeatureTypeIndicator()}
-          </span>
-          <div className="text-base font-medium text-foreground">
-            {getDisplayName()}
-          </div>
-          <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded-full">
-            {selectedFeature.type}
-          </span>
-        </div>
-
-        {/* Search Component */}
-        <div className="ml-auto flex items-center gap-2">
-          <FeatureSearchCommand
-            dams={dams}
-            powerLines={powerLines}
-            flowgates={flowgates}
-            onDamSelect={onDamSelect}
-            onPowerLineSelect={onPowerLineSelect}
-            onFlowgateSelect={onFlowgateSelect}
+          <SidebarTrigger className="-ml-1" />
+          <Separator
+            orientation="vertical"
+            className="data-[orientation=vertical]:h-4"
           />
+        </div>
+        
+        {/* Center - Prominent Search */}
+        <div className="flex-1 flex justify-center max-w-2xl mx-auto">
+          <div className="w-full max-w-md">
+            <FeatureSearchCommand
+              dams={dams}
+              powerLines={powerLines}
+              flowgates={flowgates}
+              onDamSelect={onDamSelect}
+              onPowerLineSelect={onPowerLineSelect}
+              onFlowgateSelect={onFlowgateSelect}
+            />
+          </div>
+        </div>
+        
+        {/* Right side - Future features (empty for now) */}
+        <div className="flex items-center gap-2">
+          {/* Space for future features like user menu, notifications, etc. */}
         </div>
       </div>
     </header>

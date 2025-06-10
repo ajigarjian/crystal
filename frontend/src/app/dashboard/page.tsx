@@ -11,6 +11,12 @@ import {
   SidebarProvider,
 } from "@/components/ui/sidebar"
 import { InteractiveMap } from "@/components/InteractiveMap"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 
 import { getDashboardSectionCards, SectionCardData, getDamLocations, DamLocation } from "@/lib/firebase"
 
@@ -66,6 +72,8 @@ export default function Page() {
 
   // Add state to track power infrastructure data for search
   const [powerInfrastructureData, setPowerInfrastructureData] = React.useState<any>(null);
+
+  const [selectedFlowgate, setSelectedFlowgate] = React.useState<string | null>(null);
 
   const getCurrentDam = (): DamInfo | null => {
     return selectedFeature.type === 'dam' ? selectedFeature.data as DamInfo : null;
@@ -174,8 +182,10 @@ export default function Page() {
     }));
   }, [powerInfrastructureData]);
 
-  // Search handlers
+  // Updated search handlers
   const handleSearchDamSelect = (dam: DamInfo) => {
+    // Clear flowgate selection when selecting dam
+    setSelectedFlowgate(null);
     setSelectedFeature({
       type: 'dam',
       data: dam
@@ -183,6 +193,8 @@ export default function Page() {
   };
 
   const handleSearchPowerLineSelect = (powerLine: PowerLineInfo) => {
+    // Set flowgate if this power line has one
+    setSelectedFlowgate(powerLine.flowgate || null);
     setSelectedFeature({
       type: 'powerline',
       data: powerLine
@@ -190,20 +202,30 @@ export default function Page() {
   };
 
   const handleSearchFlowgateSelect = (flowgate: string) => {
-    // For flowgate selection, we could either:
-    // 1. Select the first power line in that flowgate, or
-    // 2. Create a special flowgate selection state
-    // For now, let's select the first power line in the flowgate
-    const firstLineInFlowgate = searchPowerLines.find(line => 
+    // Set the flowgate for map highlighting
+    setSelectedFlowgate(flowgate);
+    
+    // Pick a random power line from this flowgate for the right panel
+    const flowgateLines = searchPowerLines.filter(line => 
       (line.data as PowerLineInfo).flowgate === flowgate
     );
     
-    if (firstLineInFlowgate) {
-      handleSearchPowerLineSelect(firstLineInFlowgate.data as PowerLineInfo);
+    if (flowgateLines.length > 0) {
+      // Pick a random line instead of always the first one
+      const randomIndex = Math.floor(Math.random() * flowgateLines.length);
+      const randomLine = flowgateLines[randomIndex];
+      
+      setSelectedFeature({
+        type: 'powerline',
+        data: randomLine.data as PowerLineInfo
+      });
     }
   };
 
   const handleMapMarkerClick = (marker: { id: string | number; name?: string; latitude: number; longitude: number }) => {
+    // Clear flowgate selection when clicking dam
+    setSelectedFlowgate(null);
+    
     const clickedDam = AVAILABLE_DAMS.find(dam => dam.id === Number(marker.id));
     if (clickedDam) {
       console.log('Dashboard handling dam click:', clickedDam);
@@ -226,6 +248,10 @@ export default function Page() {
     associatedLines?: string[];
   }) => {
     console.log('Dashboard handling power line click:', powerLineData);
+    
+    // Set flowgate selection for map highlighting
+    setSelectedFlowgate(powerLineData.flowgate || null);
+    
     setSelectedFeature({
       type: 'powerline',
       data: {
@@ -240,8 +266,25 @@ export default function Page() {
     });
   };
 
+  // Helper function to get display info for selected feature
+  const getSelectedFeatureDisplay = () => {
+    if (selectedFeature.type === 'dam') {
+      const damData = selectedFeature.data as DamInfo;
+      return {
+        name: damData.name
+      };
+    } else if (selectedFeature.type === 'powerline') {
+      const powerLineData = selectedFeature.data as PowerLineInfo;
+      return {
+        name: powerLineData.name
+      };
+    }
+    return null;
+  };
+
   const currentDam = getCurrentDam();
   const currentPowerLine = getCurrentPowerLine();
+  const selectedDisplay = getSelectedFeatureDisplay();
 
   return (
     <SidebarProvider
@@ -279,6 +322,7 @@ export default function Page() {
                         onPowerLineClick={handlePowerLineClick}
                         selectedMarkerId={currentDam?.id}
                         selectedPowerLineId={currentPowerLine?.id}
+                        selectedFlowgate={selectedFlowgate}
                       />
                     ) : (
                       <div className="flex h-full items-center justify-center rounded-xl border border-dashed bg-muted/50 p-4 text-center">
@@ -290,6 +334,26 @@ export default function Page() {
                     )}
                   </div>
                   <div className="col-span-1 flex flex-col gap-6">
+                    {/* Selected Feature Header */}
+                    {selectedDisplay && (
+                      <div className="pb-2 border-b">
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <div className="min-w-0">
+                                <div className="text-lg font-semibold text-foreground truncate">
+                                  {selectedDisplay.name}
+                                </div>
+                              </div>
+                            </TooltipTrigger>
+                            <TooltipContent side="bottom" align="start">
+                              <p className="max-w-xs break-words">{selectedDisplay.name}</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      </div>
+                    )}
+
                     {selectedFeature.type === 'dam' && currentDam && (
                       <>
                         <div className="min-h-[300px] flex-shrink-0">
@@ -318,7 +382,6 @@ export default function Page() {
                       <>
                         <div className="min-h-[300px] flex-shrink-0 p-4 rounded-lg border bg-card">
                           <div className="text-sm font-medium text-muted-foreground mb-2">Power Line Details</div>
-                          <div className="text-lg font-bold mb-3">{currentPowerLine.name}</div>
                           
                           <div className="space-y-2 text-sm">
                             <div><strong>Voltage:</strong> {currentPowerLine.voltage || 'Unknown'}</div>

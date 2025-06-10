@@ -34,6 +34,7 @@ interface InteractiveMapProps {
   onPowerLineClick?: (powerLineData: PowerLineClickData) => void;
   selectedMarkerId?: string | number;
   selectedPowerLineId?: number | null;
+  selectedFlowgate?: string | null;
 }
 
 // Focus on Columbia River basin area - covering the basins you mentioned
@@ -55,6 +56,7 @@ export function InteractiveMap({
   onPowerLineClick,
   selectedMarkerId,
   selectedPowerLineId,
+  selectedFlowgate,
 }: InteractiveMapProps) {
   const [viewport, setViewport] = React.useState({
     latitude: initialLatitude,
@@ -156,6 +158,16 @@ export function InteractiveMap({
     
     loadPowerInfrastructure();
   }, []);
+
+  // Add effect to sync external selectedFlowgate prop with internal state
+  React.useEffect(() => {
+    setSelectedFlowgateGroup(selectedFlowgate || null);
+  }, [selectedFlowgate]);
+
+  // Add effect to sync external selectedPowerLineId with internal state
+  React.useEffect(() => {
+    setClickedLineId(selectedPowerLineId || null);
+  }, [selectedPowerLineId]);
 
   if (isLoading) {
     return <MapSkeleton style={{ height, width: '100%' }} />;
@@ -503,65 +515,6 @@ export function InteractiveMap({
               </svg>
             )}
           </button>
-        </div>
-      </div>
-      
-      {/* Flowgate Selector Widget */}
-      <div 
-        className="absolute top-20 right-4 bg-white/95 rounded-lg px-3 py-2 shadow-lg border w-64"
-        style={{ zIndex: 40, maxHeight: '60vh', overflowY: 'auto' }}
-      >
-        <div className="text-sm font-medium text-gray-800 mb-2">Flowgate Selector</div>
-        <div className="space-y-1 max-h-48 overflow-y-auto">
-          {powerInfrastructureData && 
-            (() => {
-              // Debug: Log the flowgate extraction process
-              const allFlowgates = powerInfrastructureData.features.map(f => f.properties.flowgate);
-              const filteredFlowgates = allFlowgates.filter(flowgate => flowgate && flowgate !== 'null');
-              const uniqueFlowgates = Array.from(new Set(filteredFlowgates)).sort();
-              
-              console.log("Flowgate selector debug:");
-              console.log("- All flowgates:", allFlowgates);
-              console.log("- Filtered flowgates:", filteredFlowgates);
-              console.log("- Unique flowgates:", uniqueFlowgates);
-              
-              return uniqueFlowgates;
-            })().map((flowgate) => {
-              const isSelected = selectedFlowgateGroup === flowgate;
-              const lineCount = powerInfrastructureData.features
-                .filter(f => f.properties.flowgate === flowgate).length;
-              
-              return (
-                <button
-                  key={flowgate}
-                  onClick={() => {
-                    if (isSelected) {
-                      // Deselect if already selected
-                      setSelectedFlowgateGroup(null);
-                      setClickedLineId(null);
-                    } else {
-                      // Select this flowgate
-                      setSelectedFlowgateGroup(flowgate);
-                      setClickedLineId(null);
-                    }
-                  }}
-                  className={`w-full text-left px-2 py-1 rounded text-xs transition-colors ${
-                    isSelected 
-                      ? 'bg-red-100 text-red-800 border border-red-300' 
-                      : 'hover:bg-gray-100 text-gray-700'
-                  }`}
-                >
-                  <div className="font-mono text-xs truncate">{flowgate}</div>
-                  <div className="text-xs text-gray-500">{lineCount} lines</div>
-                </button>
-              );
-            })
-          }
-          {(!powerInfrastructureData || 
-            !powerInfrastructureData.features.some(f => f.properties.flowgate && f.properties.flowgate !== 'null')
-          ) && (
-            <div className="text-xs text-gray-500 italic">No flowgates available</div>
-          )}
         </div>
       </div>
       
