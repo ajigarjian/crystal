@@ -12,7 +12,15 @@ import {
   CommandList,
 } from "@/components/ui/command"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { DamInfo, PowerLineInfo } from "@/app/dashboard/page"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 
 interface SearchableFeature {
   id: string | number;
@@ -26,6 +34,8 @@ interface FlowgateInfo {
   name: string;
   lineCount: number;
 }
+
+type FeatureTypeFilter = 'all' | 'dam' | 'powerline' | 'flowgate';
 
 interface FeatureSearchCommandProps {
   dams: DamInfo[];
@@ -46,6 +56,7 @@ export function FeatureSearchCommand({
 }: FeatureSearchCommandProps) {
   const [open, setOpen] = React.useState(false)
   const [search, setSearch] = React.useState("")
+  const [activeFilter, setActiveFilter] = React.useState<FeatureTypeFilter>('all')
 
   // Combine all features for searching
   const allFeatures: SearchableFeature[] = React.useMemo(() => {
@@ -59,14 +70,24 @@ export function FeatureSearchCommand({
     return [...damFeatures, ...powerLines, ...flowgates];
   }, [dams, powerLines, flowgates]);
 
-  // Filter features based on search term
+  // Filter features based on search term and active filter
   const filteredFeatures = React.useMemo(() => {
-    if (!search) return allFeatures;
+    let features = allFeatures;
     
-    return allFeatures.filter(feature =>
-      feature.name.toLowerCase().includes(search.toLowerCase())
-    );
-  }, [allFeatures, search]);
+    // Apply type filter
+    if (activeFilter !== 'all') {
+      features = features.filter(feature => feature.type === activeFilter);
+    }
+    
+    // Apply search filter
+    if (search) {
+      features = features.filter(feature =>
+        feature.name.toLowerCase().includes(search.toLowerCase())
+      );
+    }
+    
+    return features;
+  }, [allFeatures, search, activeFilter]);
 
   // Group filtered features by type
   const groupedFeatures = React.useMemo(() => {
@@ -95,6 +116,15 @@ export function FeatureSearchCommand({
     setSearch("");
   };
 
+  // Reset filters when dialog closes
+  const handleOpenChange = (open: boolean) => {
+    setOpen(open);
+    if (!open) {
+      setActiveFilter('all');
+      setSearch("");
+    }
+  };
+
   // Handle keyboard shortcut
   React.useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -116,6 +146,24 @@ export function FeatureSearchCommand({
     }
   };
 
+  const getFilterCounts = () => {
+    return {
+      all: allFeatures.length,
+      dam: dams.length,
+      powerline: powerLines.length,
+      flowgate: flowgates.length,
+    };
+  };
+
+  const filterCounts = getFilterCounts();
+
+  const filterOptions: { key: FeatureTypeFilter; label: string; icon: string }[] = [
+    { key: 'all', label: 'All', icon: '🔍' },
+    { key: 'dam', label: 'Dams', icon: '🏗️' },
+    { key: 'powerline', label: 'Lines', icon: '⚡' },
+    { key: 'flowgate', label: 'Flowgates', icon: '🔗' },
+  ];
+
   return (
     <>
       <Button
@@ -132,74 +180,102 @@ export function FeatureSearchCommand({
         </kbd>
       </Button>
       
-      <CommandDialog 
-        open={open} 
-        onOpenChange={setOpen}
-        title="Search Features"
-        description="Search for dams, power lines, and flowgates"
-      >
-        <CommandInput 
-          placeholder="Type a feature name..." 
-          value={search}
-          onValueChange={setSearch}
-        />
-        <CommandList>
-          <CommandEmpty>No features found.</CommandEmpty>
-          
-          {groupedFeatures.dam.length > 0 && (
-            <CommandGroup heading="Dams">
-              {groupedFeatures.dam.map((feature) => (
-                <CommandItem
-                  key={`dam-${feature.id}`}
-                  value={feature.name}
-                  onSelect={() => handleSelect(feature)}
-                  className="cursor-pointer"
+      <Dialog open={open} onOpenChange={handleOpenChange}>
+        <DialogContent className="overflow-hidden p-0 sm:max-w-xl">
+          <DialogHeader className="sr-only">
+            <DialogTitle>Search Features</DialogTitle>
+            <DialogDescription>Search for dams, power lines, and flowgates</DialogDescription>
+          </DialogHeader>
+          <Command className="[&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group]]:px-2 [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-3 [&_[cmdk-item]_svg]:h-5 [&_[cmdk-item]_svg]:w-5">
+            {/* Filter buttons */}
+            <div className="flex items-center gap-1 p-3 pb-0">
+              <span className="text-xs text-muted-foreground mr-2">Filter:</span>
+              {filterOptions.map((filter) => (
+                <Button
+                  key={filter.key}
+                  variant={activeFilter === filter.key ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setActiveFilter(filter.key)}
+                  className="h-7 text-xs gap-1"
                 >
-                  <span className="mr-2">{getFeatureIcon('dam')}</span>
-                  <span>{feature.name}</span>
-                  <span className="ml-auto text-xs text-muted-foreground">Dam</span>
-                </CommandItem>
+                  <span>{filter.icon}</span>
+                  <span>{filter.label}</span>
+                  <Badge 
+                    variant="secondary" 
+                    className="ml-1 h-4 min-w-4 text-[10px] px-1"
+                  >
+                    {filterCounts[filter.key]}
+                  </Badge>
+                </Button>
               ))}
-            </CommandGroup>
-          )}
+            </div>
+            
+            <CommandInput 
+              placeholder={`Type a ${activeFilter === 'all' ? 'feature' : activeFilter} name...`}
+              value={search}
+              onValueChange={setSearch}
+            />
+            <CommandList>
+              <CommandEmpty>
+                No {activeFilter === 'all' ? 'features' : `${activeFilter}s`} found.
+              </CommandEmpty>
+              
+              {groupedFeatures.dam.length > 0 && (activeFilter === 'all' || activeFilter === 'dam') && (
+                <CommandGroup heading="Dams">
+                  {groupedFeatures.dam.map((feature) => (
+                    <CommandItem
+                      key={`dam-${feature.id}`}
+                      value={feature.name}
+                      onSelect={() => handleSelect(feature)}
+                      className="cursor-pointer"
+                    >
+                      <span className="mr-2">{getFeatureIcon('dam')}</span>
+                      <span>{feature.name}</span>
+                      <span className="ml-auto text-xs text-muted-foreground">Dam</span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              )}
 
-          {groupedFeatures.powerline.length > 0 && (
-            <CommandGroup heading="Power Lines">
-              {groupedFeatures.powerline.map((feature) => (
-                <CommandItem
-                  key={`powerline-${feature.id}`}
-                  value={feature.name}
-                  onSelect={() => handleSelect(feature)}
-                  className="cursor-pointer"
-                >
-                  <span className="mr-2">{getFeatureIcon('powerline')}</span>
-                  <span className="truncate">{feature.name}</span>
-                  <span className="ml-auto text-xs text-muted-foreground">Line</span>
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          )}
+              {groupedFeatures.powerline.length > 0 && (activeFilter === 'all' || activeFilter === 'powerline') && (
+                <CommandGroup heading="Power Lines">
+                  {groupedFeatures.powerline.map((feature) => (
+                    <CommandItem
+                      key={`powerline-${feature.id}`}
+                      value={feature.name}
+                      onSelect={() => handleSelect(feature)}
+                      className="cursor-pointer"
+                    >
+                      <span className="mr-2">{getFeatureIcon('powerline')}</span>
+                      <span className="truncate">{feature.name}</span>
+                      <span className="ml-auto text-xs text-muted-foreground">Line</span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              )}
 
-          {groupedFeatures.flowgate.length > 0 && (
-            <CommandGroup heading="Flowgates">
-              {groupedFeatures.flowgate.map((feature) => (
-                <CommandItem
-                  key={`flowgate-${feature.id}`}
-                  value={feature.name}
-                  onSelect={() => handleSelect(feature)}
-                  className="cursor-pointer"
-                >
-                  <span className="mr-2">{getFeatureIcon('flowgate')}</span>
-                  <span className="font-mono text-sm">{feature.name}</span>
-                  <span className="ml-auto text-xs text-muted-foreground">
-                    {(feature.data as FlowgateInfo).lineCount} lines
-                  </span>
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          )}
-        </CommandList>
-      </CommandDialog>
+              {groupedFeatures.flowgate.length > 0 && (activeFilter === 'all' || activeFilter === 'flowgate') && (
+                <CommandGroup heading="Flowgates">
+                  {groupedFeatures.flowgate.map((feature) => (
+                    <CommandItem
+                      key={`flowgate-${feature.id}`}
+                      value={feature.name}
+                      onSelect={() => handleSelect(feature)}
+                      className="cursor-pointer"
+                    >
+                      <span className="mr-2">{getFeatureIcon('flowgate')}</span>
+                      <span className="font-mono text-sm">{feature.name}</span>
+                      <span className="ml-auto text-xs text-muted-foreground">
+                        {(feature.data as FlowgateInfo).lineCount} lines
+                      </span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              )}
+            </CommandList>
+          </Command>
+        </DialogContent>
+      </Dialog>
     </>
   )
 } 
