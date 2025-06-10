@@ -1,13 +1,37 @@
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { SidebarTrigger } from "@/components/ui/sidebar"
+import { FeatureSearchCommand } from "@/components/FeatureSearchCommand"
 import { SelectedFeature, DamInfo, PowerLineInfo } from "@/app/dashboard/page";
+
+interface SearchableFeature {
+  id: string | number;
+  name: string;
+  type: 'dam' | 'powerline' | 'flowgate';
+  data: any;
+}
 
 interface SiteHeaderProps {
   selectedFeature: SelectedFeature;
+  // Search data
+  dams: DamInfo[];
+  powerLines: SearchableFeature[];
+  flowgates: SearchableFeature[];
+  // Search handlers
+  onDamSelect: (dam: DamInfo) => void;
+  onPowerLineSelect: (powerLine: PowerLineInfo) => void;
+  onFlowgateSelect: (flowgate: string) => void;
 }
 
-export function SiteHeader({ selectedFeature }: SiteHeaderProps) {
+export function SiteHeader({ 
+  selectedFeature,
+  dams,
+  powerLines,
+  flowgates,
+  onDamSelect,
+  onPowerLineSelect,
+  onFlowgateSelect
+}: SiteHeaderProps) {
   // Get the display name based on feature type
   const getDisplayName = (): string => {
     if (selectedFeature.type === 'dam') {
@@ -33,6 +57,8 @@ export function SiteHeader({ selectedFeature }: SiteHeaderProps) {
           orientation="vertical"
           className="mx-2 data-[orientation=vertical]:h-4"
         />
+        
+        {/* Current Feature Display */}
         <div className="flex items-center gap-2">
           <span className="text-lg" title={`Selected ${selectedFeature.type}`}>
             {getFeatureTypeIndicator()}
@@ -44,17 +70,17 @@ export function SiteHeader({ selectedFeature }: SiteHeaderProps) {
             {selectedFeature.type}
           </span>
         </div>
+
+        {/* Search Component */}
         <div className="ml-auto flex items-center gap-2">
-          {/* <Button variant="ghost" asChild size="sm" className="hidden sm:flex">
-            <a
-              href="https://github.com/shadcn-ui/ui/tree/main/apps/v4/app/(examples)/dashboard"
-              rel="noopener noreferrer"
-              target="_blank"
-              className="dark:text-foreground"
-            >
-              GitHub
-            </a>
-          </Button> */}
+          <FeatureSearchCommand
+            dams={dams}
+            powerLines={powerLines}
+            flowgates={flowgates}
+            onDamSelect={onDamSelect}
+            onPowerLineSelect={onPowerLineSelect}
+            onFlowgateSelect={onFlowgateSelect}
+          />
         </div>
       </div>
     </header>

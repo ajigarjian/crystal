@@ -480,7 +480,7 @@ export function InteractiveMap({
       {/* Columbia River System Label Overlay with Full Screen Button */}
       <div 
         className="absolute top-4 left-4 bg-white/95 rounded-lg px-3 py-2 shadow-lg border"
-        style={{ zIndex: 400 }}
+        style={{ zIndex: 40 }}
       >
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -509,7 +509,7 @@ export function InteractiveMap({
       {/* Flowgate Selector Widget */}
       <div 
         className="absolute top-20 right-4 bg-white/95 rounded-lg px-3 py-2 shadow-lg border w-64"
-        style={{ zIndex: 400, maxHeight: '60vh', overflowY: 'auto' }}
+        style={{ zIndex: 40, maxHeight: '60vh', overflowY: 'auto' }}
       >
         <div className="text-sm font-medium text-gray-800 mb-2">Flowgate Selector</div>
         <div className="space-y-1 max-h-48 overflow-y-auto">
@@ -568,7 +568,7 @@ export function InteractiveMap({
       {/* Legend */}
       <div 
         className="absolute bottom-4 right-4 bg-white/95 rounded-lg px-3 py-2 shadow-lg border"
-        style={{ zIndex: 400 }}
+        style={{ zIndex: 40 }}
       >
         <div className="text-xs space-y-2">
           <div className="font-medium text-gray-800 mb-2">Legend</div>

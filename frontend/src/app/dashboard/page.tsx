@@ -45,6 +45,13 @@ const AVAILABLE_DAMS: DamInfo[] = [
   { id: 7, name: "Bonneville Locks and Dam"}
 ];
 
+interface SearchableFeature {
+  id: string | number;
+  name: string;
+  type: 'dam' | 'powerline' | 'flowgate';
+  data: any;
+}
+
 export default function Page() {
   const [selectedFeature, setSelectedFeature] = React.useState<SelectedFeature>({
     type: 'dam',
@@ -56,6 +63,9 @@ export default function Page() {
   const [damMarkers, setDamMarkers] = React.useState<DamLocation[]>([]);
 
   const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
+
+  // Add state to track power infrastructure data for search
+  const [powerInfrastructureData, setPowerInfrastructureData] = React.useState<any>(null);
 
   const getCurrentDam = (): DamInfo | null => {
     return selectedFeature.type === 'dam' ? selectedFeature.data as DamInfo : null;
@@ -99,6 +109,99 @@ export default function Page() {
   
     loadDamMapData();
   }, []);
+
+  // Fetch power infrastructure data for search
+  React.useEffect(() => {
+    async function loadPowerInfrastructureForSearch() {
+      try {
+        const { getPowerInfrastructure } = await import("@/lib/firebase");
+        const data = await getPowerInfrastructure();
+        setPowerInfrastructureData(data);
+      } catch (error) {
+        console.error("Failed to load power infrastructure for search:", error);
+      }
+    }
+    
+    loadPowerInfrastructureForSearch();
+  }, []);
+
+  // Prepare search data
+  const searchPowerLines: SearchableFeature[] = React.useMemo(() => {
+    if (!powerInfrastructureData?.features) return [];
+    
+    return powerInfrastructureData.features
+      .filter((feature: any) => 
+        feature.properties.power_type === 'line' && 
+        feature.properties.name && 
+        feature.properties.name !== 'Unnamed'
+      )
+      .map((feature: any) => ({
+        id: feature.properties.gid,
+        name: feature.properties.name,
+        type: 'powerline' as const,
+        data: {
+          id: feature.properties.gid,
+          name: feature.properties.name,
+          flowgate: feature.properties.flowgate,
+          voltage: feature.properties.voltage,
+          operator: feature.properties.operator,
+          ref: feature.properties.ref || '',
+        }
+      }));
+  }, [powerInfrastructureData]);
+
+  const searchFlowgates: SearchableFeature[] = React.useMemo(() => {
+    if (!powerInfrastructureData?.features) return [];
+    
+    const flowgateMap = new Map<string, number>();
+    
+    powerInfrastructureData.features.forEach((feature: any) => {
+      const flowgate = feature.properties.flowgate;
+      if (flowgate && flowgate !== 'null') {
+        flowgateMap.set(flowgate, (flowgateMap.get(flowgate) || 0) + 1);
+      }
+    });
+
+    return Array.from(flowgateMap.entries()).map(([flowgate, lineCount]) => ({
+      id: flowgate,
+      name: flowgate,
+      type: 'flowgate' as const,
+      data: {
+        id: flowgate,
+        name: flowgate,
+        lineCount: lineCount
+      }
+    }));
+  }, [powerInfrastructureData]);
+
+  // Search handlers
+  const handleSearchDamSelect = (dam: DamInfo) => {
+    setSelectedFeature({
+      type: 'dam',
+      data: dam
+    });
+  };
+
+  const handleSearchPowerLineSelect = (powerLine: PowerLineInfo) => {
+    setSelectedFeature({
+      type: 'powerline',
+      data: powerLine
+    });
+  };
+
+  const handleSearchFlowgateSelect = (flowgate: string) => {
+    // For flowgate selection, we could either:
+    // 1. Select the first power line in that flowgate, or
+    // 2. Create a special flowgate selection state
+    // For now, let's select the first power line in the flowgate
+    const firstLineInFlowgate = searchPowerLines.find(line => 
+      (line.data as PowerLineInfo).flowgate === flowgate
+    );
+    
+    if (firstLineInFlowgate) {
+      handleSearchPowerLineSelect(firstLineInFlowgate.data as PowerLineInfo);
+    }
+  };
 
   const handleMapMarkerClick = (marker: { id: string | number; name?: string; latitude: number; longitude: number }) => {
     const clickedDam = AVAILABLE_DAMS.find(dam => dam.id === Number(marker.id));
@@ -154,11 +257,17 @@ export default function Page() {
       <SidebarInset>
         <SiteHeader
           selectedFeature={selectedFeature}
+          dams={AVAILABLE_DAMS}
+          powerLines={searchPowerLines}
+          flowgates={searchFlowgates}
+          onDamSelect={handleSearchDamSelect}
+          onPowerLineSelect={handleSearchPowerLineSelect}
+          onFlowgateSelect={handleSearchFlowgateSelect}
         />
         <div className="flex flex-1 flex-col pt-4">
           <div className="flex flex-1 flex-col">
             <div className="@container/main flex flex-1 flex-col gap-2">
-              <div className="flex flex-col gap-4 pt-2 md:gap-6 md:pb-6 min-h-[calc(100vh-200px)]">
+              <div className="flex flex-col gap-4 pt-2 md:gap-6 min-h-[calc(100vh-200px)]">
                 <div className="flex grid grid-cols-3 gap-4 px-4 lg:px-6 flex-1">
                   <div className="col-span-2 min-h-[600px]">
                     {mapboxToken ? (
