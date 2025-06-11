@@ -179,6 +179,8 @@ export function InteractiveMap({
     <div className="relative w-full h-full">
       <ReactMapGL
         {...viewport}
+        width="100%"
+        height="100%"
         mapboxAccessToken={mapboxAccessToken}
         mapStyle={BASE_STYLE}
         onMove={(evt: ViewStateChangeEvent) => setViewport(evt.viewState)}
@@ -264,6 +266,8 @@ export function InteractiveMap({
         minZoom={4}
         maxZoom={12}
         style={{
+          width: '100%',
+          height: '100%',
           transition: 'filter 0.3s ease'
         }}
       >

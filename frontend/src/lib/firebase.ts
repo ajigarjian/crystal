@@ -847,4 +847,60 @@ export const getPowerInfrastructure = async (bbox?: string): Promise<PowerInfras
     console.error('Error in getPowerInfrastructure:', error);
     throw error;
   }
+};
+
+// Define the expected structure for a single TTC data point
+export interface TTCDataPoint {
+  ttc_id: number;
+  flowgate_id: number;
+  metric_id: number;
+  source_id: number;
+  datetime_utc: string;
+  hour_ending: number;
+  value_mw: number;
+  quality: 'F' | 'R'; // Forecast or Real
+  ingestion_timestamp: string;
+}
+
+// Export a helper for calling the TTC flowgate data function
+export const getTTCFlowgateData = async (flowgate: string, date: string): Promise<TTCDataPoint[]> => {
+  const region = functions.region || 'us-central1';
+  const projectId = firebaseConfig.projectId;
+  let baseUrl = '';
+
+  if (process.env.NODE_ENV === 'development') {
+    baseUrl = `http://localhost:5001/${projectId}/${region}`;
+  } else {
+    baseUrl = `https://${region}-${projectId}.cloudfunctions.net`;
+  }
+
+  // The name of the new Python Cloud Function
+  const url = `${baseUrl}/get_ttc_flowgate_data?flowgate=${encodeURIComponent(flowgate)}&date=${date}`;
+
+  try {
+    // This is a GET request to fetch data
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      let errorData = { error: "Failed to fetch TTC flowgate data" };
+      try {
+        errorData = await response.json();
+      } catch (e) {
+        console.error("Failed to parse error response from getTTCFlowgateData: ", e);
+      }
+      console.error('Error fetching TTC flowgate data:', response.status, errorData);
+      throw new Error(errorData.error || `Failed to fetch TTC flowgate data. Status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data as TTCDataPoint[];
+  } catch (error: any) {
+    console.error('Error calling getTTCFlowgateData function:', error);
+    return []; 
+  }
 }; 

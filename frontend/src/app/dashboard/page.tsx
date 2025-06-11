@@ -1,24 +1,24 @@
 "use client";
 
-import * as React from "react";
+import * as React from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import dynamic from 'next/dynamic'
 import { AppSidebar } from "@/components/app-sidebar"
-import { ChartAreaInteractive } from "@/components/chart-area-interactive"
 import { SectionCards } from "@/components/section-cards"
 import { SectionCardSkeleton } from "@/components/SectionCardSkeleton"
 import { SiteHeader } from "@/components/site-header"
-import {
-  SidebarInset,
-  SidebarProvider,
-} from "@/components/ui/sidebar"
+import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { InteractiveMap } from "@/components/InteractiveMap"
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { TradingSummary } from "@/components/TradingSummary"
+import { ChartAreaInteractive } from '@/components/chart-area-interactive'
+import { ChartTTCFlowgate } from '@/components/chart-ttc-flowgate'
+import { Terminal, Mic, Square } from "lucide-react"
+import { Separator } from "@/components/ui/separator"
 
 import { getDashboardSectionCards, SectionCardData, getDamLocations, DamLocation } from "@/lib/firebase"
 
@@ -328,8 +328,8 @@ export default function Page() {
           <div className="flex flex-1 flex-col">
             <div className="@container/main flex flex-1 flex-col gap-2">
               <div className="flex flex-col gap-4 pt-2 md:gap-6 min-h-[calc(100vh-200px)]">
-                <div className="flex grid grid-cols-3 gap-4 px-4 lg:px-6 flex-1">
-                  <div className="col-span-2 min-h-[600px] max-h-[90vh]">
+                <div className="flex grid grid-cols-5 gap-4 px-4 lg:px-6 flex-1">
+                  <div className="col-span-3 min-h-[600px] h-[85vh]">
                     {mapboxToken ? (
                       <InteractiveMap 
                         mapboxAccessToken={mapboxToken} 
@@ -351,7 +351,7 @@ export default function Page() {
                       </div>
                     )}
                   </div>
-                  <div className="col-span-1 flex flex-col gap-6">
+                  <div className="col-span-2 flex flex-col gap-6">
                     {/* Selected Feature Header with Clear Button */}
                     {selectedDisplay && (
                       <div className="pb-2 border-b flex items-center justify-between">
@@ -406,6 +406,21 @@ export default function Page() {
                       <TradingSummary />
                     )}
 
+                    {/* Flowgate only selection - shown when flowgate is selected without a specific feature */}
+                    {!selectedFeature && selectedFlowgate && (
+                      <>
+                        <div className="p-4 rounded-lg border bg-card">
+                          <div className="text-sm font-medium text-muted-foreground mb-2">
+                            Selected Flowgate: {selectedFlowgate}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            Viewing TTC limits for this flowgate path
+                          </div>
+                        </div>
+                        <ChartTTCFlowgate selectedFlowgate={selectedFlowgate} />
+                      </>
+                    )}
+
                     {selectedFeature?.type === 'dam' && currentDam && (
                       <>
                         <div className="min-h-[300px] flex-shrink-0">
@@ -432,54 +447,72 @@ export default function Page() {
 
                     {selectedFeature?.type === 'powerline' && currentPowerLine && (
                       <>
-                        <div className="min-h-[300px] flex-shrink-0 p-4 rounded-lg border bg-card">
-                          <div className="text-sm font-medium text-muted-foreground mb-2">Power Line Details</div>
-                          
-                          <div className="space-y-2 text-sm">
-                            <div><strong>Voltage:</strong> {currentPowerLine.voltage || 'Unknown'}</div>
-                            <div><strong>Operator:</strong> {currentPowerLine.operator || 'Unknown'}</div>
-                            {currentPowerLine.ref && (
-                              <div><strong>Reference:</strong> {currentPowerLine.ref}</div>
-                            )}
-                            {currentPowerLine.flowgate && (
-                              <div><strong>Flowgate:</strong> {currentPowerLine.flowgate}</div>
-                            )}
-                          </div>
-                        </div>
-
+                        {/* TTC Chart First - Primary Data */}
                         {currentPowerLine.flowgate && (
-                          <div className="p-4 rounded-lg border bg-card">
-                            <div className="text-sm font-medium text-muted-foreground mb-2">
-                              Flowgate: {currentPowerLine.flowgate}
-                            </div>
-                            
-                            {currentPowerLine.associatedLines && currentPowerLine.associatedLines.length > 0 ? (
-                              <>
-                                <div className="text-sm font-medium mb-2">
-                                  Other Lines in this Flowgate ({currentPowerLine.associatedLines.length})
+                          <ChartTTCFlowgate selectedFlowgate={currentPowerLine.flowgate} />
+                        )}
+
+                        {/* Power Line Details Second - Supporting Context */}
+                        <Card className="flex-shrink-0">
+                          <CardHeader>
+                            <CardTitle className="text-sm text-muted-foreground">Power Line Details</CardTitle>
+                          </CardHeader>
+                          <CardContent className="space-y-4">
+                            {/* Basic Power Line Information */}
+                            <div className="grid grid-cols-2 gap-3 text-sm">
+                              <div>
+                                <span className="font-medium text-muted-foreground">Voltage:</span>
+                                <div className="font-medium">{currentPowerLine.voltage || 'Unknown'}</div>
+                              </div>
+                              <div>
+                                <span className="font-medium text-muted-foreground">Operator:</span>
+                                <div className="font-medium">{currentPowerLine.operator || 'Unknown'}</div>
+                              </div>
+                              {currentPowerLine.ref && (
+                                <div className="col-span-2">
+                                  <span className="font-medium text-muted-foreground">Reference:</span>
+                                  <div className="font-medium">{currentPowerLine.ref}</div>
                                 </div>
-                                <div className="space-y-1 max-h-32 overflow-y-auto">
-                                  {currentPowerLine.associatedLines.map((lineName, index) => (
-                                    <div 
-                                      key={index} 
-                                      className="text-xs p-2 bg-muted rounded text-muted-foreground"
-                                    >
-                                      {lineName}
+                              )}
+                            </div>
+
+                            {/* Flowgate Information */}
+                            {currentPowerLine.flowgate && (
+                              <>
+                                <Separator />
+                                <div className="space-y-3">
+                                  <div>
+                                    <span className="font-medium text-muted-foreground">Flowgate:</span>
+                                    <div className="font-medium">{currentPowerLine.flowgate}</div>
+                                  </div>
+                                  
+                                  {currentPowerLine.associatedLines && currentPowerLine.associatedLines.length > 0 ? (
+                                    <div>
+                                      <div className="text-sm font-medium text-muted-foreground mb-2">
+                                        Other Lines in this Flowgate ({currentPowerLine.associatedLines.length})
+                                      </div>
+                                      <div className="space-y-1 max-h-32 overflow-y-auto">
+                                        {currentPowerLine.associatedLines.map((lineName, index) => (
+                                          <Badge 
+                                            key={index} 
+                                            variant="secondary" 
+                                            className="text-xs block w-full justify-start py-1 px-2 font-normal"
+                                          >
+                                            {lineName}
+                                          </Badge>
+                                        ))}
+                                      </div>
                                     </div>
-                                  ))}
+                                  ) : (
+                                    <div className="text-xs text-muted-foreground italic">
+                                      No other lines found in this flowgate
+                                    </div>
+                                  )}
                                 </div>
                               </>
-                            ) : (
-                              <div className="text-xs text-muted-foreground italic">
-                                No other lines found in this flowgate
-                              </div>
                             )}
-                            
-                            <div className="text-xs text-muted-foreground mt-3 p-2 bg-muted rounded">
-                              TTC chart for this flowgate will be implemented in the next steps.
-                            </div>
-                          </div>
-                        )}
+                          </CardContent>
+                        </Card>
                       </>
                     )}
                   </div>

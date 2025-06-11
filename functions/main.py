@@ -106,6 +106,168 @@ METRICS_CONFIG = {
     memory=options.MemoryOption.MB_512,
     timeout_sec=30
 )
+def get_ttc_flowgate_data(request: https_fn.Request) -> https_fn.Response:
+    """
+    HTTP Cloud Function to fetch TTC flowgate data for a specific flowgate and date.
+    Accepts 'flowgate' and 'date' query parameters.
+    """
+    logger.info("Received request for TTC flowgate data.")
+
+    # Handle warming requests
+    if request.method == 'POST':
+        try:
+            request_json = request.get_json(silent=True)
+            if request_json and request_json.get('warming'):
+                logger.info("Warming request received for get_ttc_flowgate_data.")
+                return https_fn.Response(
+                    json.dumps({"status": "warmed"}),
+                    status=200,
+                    headers={"Content-Type": "application/json"}
+                )
+        except Exception:
+            pass
+
+    # Parse query params
+    flowgate_param = request.args.get('flowgate', '')
+    date_param = request.args.get('date', '')
+    
+    if not flowgate_param:
+        logger.warning("Missing flowgate parameter.")
+        return https_fn.Response(
+            json.dumps({"error": "Flowgate parameter is required"}),
+            status=400,
+            headers={"Content-Type": "application/json"}
+        )
+    
+    if not date_param:
+        logger.warning("Missing date parameter.")
+        return https_fn.Response(
+            json.dumps({"error": "Date parameter is required (format: YYYY-MM-DD)"}),
+            status=400,
+            headers={"Content-Type": "application/json"}
+        )
+    
+    logger.info(f"Processing TTC request for flowgate: {flowgate_param}, date: {date_param}")
+
+    try:
+        pool = get_connection_pool()
+        conn = pool.getconn()
+        
+        try:
+            with conn.cursor() as cursor:
+                # First, get the flowgate_id from the flowgate_code
+                flowgate_lookup_sql = """
+                    SELECT flowgate_id FROM dim_flowgate 
+                    WHERE flowgate_code = %s AND is_active = true;
+                """
+                cursor.execute(flowgate_lookup_sql, (flowgate_param,))
+                flowgate_row = cursor.fetchone()
+                
+                if not flowgate_row:
+                    logger.warning(f"Flowgate not found: {flowgate_param}")
+                    return https_fn.Response(
+                        json.dumps({"error": f"Flowgate '{flowgate_param}' not found"}),
+                        status=404,
+                        headers={"Content-Type": "application/json"}
+                    )
+                
+                flowgate_id = flowgate_row[0]
+                logger.info(f"Found flowgate_id: {flowgate_id} for flowgate: {flowgate_param}")
+                
+                # Query TTC data for the specific flowgate and date
+                # We'll get all hours for the specified date
+                query_sql = """
+                    SELECT ttc_id, flowgate_id, metric_id, source_id, datetime_utc, 
+                           hour_ending, value_mw, quality, ingestion_timestamp
+                    FROM fact_ttc_hourly
+                    WHERE flowgate_id = %s 
+                      AND DATE(datetime_utc) = %s
+                    ORDER BY hour_ending ASC;
+                """
+                
+                cursor.execute(query_sql, (flowgate_id, date_param))
+                rows = cursor.fetchall()
+                
+                result = []
+                for row in rows:
+                    ttc_id, flowgate_id_val, metric_id, source_id, datetime_utc, hour_ending, value_mw, quality, ingestion_timestamp = row
+                    
+                    # Format datetime to ISO string
+                    datetime_utc_str = datetime_utc.strftime('%Y-%m-%dT%H:%M:%SZ') if datetime_utc else None
+                    ingestion_timestamp_str = ingestion_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%fZ') if ingestion_timestamp else None
+                    
+                    # Convert value_mw to float if it's a Decimal
+                    value_mw_float = None
+                    if value_mw is not None:
+                        if isinstance(value_mw, decimal.Decimal):
+                            value_mw_float = float(value_mw)
+                        elif isinstance(value_mw, (int, float)):
+                            value_mw_float = float(value_mw)
+                        else:
+                            try:
+                                value_mw_float = float(value_mw)
+                            except (ValueError, TypeError):
+                                logger.warning(f"Could not convert value_mw {value_mw} to float for ttc_id {ttc_id}")
+                                continue
+                    
+                    if value_mw_float is not None:
+                        result.append({
+                            "ttc_id": ttc_id,
+                            "flowgate_id": flowgate_id_val,
+                            "metric_id": metric_id,
+                            "source_id": source_id,
+                            "datetime_utc": datetime_utc_str,
+                            "hour_ending": hour_ending,
+                            "value_mw": value_mw_float,
+                            "quality": quality,
+                            "ingestion_timestamp": ingestion_timestamp_str
+                        })
+                
+                logger.info(f"Returning {len(result)} TTC data points for flowgate {flowgate_param} on {date_param}")
+                
+                return https_fn.Response(
+                    json.dumps(result),
+                    status=200,
+                    headers={"Content-Type": "application/json"}
+                )
+                
+        except Exception as db_error:
+            logger.error(f"Database error in get_ttc_flowgate_data: {db_error}")
+            logger.error(traceback.format_exc())
+            if conn:
+                conn.rollback()
+            return https_fn.Response(
+                json.dumps({"error": "A database error occurred.", "details": str(db_error)}),
+                status=500,
+                headers={"Content-Type": "application/json"}
+            )
+        finally:
+            if conn:
+                pool.putconn(conn)
+                
+    except Exception as e:
+        logger.error(f"General error in get_ttc_flowgate_data: {e}")
+        logger.error(traceback.format_exc())
+        return https_fn.Response(
+            json.dumps({"error": "An internal server error occurred.", "details": str(e)}),
+            status=500,
+            headers={"Content-Type": "application/json"}
+        )
+
+@https_fn.on_request(
+    cors=options.CorsOptions(
+        cors_origins=[
+        "https://crystal-2f87e.web.app",
+        "https://askcrystal.info",
+        "https://www.askcrystal.info",
+        "http://localhost:3000",
+        "http://localhost:5173",
+        ],
+        cors_methods=["get", "post", "options"]
+    ),
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=30
+)
 def get_power_infrastructure(request: https_fn.Request) -> https_fn.Response:
     """
     HTTP Cloud Function to fetch BPA power infrastructure data as GeoJSON.
@@ -455,7 +617,7 @@ def evaluate_search_query(request):
         "http://localhost:3000",
         "http://localhost:5173",
         ],
-        cors_methods=["get", "post"]
+        cors_methods=["get", "post", "options"]
     ),
     memory=options.MemoryOption.GB_1,
     timeout_sec=180 # Let's increase timeout here to 3 mins.

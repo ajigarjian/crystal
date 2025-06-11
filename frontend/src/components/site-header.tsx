@@ -12,7 +12,7 @@ interface SearchableFeature {
 }
 
 interface SiteHeaderProps {
-  selectedFeature: SelectedFeature;
+  selectedFeature: SelectedFeature | null;
   // Search data
   dams: DamInfo[];
   powerLines: SearchableFeature[];
