@@ -536,31 +536,42 @@ export function ChartTTCFlowgate({ selectedFlowgate }: ChartTTCFlowgateProps) {
               </div>
             ) : (
               <div className="h-full overflow-hidden rounded-md border">
-                <div className="h-full overflow-auto">
-                  <Table>
-                    <TableHeader className="sticky top-0 bg-background z-10">
-                      <TableRow>
-                        <TableHead className="w-[120px] font-semibold">Date</TableHead>
+                <div 
+                  className="h-full overflow-auto [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb:hover]:bg-muted-foreground/50"
+                  style={{
+                    scrollbarWidth: 'thin',
+                    scrollbarColor: 'hsl(var(--border)) transparent',
+                  }}
+                >
+                  <table className="w-full caption-bottom text-sm">
+                    <thead className="sticky top-0 bg-background z-10 shadow-sm border-b">
+                      <tr className="border-b">
+                        <th className="h-10 px-2 text-left align-middle font-medium whitespace-nowrap w-[120px] font-semibold bg-background">
+                          Date
+                        </th>
                         {Array.from({ length: 24 }, (_, i) => i + 1).map(hour => (
-                          <TableHead key={hour} className="text-center min-w-[60px] font-semibold">
+                          <th 
+                            key={hour} 
+                            className="h-10 px-2 text-center align-middle font-medium whitespace-nowrap min-w-[60px] font-semibold bg-background"
+                          >
                             HE{hour.toString().padStart(2, '0')}
-                          </TableHead>
+                          </th>
                         ))}
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
+                      </tr>
+                    </thead>
+                    <tbody>
                       {tableData.map((row) => (
-                        <TableRow key={row.date}>
-                          <TableCell className="font-medium whitespace-nowrap">
+                        <tr key={row.date} className="border-b transition-colors hover:bg-muted/50">
+                          <td className="p-2 align-middle whitespace-nowrap font-medium">
                             {row.displayDate}
-                          </TableCell>
+                          </td>
                           {Array.from({ length: 24 }, (_, i) => i + 1).map(hour => {
                             const cellData = row.hours[hour]
                             return (
-                              <TableCell 
+                              <td 
                                 key={hour} 
                                 className={cn(
-                                  "text-center text-xs",
+                                  "p-2 align-middle whitespace-nowrap text-center text-xs",
                                   cellData?.isForecast && "bg-blue-50 dark:bg-blue-950/20"
                                 )}
                               >
@@ -578,13 +589,13 @@ export function ChartTTCFlowgate({ selectedFlowgate }: ChartTTCFlowgateProps) {
                                 ) : (
                                   <span className="text-muted-foreground">-</span>
                                 )}
-                              </TableCell>
+                              </td>
                             )
                           })}
-                        </TableRow>
+                        </tr>
                       ))}
-                    </TableBody>
-                  </Table>
+                    </tbody>
+                  </table>
                 </div>
               </div>
             )}

@@ -286,7 +286,11 @@ export function InteractiveMap({
         }}
         interactiveLayerIds={['power-lines', 'power-lines-clickable']}
         minZoom={4}
-        maxZoom={12}
+        maxZoom={22}
+        scrollZoom={{
+          speed: 0.02,
+          smooth: true
+        }}
         style={{
           width: '100%',
           height: '100%',
