@@ -262,6 +262,28 @@ export function InteractiveMap({
             onEmptyMapClick();
           }
         }}
+        onMouseEnter={(event) => {
+          // Check if we're hovering over a power line
+          const features = event.target.queryRenderedFeatures(event.point, {
+            layers: ['power-lines', 'power-lines-clickable']
+          });
+          
+          if (features.length > 0) {
+            event.target.getCanvas().style.cursor = 'pointer';
+          }
+        }}
+        onMouseLeave={(event) => {
+          // Reset cursor when leaving power lines
+          event.target.getCanvas().style.cursor = '';
+        }}
+        onMouseMove={(event) => {
+          // Update cursor based on what we're hovering over
+          const features = event.target.queryRenderedFeatures(event.point, {
+            layers: ['power-lines', 'power-lines-clickable']
+          });
+          
+          event.target.getCanvas().style.cursor = features.length > 0 ? 'pointer' : '';
+        }}
         interactiveLayerIds={['power-lines', 'power-lines-clickable']}
         minZoom={4}
         maxZoom={12}

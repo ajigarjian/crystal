@@ -60,6 +60,86 @@ interface SearchableFeature {
   data: any;
 }
 
+// Utility function to convert voltage to kV format
+const formatVoltageToKV = (voltage: string | undefined): string => {
+  if (!voltage || voltage === 'Unknown' || voltage === '') {
+    return 'Unknown';
+  }
+  
+  // Clean the input string and handle semicolon-separated duplicates
+  let cleanVoltage = voltage.trim();
+  
+  // If there's a semicolon, take only the first value
+  if (cleanVoltage.includes(';')) {
+    cleanVoltage = cleanVoltage.split(';')[0].trim();
+  }
+  
+  // If it already contains 'kV', check if it's properly formatted
+  if (cleanVoltage.toLowerCase().includes('kv')) {
+    // Extract the numeric part before 'kV'
+    const kvMatch = cleanVoltage.match(/^(\d+(?:\.\d+)?)\s*kv$/i);
+    if (kvMatch) {
+      // It's already properly formatted, return as is
+      const value = parseFloat(kvMatch[1]);
+      if (!isNaN(value)) {
+        if (value >= 100) {
+          return `${Math.round(value)} kV`;
+        } else if (value >= 10) {
+          return `${value.toFixed(1)} kV`;
+        } else {
+          return `${value.toFixed(2)} kV`;
+        }
+      }
+    }
+    
+    // If it contains kV but isn't properly formatted, try to extract just the number
+    const numericPart = cleanVoltage.replace(/[^\d.]/g, '');
+    const numericValue = parseFloat(numericPart);
+    
+    if (!isNaN(numericValue)) {
+      // If the number is already reasonable for kV (< 1000), use it directly
+      if (numericValue < 1000) {
+        if (numericValue >= 100) {
+          return `${Math.round(numericValue)} kV`;
+        } else if (numericValue >= 10) {
+          return `${numericValue.toFixed(1)} kV`;
+        } else {
+          return `${numericValue.toFixed(2)} kV`;
+        }
+      } else {
+        // If it's a large number, convert from V to kV
+        const kVValue = numericValue / 1000;
+        if (kVValue >= 100) {
+          return `${Math.round(kVValue)} kV`;
+        } else if (kVValue >= 10) {
+          return `${kVValue.toFixed(1)} kV`;
+        } else {
+          return `${kVValue.toFixed(2)} kV`;
+        }
+      }
+    }
+  }
+  
+  // If it doesn't contain 'kV', assume it's in volts and convert
+  const numericValue = parseFloat(cleanVoltage.replace(/[^\d.]/g, ''));
+  
+  if (isNaN(numericValue)) {
+    return cleanVoltage; // Return original if can't parse
+  }
+  
+  // Convert to kV (divide by 1000)
+  const kVValue = numericValue / 1000;
+  
+  // Format with appropriate decimal places
+  if (kVValue >= 100) {
+    return `${Math.round(kVValue)} kV`;
+  } else if (kVValue >= 10) {
+    return `${kVValue.toFixed(1)} kV`;
+  } else {
+    return `${kVValue.toFixed(2)} kV`;
+  }
+};
+
 export default function Page() {
   const [selectedFeature, setSelectedFeature] = React.useState<SelectedFeature | null>(null);
   
@@ -462,7 +542,7 @@ export default function Page() {
                             <div className="grid grid-cols-2 gap-3 text-sm">
                               <div>
                                 <span className="font-medium text-muted-foreground">Voltage:</span>
-                                <div className="font-medium">{currentPowerLine.voltage || 'Unknown'}</div>
+                                <div className="font-medium">{formatVoltageToKV(currentPowerLine.voltage)}</div>
                               </div>
                               <div>
                                 <span className="font-medium text-muted-foreground">Operator:</span>
