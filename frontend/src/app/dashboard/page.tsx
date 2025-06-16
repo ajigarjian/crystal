@@ -286,19 +286,18 @@ export default function Page() {
     // Set the flowgate for map highlighting
     setSelectedFlowgate(flowgate);
     
-    // Pick a random power line from this flowgate for the right panel
+    // Pick a power line from this flowgate for the right panel
     const flowgateLines = searchPowerLines.filter(line => 
       (line.data as PowerLineInfo).flowgate === flowgate
     );
     
     if (flowgateLines.length > 0) {
-      // Pick a random line instead of always the first one
-      const randomIndex = Math.floor(Math.random() * flowgateLines.length);
-      const randomLine = flowgateLines[randomIndex];
+      // Use the first line consistently to avoid hydration mismatches
+      const selectedLine = flowgateLines[0];
       
       setSelectedFeature({
         type: 'powerline',
-        data: randomLine.data as PowerLineInfo
+        data: selectedLine.data as PowerLineInfo
       });
     }
   };

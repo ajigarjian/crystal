@@ -4,7 +4,7 @@ import * as React from 'react';
 import ReactMapGL, { Marker, Popup, NavigationControl, ViewStateChangeEvent, Source, Layer } from 'react-map-gl/mapbox';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { MapSkeleton } from "@/components/MapSkeleton";
-import { getPowerInfrastructure, PowerInfrastructureData, getPowerGenerators, GeneratorData, getPowerPlants, PlantData } from "@/lib/firebase";
+import { getPowerInfrastructure, PowerInfrastructureData, getPowerGenerators, GeneratorData, getPowerPlants, PowerPlantsData } from "@/lib/firebase";
 
 interface MapMarker {
   latitude: number;
@@ -151,7 +151,7 @@ export function InteractiveMap({
   const [selectedFlowgateGroup, setSelectedFlowgateGroup] = React.useState<string | null>(null);
   const [clickedLineId, setClickedLineId] = React.useState<number | null>(null);
   const [generatorData, setGeneratorData] = React.useState<GeneratorData | null>(null);
-  const [plantData, setPlantData] = React.useState<PlantData | null>(null);
+  const [plantData, setPlantData] = React.useState<PowerPlantsData | null>(null);
   const [showGenerators, setShowGenerators] = React.useState(true);
   const [showPlants, setShowPlants] = React.useState(true);
   
@@ -178,13 +178,20 @@ export function InteractiveMap({
   const [showGeothermal, setShowGeothermal] = React.useState(true);
   const [showOtherTypes, setShowOtherTypes] = React.useState(true);
 
+  // Add collapsible section state
+  const [isTransmissionCollapsed, setIsTransmissionCollapsed] = React.useState(true);
+  const [isGenerationCollapsed, setIsGenerationCollapsed] = React.useState(true);
+
+  // Add hover state for dam markers
+  const [hoveredMarker, setHoveredMarker] = React.useState<MapMarker | null>(null);
+
+ // Replace the hardcoded timeout effect with data-driven loading
   React.useEffect(() => {
-    // Simulate map loading delay
-    const timer = setTimeout(() => {
+    // Set loading to false once power infrastructure data is loaded (or failed to load)
+    if (powerInfrastructureData !== null) {
       setIsLoading(false);
-    }, 1500);
-    return () => clearTimeout(timer);
-  }, []);
+    }
+  }, [powerInfrastructureData]);
 
   React.useEffect(() => {
     // Update viewport if initial props change
@@ -378,8 +385,6 @@ export function InteractiveMap({
     <div className="relative w-full h-full">
       <ReactMapGL
         {...viewport}
-        width="100%"
-        height="100%"
         mapboxAccessToken={mapboxAccessToken}
         mapStyle={BASE_STYLE}
         onMove={(evt: ViewStateChangeEvent) => setViewport(evt.viewState)}
@@ -486,10 +491,7 @@ export function InteractiveMap({
         interactiveLayerIds={['power-lines', 'power-lines-clickable']}
         minZoom={4}
         maxZoom={22}
-        scrollZoom={{
-          speed: 0.02,
-          smooth: true
-        }}
+        scrollZoom={true}
         style={{
           width: '100%',
           height: '100%',
@@ -644,13 +646,13 @@ export function InteractiveMap({
               />
             )}
 
-            {/* Transmission Line Labels - Show at zoom 8+ */}
+            {/* Transmission Line Labels - Show at zoom 6+ */}
             {showPowerLines && (
               <Layer
                 id="power-line-labels"
                 type="symbol"
                 filter={["==", ["get", "geometry_type"], "ST_LineString"]}
-                minzoom={8}
+                minzoom={6}
                 layout={{
                   "text-field": [
                     "case",
@@ -693,10 +695,10 @@ export function InteractiveMap({
                     "interpolate",
                     ["linear"],
                     ["zoom"],
-                    8, 9,    // At zoom 8, text size 9
-                    10, 11,  // At zoom 10, text size 11
-                    12, 12,  // At zoom 12, text size 12
-                    16, 14   // At zoom 16, text size 14
+                    8, 12,   // At zoom 8, text size 12 (increased from 9)
+                    10, 14,  // At zoom 10, text size 14 (increased from 11)
+                    12, 16,  // At zoom 12, text size 16 (increased from 12)
+                    16, 18   // At zoom 16, text size 18 (increased from 14)
                   ],
                   "symbol-placement": "line",
                   "text-rotation-alignment": "map",
@@ -973,7 +975,7 @@ export function InteractiveMap({
         )}
 
         {/* Existing dam markers */}
-        {showDams && markers.map((marker) => (
+        {showDams && markers && markers.length > 0 && markers.map((marker) => (
           <Marker
             key={`marker-${marker.id}`}
             latitude={marker.latitude}
@@ -985,6 +987,8 @@ export function InteractiveMap({
                 e.stopPropagation();
                 handleMarkerClick(marker);
               }}
+              onMouseEnter={() => setHoveredMarker(marker)}
+              onMouseLeave={() => setHoveredMarker(null)}
               style={{
                 border: 'none',
                 background: 'transparent',
@@ -1022,6 +1026,20 @@ export function InteractiveMap({
             </button>
           </Marker>
         ))}
+
+        {/* Dam hover popup */}
+        {hoveredMarker && (
+          <Popup
+            latitude={hoveredMarker.latitude}
+            longitude={hoveredMarker.longitude}
+            closeButton={false}
+            closeOnClick={false}
+            offset={[0, -10]}
+            className="dam-hover-popup"
+          >
+            {hoveredMarker.name || 'Dam'}
+          </Popup>
+        )}
       </ReactMapGL>
       
       {/* Columbia River System Label Overlay with Full Screen Button */}
@@ -1056,7 +1074,7 @@ export function InteractiveMap({
       {/* Legend */}
       <div 
         className="absolute bottom-4 right-4 bg-white/95 rounded-lg px-3 py-2 shadow-lg border"
-        style={{ zIndex: 40 }}
+        style={{ zIndex: 40, minWidth: '180px' }}
       >
         <div className="text-xs space-y-2">
           <div className="font-medium text-gray-800 mb-2">Legend</div>
@@ -1095,68 +1113,134 @@ export function InteractiveMap({
           </div>
           
           
-          {/* Power Infrastructure */}
+          {/* Power Infrastructure → Transmission */}
           {powerInfrastructureData && (
             <>
               <div className="border-t pt-2">
-                <div className="font-medium text-gray-800 mb-1 text-xs">Power Infrastructure</div>
-                <div className="space-y-1">
-                  <label className="flex items-center space-x-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={showPowerLines}
-                      onChange={(e) => setShowPowerLines(e.target.checked)}
-                      className="w-3 h-3"
-                    />
-                    <div className="w-3 h-0.5 bg-gray-600"></div>
-                    <span className="text-gray-600 text-xs">All Power Lines</span>
-                  </label>
-                  <div className="ml-5 space-y-1">
-                    <div className="flex items-center space-x-1">
-                      <div className="w-3 h-0.5 bg-cyan-500"></div>
-                      <span className="text-gray-600 text-xs">Selected Flowgate</span>
-                    </div>
+                <button 
+                  onClick={() => setIsTransmissionCollapsed(!isTransmissionCollapsed)}
+                  className="flex items-center justify-between w-full text-left"
+                >
+                  <div className="font-medium text-gray-800 mb-1 text-xs">Transmission</div>
+                  <svg 
+                    className={`w-3 h-3 transform transition-transform ${isTransmissionCollapsed ? 'rotate-270' : ''}`}
+                    fill="none" 
+                    stroke="currentColor" 
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+                {!isTransmissionCollapsed && (
+                  <div className="space-y-1">
                     <label className="flex items-center space-x-2 cursor-pointer">
                       <input
                         type="checkbox"
-                        checked={show500kV}
-                        onChange={(e) => setShow500kV(e.target.checked)}
-                        className="w-3 h-3"
-                      />
-                      <div className="w-3 h-0.5 bg-red-400"></div>
-                      <span className="text-gray-600 text-xs">500kV Lines</span>
-                    </label>
-                    <label className="flex items-center space-x-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={show230kV}
-                        onChange={(e) => setShow230kV(e.target.checked)}
-                        className="w-3 h-3"
-                      />
-                      <div className="w-3 h-0.5 bg-orange-500"></div>
-                      <span className="text-gray-600 text-xs">230kV Lines</span>
-                    </label>
-                    <label className="flex items-center space-x-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={show115kV}
-                        onChange={(e) => setShow115kV(e.target.checked)}
-                        className="w-3 h-3"
-                      />
-                      <div className="w-3 h-0.5 bg-yellow-500"></div>
-                      <span className="text-gray-600 text-xs">115kV Lines</span>
-                    </label>
-                    <label className="flex items-center space-x-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={showOtherVoltages}
-                        onChange={(e) => setShowOtherVoltages(e.target.checked)}
+                        checked={showPowerLines}
+                        onChange={(e) => setShowPowerLines(e.target.checked)}
                         className="w-3 h-3"
                       />
                       <div className="w-3 h-0.5 bg-gray-600"></div>
-                      <span className="text-gray-600 text-xs">Other Voltages</span>
+                      <span className="text-gray-600 text-xs">All Power Lines</span>
                     </label>
+                    <div className="ml-5 space-y-1">
+                      <div className="flex items-center space-x-1">
+                        <div className="w-3 h-0.5 bg-cyan-500"></div>
+                        <span className="text-gray-600 text-xs">Selected Flowgate</span>
+                      </div>
+                      <label className="flex items-center space-x-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={show500kV}
+                          onChange={(e) => setShow500kV(e.target.checked)}
+                          className="w-3 h-3"
+                        />
+                        <div className="w-3 h-0.5 bg-red-400"></div>
+                        <span className="text-gray-600 text-xs">500kV Lines</span>
+                      </label>
+                      <label className="flex items-center space-x-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={show230kV}
+                          onChange={(e) => setShow230kV(e.target.checked)}
+                          className="w-3 h-3"
+                        />
+                        <div className="w-3 h-0.5 bg-orange-500"></div>
+                        <span className="text-gray-600 text-xs">230kV Lines</span>
+                      </label>
+                      <label className="flex items-center space-x-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={show115kV}
+                          onChange={(e) => setShow115kV(e.target.checked)}
+                          className="w-3 h-3"
+                        />
+                        <div className="w-3 h-0.5 bg-yellow-500"></div>
+                        <span className="text-gray-600 text-xs">115kV Lines</span>
+                      </label>
+                      <label className="flex items-center space-x-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={showOtherVoltages}
+                          onChange={(e) => setShowOtherVoltages(e.target.checked)}
+                          className="w-3 h-3"
+                        />
+                        <div className="w-3 h-0.5 bg-gray-600"></div>
+                        <span className="text-gray-600 text-xs">Other Voltages</span>
+                      </label>
+                    </div>
                   </div>
+                )}
+              </div>
+            </>
+          )}
+
+          {/* Power Generation Controls → Generation */}
+          {(viewport.zoom >= 6 || showPlants || showGenerators) && (
+            <div className="border-t pt-2">
+              <button 
+                onClick={() => setIsGenerationCollapsed(!isGenerationCollapsed)}
+                className="flex items-center justify-between w-full text-left"
+              >
+                <div className="font-medium text-gray-800 mb-1 text-xs">Generation</div>
+                <svg 
+                  className={`w-3 h-3 transform transition-transform ${isGenerationCollapsed ? 'rotate-270' : ''}`}
+                  fill="none" 
+                  stroke="currentColor" 
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              {!isGenerationCollapsed && (
+                <div className="space-y-1">
+                  {/* Plants control - show at zoom 6+ */}
+                  {viewport.zoom >= 6 && (
+                    <label className="flex items-center space-x-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={showPlants}
+                        onChange={(e) => setShowPlants(e.target.checked)}
+                        className="w-3 h-3"
+                      />
+                      <span className="text-gray-600 text-xs">Power Plants</span>
+                    </label>
+                  )}
+                  
+                  {/* Generators control - show at zoom 6+ */}
+                  {viewport.zoom >= 6 && (
+                    <label className="flex items-center space-x-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={showGenerators}
+                        onChange={(e) => setShowGenerators(e.target.checked)}
+                        className="w-3 h-3"
+                      />
+                      <span className="text-gray-600 text-xs">Generators</span>
+                    </label>
+                  )}
+
+                  {/* Substations */}
                   <label className="flex items-center space-x-2 cursor-pointer">
                     <input
                       type="checkbox"
@@ -1167,149 +1251,107 @@ export function InteractiveMap({
                     <div className="w-2 h-2 rounded-full bg-gray-500"></div>
                     <span className="text-gray-600 text-xs">Substations</span>
                   </label>
-                  <label className="flex items-center space-x-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={showPowerPlants}
-                      onChange={(e) => setShowPowerPlants(e.target.checked)}
-                      className="w-3 h-3"
-                    />
-                    <div className="w-2 h-2 rounded bg-purple-500"></div>
-                    <span className="text-gray-600 text-xs">Power Plants</span>
-                  </label>
+                  
+                  {/* Type filters - show when either plants or generators are enabled */}
+                  {(showPlants || showGenerators) && (
+                    <div className="ml-5">
+                      <div className="text-xs text-gray-500 mb-1">Types:</div>
+                      <div className="space-y-1">
+                        <label className="flex items-center space-x-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={showNuclear}
+                            onChange={(e) => setShowNuclear(e.target.checked)}
+                            className="w-3 h-3"
+                          />
+                          <div className="w-2 h-2 rounded-full bg-orange-500"></div>
+                          <span className="text-gray-600 text-xs">Nuclear</span>
+                        </label>
+                        <label className="flex items-center space-x-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={showSolar}
+                            onChange={(e) => setShowSolar(e.target.checked)}
+                            className="w-3 h-3"
+                          />
+                          <div className="w-2 h-2 rounded-full bg-yellow-500"></div>
+                          <span className="text-gray-600 text-xs">Solar</span>
+                        </label>
+                        <label className="flex items-center space-x-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={showWind}
+                            onChange={(e) => setShowWind(e.target.checked)}
+                            className="w-3 h-3"
+                          />
+                          <div className="w-2 h-2 rounded-full bg-green-400"></div>
+                          <span className="text-gray-600 text-xs">Wind</span>
+                        </label>
+                        <label className="flex items-center space-x-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={showHydro}
+                            onChange={(e) => setShowHydro(e.target.checked)}
+                            className="w-3 h-3"
+                          />
+                          <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+                          <span className="text-gray-600 text-xs">Hydro</span>
+                        </label>
+                        <label className="flex items-center space-x-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={showGas}
+                            onChange={(e) => setShowGas(e.target.checked)}
+                            className="w-3 h-3"
+                          />
+                          <div className="w-2 h-2 rounded-full bg-pink-500"></div>
+                          <span className="text-gray-600 text-xs">Natural Gas</span>
+                        </label>
+                        <label className="flex items-center space-x-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={showCoal}
+                            onChange={(e) => setShowCoal(e.target.checked)}
+                            className="w-3 h-3"
+                          />
+                          <div className="w-2 h-2 rounded-full bg-amber-800"></div>
+                          <span className="text-gray-600 text-xs">Coal</span>
+                        </label>
+                        <label className="flex items-center space-x-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={showBiomass}
+                            onChange={(e) => setShowBiomass(e.target.checked)}
+                            className="w-3 h-3"
+                          />
+                          <div className="w-2 h-2 rounded-full bg-green-600"></div>
+                          <span className="text-gray-600 text-xs">Biomass</span>
+                        </label>
+                        <label className="flex items-center space-x-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={showGeothermal}
+                            onChange={(e) => setShowGeothermal(e.target.checked)}
+                            className="w-3 h-3"
+                          />
+                          <div className="w-2 h-2 rounded-full bg-red-600"></div>
+                          <span className="text-gray-600 text-xs">Geothermal</span>
+                        </label>
+                        <label className="flex items-center space-x-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={showOtherTypes}
+                            onChange={(e) => setShowOtherTypes(e.target.checked)}
+                            className="w-3 h-3"
+                          />
+                          <div className="w-2 h-2 rounded-full bg-purple-500"></div>
+                          <span className="text-gray-600 text-xs">Other</span>
+                        </label>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </div>
-            </>
-          )}
-
-          {/* Power Generation Controls */}
-          {(viewport.zoom >= 6 || showPlants || showGenerators) && (
-            <div className="border-t pt-2">
-              <div className="font-medium text-gray-800 mb-1 text-xs">Power Generation</div>
-              <div className="space-y-1">
-                {/* Plants control - show at zoom 6+ */}
-                {viewport.zoom >= 6 && (
-                  <label className="flex items-center space-x-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={showPlants}
-                      onChange={(e) => setShowPlants(e.target.checked)}
-                      className="w-3 h-3"
-                    />
-                    <span className="text-gray-600 text-xs">Power Plants</span>
-                  </label>
-                )}
-                
-                {/* Generators control - show at zoom 6+ */}
-                {viewport.zoom >= 6 && (
-                  <label className="flex items-center space-x-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={showGenerators}
-                      onChange={(e) => setShowGenerators(e.target.checked)}
-                      className="w-3 h-3"
-                    />
-                    <span className="text-gray-600 text-xs">Generators</span>
-                  </label>
-                )}
-                
-                {/* Type filters - show when either plants or generators are enabled */}
-                {(showPlants || showGenerators) && (
-                  <div className="ml-5 space-y-1">
-                    <div className="text-xs text-gray-500 mb-1">Filter by Type:</div>
-                    <label className="flex items-center space-x-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={showNuclear}
-                        onChange={(e) => setShowNuclear(e.target.checked)}
-                        className="w-3 h-3"
-                      />
-                      <div className="w-2 h-2 rounded-full bg-orange-500"></div>
-                      <span className="text-gray-600 text-xs">Nuclear</span>
-                    </label>
-                    <label className="flex items-center space-x-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={showSolar}
-                        onChange={(e) => setShowSolar(e.target.checked)}
-                        className="w-3 h-3"
-                      />
-                      <div className="w-2 h-2 rounded-full bg-yellow-500"></div>
-                      <span className="text-gray-600 text-xs">Solar</span>
-                    </label>
-                    <label className="flex items-center space-x-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={showWind}
-                        onChange={(e) => setShowWind(e.target.checked)}
-                        className="w-3 h-3"
-                      />
-                      <div className="w-2 h-2 rounded-full bg-green-400"></div>
-                      <span className="text-gray-600 text-xs">Wind</span>
-                    </label>
-                    <label className="flex items-center space-x-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={showHydro}
-                        onChange={(e) => setShowHydro(e.target.checked)}
-                        className="w-3 h-3"
-                      />
-                      <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-                      <span className="text-gray-600 text-xs">Hydro</span>
-                    </label>
-                    <label className="flex items-center space-x-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={showGas}
-                        onChange={(e) => setShowGas(e.target.checked)}
-                        className="w-3 h-3"
-                      />
-                      <div className="w-2 h-2 rounded-full bg-pink-500"></div>
-                      <span className="text-gray-600 text-xs">Natural Gas</span>
-                    </label>
-                    <label className="flex items-center space-x-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={showCoal}
-                        onChange={(e) => setShowCoal(e.target.checked)}
-                        className="w-3 h-3"
-                      />
-                      <div className="w-2 h-2 rounded-full bg-amber-800"></div>
-                      <span className="text-gray-600 text-xs">Coal</span>
-                    </label>
-                    <label className="flex items-center space-x-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={showBiomass}
-                        onChange={(e) => setShowBiomass(e.target.checked)}
-                        className="w-3 h-3"
-                      />
-                      <div className="w-2 h-2 rounded-full bg-green-600"></div>
-                      <span className="text-gray-600 text-xs">Biomass</span>
-                    </label>
-                    <label className="flex items-center space-x-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={showGeothermal}
-                        onChange={(e) => setShowGeothermal(e.target.checked)}
-                        className="w-3 h-3"
-                      />
-                      <div className="w-2 h-2 rounded-full bg-red-600"></div>
-                      <span className="text-gray-600 text-xs">Geothermal</span>
-                    </label>
-                    <label className="flex items-center space-x-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={showOtherTypes}
-                        onChange={(e) => setShowOtherTypes(e.target.checked)}
-                        className="w-3 h-3"
-                      />
-                      <div className="w-2 h-2 rounded-full bg-purple-500"></div>
-                      <span className="text-gray-600 text-xs">Other</span>
-                    </label>
-                  </div>
-                )}
-              </div>
+              )}
             </div>
           )}
         </div>

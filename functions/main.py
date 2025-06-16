@@ -260,7 +260,7 @@ def get_ttc_flowgate_data(request: https_fn.Request) -> https_fn.Response:
         cors_methods=["get", "post", "options"]
     ),
     memory=options.MemoryOption.MB_512,
-    timeout_sec=30
+    timeout_sec=60
 )
 def get_power_infrastructure(request: https_fn.Request) -> https_fn.Response:
     """
@@ -293,30 +293,31 @@ def get_power_infrastructure(request: https_fn.Request) -> https_fn.Response:
         try:
             with conn.cursor() as cursor:
                 # Base query to get power infrastructure as GeoJSON with flowgate data
+               # Simplified query structure
                 base_query = """
-                    SELECT jsonb_build_object(
+                    SELECT json_build_object(
                         'type', 'FeatureCollection',
-                        'features', jsonb_agg(feature)
+                        'features', json_agg(
+                            json_build_object(
+                                'type', 'Feature',
+                                'id', pi.gid,
+                                'geometry', ST_AsGeoJSON(pi.geom),
+                                'properties', json_build_object(
+                                    'gid', pi.gid,
+                                    'name', COALESCE(pi.name, 'Unnamed'),
+                                    'operator', pi.operator,
+                                    'power_type', pi.power,
+                                    'voltage', pi.voltage,
+                                    'geometry_type', ST_GeometryType(pi.geom),
+                                    'flowgate', pfg.flowgate,
+                                    'is_flowgate_line', pfg.flowgate IS NOT NULL
+                                )
+                            ) ORDER BY pi.gid, (pfg.flowgate IS NOT NULL) DESC, pfg.flowgate
+                        )
                     )
-                    FROM (
-                        SELECT DISTINCT ON (pi.gid) jsonb_build_object(
-                            'type', 'Feature',
-                            'id', pi.gid,
-                            'geometry', ST_AsGeoJSON(pi.geom)::jsonb,
-                            'properties', jsonb_build_object(
-                                'gid', pi.gid,
-                                'name', COALESCE(pi.name, 'Unnamed'),
-                                'operator', pi.operator,
-                                'power_type', pi.power,
-                                'voltage', pi.voltage,
-                                'geometry_type', ST_GeometryType(pi.geom),
-                                'flowgate', pfg.flowgate,
-                                'is_flowgate_line', CASE WHEN pfg.flowgate IS NOT NULL THEN true ELSE false END
-                            )
-                        ) AS feature
-                        FROM power_infra pi
-                        LEFT JOIN power_flow_gates pfg ON pi.name = pfg.openinframaplinename
-                        WHERE pi.geom IS NOT NULL
+                    FROM power_infra pi
+                    LEFT JOIN power_flow_gates pfg ON pi.name = pfg.openinframaplinename
+                    WHERE pi.geom IS NOT NULL
                 """
                 
                 # Add spatial filter if bbox is provided
@@ -338,11 +339,8 @@ def get_power_infrastructure(request: https_fn.Request) -> https_fn.Response:
                     except (ValueError, TypeError) as e:
                         logger.warning(f"Error parsing bbox {bbox_param}: {e}")
                 
-                # Add ORDER BY and close the subquery
-                base_query += """
-                        ORDER BY pi.gid, (pfg.flowgate IS NOT NULL) DESC, pfg.flowgate
-                    ) AS features;
-                """
+                # Remove the separate ORDER BY clause that was causing the syntax error
+                # The ORDER BY is now inside the json_agg() function above
                 
                 cursor.execute(base_query, params)
                 result = cursor.fetchone()
@@ -1371,8 +1369,9 @@ def submit_feedback(request):
 )
 def get_inflow_timeseries(request: https_fn.Request) -> https_fn.Response:
     """
-    Fetch inflow timeseries combining observed (quality='R') and forecast (quality='F') data.
-    Returns observed data up to current time and forecast data from current time forward.
+    Fetch inflow timeseries combining observed (quality='R'), forecast (quality='F'), 
+    and forecast error data. Returns observed data up to current time, forecast data 
+    from current time forward, and forecast error for historical observed data.
     """
     logger.info("Received request for inflow timeseries data.")
 
@@ -1407,21 +1406,23 @@ def get_inflow_timeseries(request: https_fn.Request) -> https_fn.Response:
         conn = pool.getconn()
         try:
             with conn.cursor() as cursor:
-                # Combined query for both observed and forecast data
-                query_sql = """
-                    -- Get observed data (quality = 'R') up to current time
+                # Step 1: Get observed data
+                observed_query = """
                     SELECT ts_utc, value_num, 'observed' as data_type
                     FROM fact_dam_ops
                     WHERE dam_id = %s AND metric_id = %s AND quality = 'R' 
                       AND ts_utc >= %s AND ts_utc <= %s
+                    ORDER BY ts_utc ASC;
+                """
                     
-                    UNION ALL
+                cursor.execute(observed_query, (dam_id_to_query, 6, start_utc, now_utc))
+                observed_rows = cursor.fetchall()
                     
-                    -- Get most recent forecast data (quality = 'F') from current time forward
+                # Step 2: Get current forecast data
+                forecast_query = """
                     SELECT f.ts_utc, f.value_num, 'forecast' as data_type
                     FROM fact_dam_ops f
                     INNER JOIN (
-                        -- Get the most recent forecast run for this dam
                         SELECT dam_id, metric_id, MAX(ts_utc) as latest_forecast_time
                         FROM fact_dam_ops
                         WHERE dam_id = %s AND metric_id = %s AND quality = 'F'
@@ -1430,22 +1431,70 @@ def get_inflow_timeseries(request: https_fn.Request) -> https_fn.Response:
                               AND f.metric_id = latest.metric_id
                     WHERE f.dam_id = %s AND f.metric_id = %s AND f.quality = 'F'
                       AND f.ts_utc > %s
-                    
-                    ORDER BY ts_utc ASC;
+                    ORDER BY f.ts_utc ASC;
                 """
                 
-                cursor.execute(query_sql, (
-                    dam_id_to_query, 6, start_utc, now_utc,  # observed data params
-                    dam_id_to_query, 6,                       # latest forecast subquery params
-                    dam_id_to_query, 6, now_utc              # forecast data params
+                cursor.execute(forecast_query, (
+                    dam_id_to_query, 6,
+                    dam_id_to_query, 6, now_utc
                 ))
-                rows = cursor.fetchall()
+                forecast_rows = cursor.fetchall()
+                
+                # Step 3: Calculate forecast errors for observed data points
+                # For daily observed data at 07:00:00Z, compare against average of all forecasts for that same day
+                forecast_error_rows = []
+                
+                logger.info(f"Processing {len(observed_rows)} observed data points for forecast errors")
+                
+                for obs_row in observed_rows:
+                    obs_ts = obs_row[0]
+                    obs_value = float(obs_row[1]) if obs_row[1] is not None else None
+                    
+                    if obs_value is None:
+                        continue
+                    
+                    # Get the date of the observation (ignoring time)
+                    obs_date = obs_ts.date()
+                    
+                    # Find all forecasts for the same day (00:00, 06:00, 12:00, 18:00)
+                    error_query = """
+                        SELECT AVG(value_num) as avg_forecast, COUNT(*) as forecast_count
+                        FROM fact_dam_ops
+                        WHERE dam_id = %s AND metric_id = %s AND quality = 'F'
+                          AND DATE(ts_utc) = %s
+                        GROUP BY DATE(ts_utc);
+                    """
+                    
+                    cursor.execute(error_query, (dam_id_to_query, 6, obs_date))
+                    forecast_result = cursor.fetchone()
+                    
+                    if forecast_result and forecast_result[0] is not None:
+                        avg_forecast = float(forecast_result[0])
+                        forecast_count = forecast_result[1]
+                        error_value = obs_value - avg_forecast  # positive = under-forecasted, negative = over-forecasted
+                        
+                        logger.info(f"Forecast error for {obs_ts}: observed={obs_value}, avg_forecast={avg_forecast} (from {forecast_count} forecasts), error={error_value}")
+                        
+                        forecast_error_rows.append((obs_ts, error_value, 'forecast_error'))
+                    else:
+                        logger.info(f"No forecasts found for date {obs_date}")
+
+                logger.info(f"Generated {len(forecast_error_rows)} forecast error data points")
+                
+                # Combine all results
+                all_rows = []
+                all_rows.extend(observed_rows)
+                all_rows.extend(forecast_rows)
+                all_rows.extend(forecast_error_rows)
+                
+                # Sort by timestamp
+                all_rows.sort(key=lambda x: x[0])
                 
                 result = []
-                for row in rows:
+                for row in all_rows:
                     ts_utc_val_dt = row[0].astimezone(timezone.utc)
                     ts_utc_val = ts_utc_val_dt.strftime('%Y-%m-%dT%H:%M:%SZ')
-                    data_type = row[2]  # 'observed' or 'forecast'
+                    data_type = row[2]
 
                     value_num_val = None
                     if row[1] is not None:

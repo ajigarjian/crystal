@@ -606,9 +606,9 @@ function SidebarMenuSkeleton({
 }: React.ComponentProps<"div"> & {
   showIcon?: boolean
 }) {
-  // Random width between 50 to 90%.
+  // Fixed width to prevent hydration mismatches
   const width = React.useMemo(() => {
-    return `${Math.floor(Math.random() * 40) + 50}%`
+    return "70%"
   }, [])
 
   return (
@@ -698,6 +698,16 @@ function SidebarMenuSubButton({
   )
 }
 
+function CollapsibleSkeleton() {
+  return (
+    <div className="rounded-md py-[0.125rem]">
+      {Array.from({ length: 3 }).map((_, index) => (
+        <Skeleton key={index} className="mb-1 h-[1.125rem] rounded-sm px-1" style={{ width: "65%" }} />
+      ))}
+    </div>
+  )
+}
+
 export {
   Sidebar,
   SidebarContent,
@@ -723,4 +733,5 @@ export {
   SidebarSeparator,
   SidebarTrigger,
   useSidebar,
+  CollapsibleSkeleton,
 }

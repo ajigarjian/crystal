@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Line, LineChart, CartesianGrid, XAxis, YAxis, Label, Legend } from "recharts"
+import { Line, Bar, ComposedChart, CartesianGrid, XAxis, YAxis, Label, Legend } from "recharts"
 // import { toZonedTime, format as formatDate } from "date-fns-tz" // Temporarily removed for UTC display
 
 import { useIsMobile } from "@/hooks/use-mobile"
@@ -38,10 +38,12 @@ import { InflowDataPoint, getInflowTimeseries, TimeRangeOption } from "@/lib/fir
 interface ProcessedChartData {
   date: string;
   inflow: number;
-  type: 'observed' | 'forecast';
+  type: 'observed' | 'forecast' | 'forecast_error';
   timestamp: number;
   observed: number | null;
   forecast: number | null;
+  // Replace dummy volume with actual forecast error
+  forecast_error: number | null;
 }
 
 // Temporarily removed PACIFIC_TIMEZONE constant
@@ -59,6 +61,10 @@ const chartConfig = {
   forecast: {
     label: "Forecast Inflow",
     color: "hsl(340, 50%, 40%)", // Darker red
+  },
+  forecast_error: {
+    label: "Forecast Error (cfs)",
+    color: "hsl(0, 70%, 50%)", // Red for errors
   },
 } satisfies ChartConfig
 
@@ -111,12 +117,111 @@ const generateEveryOtherDayTicks = (dataMin: number, dataMax: number): number[] 
   return ticks;
 };
 
+// Remove the generateDummyVolumeData function and replace with:
+const processForecastError = (value: number, dataType: string): number | null => {
+  return dataType === 'forecast_error' ? value : null;
+};
+
+// Updated CustomErrorBar with bars positioned closer to the bottom
+const CustomErrorBar = (props: any) => {
+  const { payload, x, y, width, height, setHoveredErrorBar } = props;
+  
+  if (!payload || payload.forecast_error === null || payload.forecast_error === undefined) {
+    return null;
+  }
+  
+  const errorValue = payload.forecast_error;
+  const isPositive = errorValue > 0;
+  const fill = isPositive ? "hsl(0, 70%, 50%)" : "hsl(220, 70%, 50%)";
+  
+  // Calculate bar dimensions
+  const barWidth = Math.max(width, 8); // Slightly wider for easier hovering
+  const barX = x - (barWidth - width) / 2;
+  
+  const maxErrorHeight = 30;
+  const errorMagnitude = Math.abs(errorValue);
+  const maxError = 10000;
+  const barHeight = Math.min((errorMagnitude / maxError) * maxErrorHeight, maxErrorHeight);
+  
+  // Position closer to the actual bottom of the chart area
+  const chartBottom = 220;// Increased from 200 to move bars closer to bottom
+  const barY = chartBottom - barHeight;
+  
+  return (
+    <rect
+      x={barX}
+      y={barY}
+      width={barWidth}
+      height={barHeight}
+      fill={fill}
+      fillOpacity={0.7}
+      stroke={fill}
+      strokeWidth={0.5}
+      rx={1}
+      // Add hover handlers
+      onMouseEnter={(e) => {
+        const rect = e.currentTarget.getBoundingClientRect();
+        setHoveredErrorBar({
+          x: rect.left + rect.width / 2,
+          y: rect.top,
+          value: errorValue,
+          date: payload.date
+        });
+      }}
+      onMouseLeave={() => {
+        setHoveredErrorBar(null);
+      }}
+      style={{ cursor: 'pointer' }}
+    />
+  );
+};
+
+// Custom tooltip component for error bars
+const ErrorBarTooltip = ({ data }: { data: { x: number; y: number; value: number; date: string } }) => {
+  const errorType = data.value > 0 ? 'Under-forecasted' : 'Over-forecasted';
+  const dateObj = new Date(data.date);
+  // Remove time from error bar tooltips - just show date
+  const formattedDate = dateObj.toLocaleDateString('en-US', { 
+    year: 'numeric', month: 'short', day: 'numeric',
+    timeZone: 'UTC' 
+  });
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        left: data.x,
+        top: data.y - 10,
+        transform: 'translate(-50%, -100%)',
+        backgroundColor: 'rgba(0, 0, 0, 0.8)',
+        color: 'white',
+        padding: '8px 12px',
+        borderRadius: '4px',
+        fontSize: '12px',
+        pointerEvents: 'none',
+        zIndex: 1000,
+        whiteSpace: 'nowrap'
+      }}
+    >
+      <div>{formattedDate}</div>
+      <div>{Math.abs(data.value).toLocaleString()} cfs ({errorType})</div>
+    </div>
+  );
+};
+
 export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProps) {
   const isMobile = useIsMobile()
-  // Updated state type and default value
   const [timeRange, setTimeRange] = React.useState<TimeRangeOption>("14d") 
   const [processedChartData, setProcessedChartData] = React.useState<ProcessedChartData[]>([])
   const [isLoading, setIsLoading] = React.useState(true)
+  
+  // Move the hoveredErrorBar state INSIDE the component
+  const [hoveredErrorBar, setHoveredErrorBar] = React.useState<{
+    x: number;
+    y: number;
+    value: number;
+    date: string;
+  } | null>(null);
 
   React.useEffect(() => {
     if (isMobile) {
@@ -132,17 +237,90 @@ export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProp
       try {
         const rawData: InflowDataPoint[] = await getInflowTimeseries(timeRange, selectedDamId)
         
+        // Add comprehensive logging
+        console.log('=== RAW DATA FROM BACKEND ===')
+        console.log('Total data points received:', rawData.length)
+        console.log('Raw data sample:', rawData.slice(0, 5))
+        
+        // Log data types breakdown
+        const dataTypeBreakdown = rawData.reduce((acc, point) => {
+          acc[point.data_type] = (acc[point.data_type] || 0) + 1
+          return acc
+        }, {} as Record<string, number>)
+        console.log('Data type breakdown:', dataTypeBreakdown)
+        
+        // Log forecast_error data specifically
+        const forecastErrorData = rawData.filter(point => point.data_type === 'forecast_error')
+        console.log('Forecast error data points:', forecastErrorData.length)
+        if (forecastErrorData.length > 0) {
+          console.log('Sample forecast error data:', forecastErrorData.slice(0, 3))
+        }
+        
         const transformed = rawData.map(point => {
-          const timestamp = new Date(point.ts_utc).getTime() // Convert to timestamp
-          return {
-            date: point.ts_utc, // Keep original for tooltip
-            timestamp: timestamp, // Add timestamp for X-axis
-            observed: point.data_type === 'observed' ? Math.trunc(point.value_num) : null,
-            forecast: point.data_type === 'forecast' ? Math.trunc(point.value_num) : null,
-            inflow: Math.trunc(point.value_num),
-            type: point.data_type
+          const timestamp = new Date(point.ts_utc).getTime()
+          const inflowValue = Math.trunc(point.value_num);
+          
+          const processedPoint = {
+            date: point.ts_utc,
+            timestamp: timestamp,
+            observed: point.data_type === 'observed' ? inflowValue : null,
+            forecast: point.data_type === 'forecast' ? inflowValue : null,
+            inflow: point.data_type !== 'forecast_error' ? inflowValue : Math.abs(inflowValue), // Show absolute value for tooltip
+            type: point.data_type,
+            // Use actual forecast error - this is the key fix
+            forecast_error: point.data_type === 'forecast_error' ? inflowValue : null
           }
+          
+          // Log observed data processing
+          if (point.data_type === 'observed') {
+            console.log('Processing observed point:', {
+              original: point,
+              processed: processedPoint
+            })
+          }
+          
+          // Log forecast_error processing
+          if (point.data_type === 'forecast_error') {
+            console.log('Processing forecast_error point:', {
+              original: point,
+              processed: processedPoint
+            })
+          }
+          
+          return processedPoint
         })
+        
+        // Log final processed data
+        console.log('=== PROCESSED DATA ===')
+        console.log('Total processed points:', transformed.length)
+        
+        // Add debugging for observed data
+        const observedData = transformed.filter(point => point.observed !== null)
+        console.log('Observed data points:', observedData.length)
+        if (observedData.length > 0) {
+          console.log('Sample observed data:', observedData.slice(0, 3))
+          console.log('Observed data values:', observedData.map(d => ({ timestamp: d.timestamp, observed: d.observed })))
+        }
+        
+        const processedForecastErrors = transformed.filter(point => point.forecast_error !== null)
+        console.log('Processed forecast error points:', processedForecastErrors.length)
+        if (processedForecastErrors.length > 0) {
+          console.log('Sample processed forecast errors:', processedForecastErrors.slice(0, 3))
+        }
+        
+        // Add debugging for Y-axis domain
+        const allInflowValues = transformed
+          .filter(point => point.observed !== null || point.forecast !== null)
+          .map(point => point.observed || point.forecast)
+          .filter(val => val !== null);
+        
+        console.log('All inflow values for Y-axis:', {
+          min: Math.min(...allInflowValues),
+          max: Math.max(...allInflowValues),
+          observedRange: observedData.map(d => d.observed),
+          forecastRange: transformed.filter(p => p.forecast !== null).map(d => d.forecast)
+        });
+        
         setProcessedChartData(transformed)
       } catch (error) {
         console.error("Failed to fetch or process inflow data:", error)
@@ -241,7 +419,7 @@ export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProp
               <p>No inflow data available for the selected period.</p>
             </div>
           ) : (
-            <LineChart data={processedChartData} margin={{ left: 30, right: 10, top: 5, bottom: 0 }}>
+            <ComposedChart data={processedChartData} margin={{ left: 30, right: 10, top: 5, bottom: 0 }}>
               <CartesianGrid vertical={false} />
               <XAxis
                 dataKey="timestamp"
@@ -260,7 +438,9 @@ export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProp
                   return date.getUTCDate().toString();
                 }}
               />
+              {/* Left Y-axis for inflow lines */}
               <YAxis 
+                yAxisId="left"
                 tickLine={false}
                 axisLine={false}
                 tickMargin={8}
@@ -284,59 +464,115 @@ export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProp
                   offset={-20}
                 />
               </YAxis>
-              <ChartTooltip
-                cursor={true} 
-                content={
-                  <ChartTooltipContent
-                    labelFormatter={(value, payload) => {
-                      if (payload && payload.length > 0 && payload[0].payload.date) {
-                         const dateStringFromPayload = payload[0].payload.date;
-                         const dateObj = new Date(dateStringFromPayload);
-                         const dataType = payload[0].payload.type;
-                         if (String(dateObj) === "Invalid Date") {
-                            return "Invalid Date UTC"; 
-                         }
-                         const formattedDate = dateObj.toLocaleDateString('en-US', { 
-                           year: 'numeric', month: 'short', day: 'numeric', 
-                           hour: '2-digit', minute: '2-digit', timeZone: 'UTC' 
-                         }) + " UTC";
-                         return `${formattedDate} (${dataType})`;
-                      }
-                      return "Inflow (UTC)";
-                    }}
-                    formatter={(value, name, props) => {
-                       const dataType = props.payload.type;
-                       const typeLabel = dataType === 'forecast' ? 'Forecast' : 'Observed';
-                       return [
-                         `${props.payload.inflow.toLocaleString()} cfs (${typeLabel})`
-                       ];
-                    }}
-                    indicator="dot" 
-                  />
-                }
+              {/* Right Y-axis for forecast error bars */}
+              <YAxis 
+                yAxisId="right"
+                orientation="right"
+                hide={true}
+                domain={[
+                  (dataMin: number) => Math.min(dataMin * 1.1, 0), // Allow negative values
+                  (dataMax: number) => Math.max(dataMax * 1.1, 0)  // Allow positive values
+                ]}
               />
+              <ChartTooltip
+                cursor={true}
+                animationDuration={0}
+                content={(props) => {
+                  const { active, payload, label } = props;
+                  
+                  // If we're hovering over an error bar, don't show the line tooltip
+                  if (hoveredErrorBar) {
+                    return null;
+                  }
+                  
+                  // Only show tooltip if we have an active payload with actual data
+                  if (!active || !payload || payload.length === 0) {
+                    return null;
+                  }
+                  
+                  // Filter out null/undefined values and forecast_error data for the main tooltip
+                  const validPayload = payload.filter(entry => {
+                    const dataType = entry.payload?.type;
+                    return dataType !== 'forecast_error' && 
+                           entry.value !== null && 
+                           entry.value !== undefined &&
+                           entry.dataKey !== 'forecast_error';
+                  });
+                  
+                  // If no valid data to show, don't render tooltip
+                  if (validPayload.length === 0) {
+                    return null;
+                  }
+                  
+                  return (
+                    <ChartTooltipContent
+                      active={active}
+                      payload={validPayload}
+                      label={label}
+                      labelFormatter={(value, payload) => {
+                        if (payload && payload.length > 0 && payload[0].payload.date) {
+                          const dateStringFromPayload = payload[0].payload.date;
+                          const dateObj = new Date(dateStringFromPayload);
+                          const dataType = payload[0].payload.type;
+                          
+                          if (String(dateObj) === "Invalid Date") {
+                            return "Invalid Date UTC";
+                          }
+                          const formattedDate = dateObj.toLocaleDateString('en-US', { 
+                            year: 'numeric', month: 'short', day: 'numeric', 
+                            hour: '2-digit', minute: '2-digit', timeZone: 'UTC' 
+                          }) + " UTC";
+                          // Capitalize the data type in the title
+                          const capitalizedType = dataType.charAt(0).toUpperCase() + dataType.slice(1);
+                          return `${formattedDate} (${capitalizedType})`;
+                        }
+                        return "Inflow (UTC)";
+                      }}
+                      formatter={(value, name, props) => {
+                        // Remove the type label from the body - just show the value
+                        return [
+                          `${props.payload.inflow.toLocaleString()} cfs`
+                        ];
+                      }}
+                      indicator="dot"
+                    />
+                  );
+                }}
+              />
+              {/* Forecast error bars */}
+              <Bar
+                yAxisId="right"
+                dataKey="forecast_error"
+                shape={(props: any) => <CustomErrorBar {...props} setHoveredErrorBar={setHoveredErrorBar} />}
+                stroke="none"
+                fill="transparent"
+              />
+              {/* Observed inflow line */}
               <Line
+                yAxisId="left"
                 dataKey="observed"
                 type="linear" 
-                stroke="hsl(120, 50%, 30%)" // Darker green
+                stroke="hsl(120, 70%, 40%)"
                 strokeWidth={2}
-                dot={false}
-                activeDot={{ r: 6 }}
-                connectNulls={false}
+                activeDot={{ r: 8 }}
+                connectNulls={true}
               />
+              {/* Forecast inflow line */}
               <Line
+                yAxisId="left"
                 dataKey="forecast"
                 type="linear" 
-                stroke="hsl(340, 50%, 40%)" // Darker red
+                stroke="hsl(340, 50%, 40%)"
                 strokeWidth={2}
                 strokeDasharray="5 5"
                 dot={false}
                 activeDot={{ r: 6, fill: "hsl(340, 50%, 40%)" }}
                 connectNulls={false}
               />
-            </LineChart>
+            </ComposedChart>
           )}
         </ChartContainer>
+        {hoveredErrorBar && <ErrorBarTooltip data={hoveredErrorBar} />}
       </CardContent>
     </Card>
   )
