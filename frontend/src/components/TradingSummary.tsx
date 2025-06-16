@@ -1,6 +1,6 @@
 "use client";
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Skeleton } from "@/components/ui/skeleton";
 
 interface TradingSummaryProps {
@@ -9,27 +9,39 @@ interface TradingSummaryProps {
 }
 
 export function TradingSummary({ className = "", isLoading = false }: TradingSummaryProps) {
-  // Get current date formatted as "Month Day, Year"
-  const getCurrentDateTitle = () => {
-    const now = new Date();
-    return now.toLocaleDateString('en-US', {
-      month: 'long',
-      day: 'numeric',
-      year: 'numeric'
-    });
-  };
+  const [currentTime, setCurrentTime] = useState<{
+    dateTitle: string;
+    timeUTC: string;
+  } | null>(null);
 
-  // Get current time formatted as "HH:MM:SS UTC"
-  const getCurrentTimeUTC = () => {
-    const now = new Date();
-    return now.toLocaleTimeString('en-US', {
-      timeZone: 'UTC',
-      hour12: false,
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
-    });
-  };
+  // Use useEffect to set the time on the client side only
+  useEffect(() => {
+    const updateTime = () => {
+      const now = new Date();
+      setCurrentTime({
+        dateTitle: now.toLocaleDateString('en-US', {
+          month: 'long',
+          day: 'numeric',
+          year: 'numeric'
+        }),
+        timeUTC: now.toLocaleTimeString('en-US', {
+          timeZone: 'UTC',
+          hour12: false,
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit'
+        })
+      });
+    };
+
+    // Set initial time
+    updateTime();
+
+    // Update time every second
+    const interval = setInterval(updateTime, 1000);
+
+    return () => clearInterval(interval);
+  }, []);
 
   if (isLoading) {
     return (
@@ -87,10 +99,10 @@ export function TradingSummary({ className = "", isLoading = false }: TradingSum
       {/* Header */}
       <div className="space-y-2">
         <h2 className="text-xl font-semibold tracking-tight">
-          {getCurrentDateTitle()} Summary
+          {currentTime?.dateTitle || 'Loading...'} Summary
         </h2>
         <p className="text-sm text-muted-foreground">
-          Last updated {getCurrentTimeUTC()} UTC
+          Last updated {currentTime?.timeUTC || '--:--:--'} UTC
         </p>
       </div>
 

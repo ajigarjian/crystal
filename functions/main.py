@@ -260,7 +260,7 @@ def get_ttc_flowgate_data(request: https_fn.Request) -> https_fn.Response:
         cors_methods=["get", "post", "options"]
     ),
     memory=options.MemoryOption.MB_512,
-    timeout_sec=30
+    timeout_sec=60
 )
 def get_power_infrastructure(request: https_fn.Request) -> https_fn.Response:
     """
@@ -293,30 +293,31 @@ def get_power_infrastructure(request: https_fn.Request) -> https_fn.Response:
         try:
             with conn.cursor() as cursor:
                 # Base query to get power infrastructure as GeoJSON with flowgate data
+               # Simplified query structure
                 base_query = """
-                    SELECT jsonb_build_object(
+                    SELECT json_build_object(
                         'type', 'FeatureCollection',
-                        'features', jsonb_agg(feature)
+                        'features', json_agg(
+                            json_build_object(
+                                'type', 'Feature',
+                                'id', pi.gid,
+                                'geometry', ST_AsGeoJSON(pi.geom),
+                                'properties', json_build_object(
+                                    'gid', pi.gid,
+                                    'name', COALESCE(pi.name, 'Unnamed'),
+                                    'operator', pi.operator,
+                                    'power_type', pi.power,
+                                    'voltage', pi.voltage,
+                                    'geometry_type', ST_GeometryType(pi.geom),
+                                    'flowgate', pfg.flowgate,
+                                    'is_flowgate_line', pfg.flowgate IS NOT NULL
+                                )
+                            ) ORDER BY pi.gid, (pfg.flowgate IS NOT NULL) DESC, pfg.flowgate
+                        )
                     )
-                    FROM (
-                        SELECT DISTINCT ON (pi.gid) jsonb_build_object(
-                            'type', 'Feature',
-                            'id', pi.gid,
-                            'geometry', ST_AsGeoJSON(pi.geom)::jsonb,
-                            'properties', jsonb_build_object(
-                                'gid', pi.gid,
-                                'name', COALESCE(pi.name, 'Unnamed'),
-                                'operator', pi.operator,
-                                'power_type', pi.power,
-                                'voltage', pi.voltage,
-                                'geometry_type', ST_GeometryType(pi.geom),
-                                'flowgate', pfg.flowgate,
-                                'is_flowgate_line', CASE WHEN pfg.flowgate IS NOT NULL THEN true ELSE false END
-                            )
-                        ) AS feature
-                        FROM power_infra pi
-                        LEFT JOIN power_flow_gates pfg ON pi.name = pfg.openinframaplinename
-                        WHERE pi.geom IS NOT NULL
+                    FROM power_infra pi
+                    LEFT JOIN power_flow_gates pfg ON pi.name = pfg.openinframaplinename
+                    WHERE pi.geom IS NOT NULL
                 """
                 
                 # Add spatial filter if bbox is provided
@@ -338,11 +339,8 @@ def get_power_infrastructure(request: https_fn.Request) -> https_fn.Response:
                     except (ValueError, TypeError) as e:
                         logger.warning(f"Error parsing bbox {bbox_param}: {e}")
                 
-                # Add ORDER BY and close the subquery
-                base_query += """
-                        ORDER BY pi.gid, (pfg.flowgate IS NOT NULL) DESC, pfg.flowgate
-                    ) AS features;
-                """
+                # Remove the separate ORDER BY clause that was causing the syntax error
+                # The ORDER BY is now inside the json_agg() function above
                 
                 cursor.execute(base_query, params)
                 result = cursor.fetchone()

@@ -44,7 +44,10 @@ export default function Home() {
     const centerY = window.innerHeight / 2;
     trailPositions.current = Array(5).fill({ x: centerX, y: centerY });
     
-    // Generate random styles for text elements on client-side only
+    // Generate deterministic styles for text elements
+    // Use seeded random to ensure server and client generate the same values
+    const seededRandom = createSeededRandom(54321); // Different seed from data generation
+    
     const newTextStyles = DATA_TEXTS.map((_, i) => {
       // Create a more structured distribution by dividing the screen into a grid
       const gridCols = 10;
@@ -54,9 +57,9 @@ export default function Home() {
       const gridCol = i % gridCols;
       const gridRow = Math.floor(i / gridCols) % gridRows;
       
-      // Add randomness within the grid cell (±10%)
-      const randomOffsetX = (Math.random() - 0.5) * 20;
-      const randomOffsetY = (Math.random() - 0.5) * 20;
+      // Add deterministic "randomness" within the grid cell (±10%)
+      const randomOffsetX = (seededRandom() - 0.5) * 20;
+      const randomOffsetY = (seededRandom() - 0.5) * 20;
       
       // Calculate final position with margins to prevent edge clipping
       const left = (gridCol * (100 / gridCols)) + randomOffsetX;
@@ -91,24 +94,24 @@ export default function Home() {
       if (isInTitleZone || isInTaglineZone || isInButtonsZone || isInNavLinksZone) {
         // Create larger margins around important elements
         // Move to one of the corners or edges
-        const position = Math.floor(Math.random() * 4); // 0-3 for different positions
+        const position = Math.floor(seededRandom() * 4); // 0-3 for different positions
         
         switch(position) {
           case 0: // Top-left
-            safeLeft = 5 + (Math.random() * 15);
-            safeTop = 5 + (Math.random() * 15);
+            safeLeft = 5 + (seededRandom() * 15);
+            safeTop = 5 + (seededRandom() * 15);
             break;
           case 1: // Middle-right
-            safeLeft = 70 + (Math.random() * 20);
-            safeTop = 40 + (Math.random() * 20);
+            safeLeft = 70 + (seededRandom() * 20);
+            safeTop = 40 + (seededRandom() * 20);
             break;
           case 2: // Bottom-left
-            safeLeft = 5 + (Math.random() * 15);
-            safeTop = 70 + (Math.random() * 20);
+            safeLeft = 5 + (seededRandom() * 15);
+            safeTop = 70 + (seededRandom() * 20);
             break;
           case 3: // Bottom-right
-            safeLeft = 70 + (Math.random() * 20);
-            safeTop = 70 + (Math.random() * 20);
+            safeLeft = 70 + (seededRandom() * 20);
+            safeTop = 70 + (seededRandom() * 20);
             break;
         }
       } else {
@@ -117,17 +120,17 @@ export default function Home() {
         safeTop = Math.max(5, Math.min(95, top));
       }
       
-      const animationDelay = Math.random() * 10;
-      const animationDuration = 15 + Math.random() * 20;
+      const animationDelay = seededRandom() * 10;
+      const animationDuration = 15 + seededRandom() * 20;
       const animationType = i % 2 === 0 ? 'float' : 'float-alt';
       
       return {
         top: `${safeTop}%`,
         left: `${safeLeft}%`,
         animation: `${animationType} ${animationDuration}s ease-in-out ${animationDelay}s infinite`,
-        fontSize: `${Math.max(0.7, Math.random() * 0.3 + 0.7)}rem`,
-        opacity: 0.3 + Math.random() * 0.5,
-        transform: `rotate(${(Math.random() - 0.5) * 10}deg)`,
+        fontSize: `${Math.max(0.7, seededRandom() * 0.3 + 0.7)}rem`,
+        opacity: 0.3 + seededRandom() * 0.5,
+        transform: `rotate(${(seededRandom() - 0.5) * 10}deg)`,
       };
     });
     
