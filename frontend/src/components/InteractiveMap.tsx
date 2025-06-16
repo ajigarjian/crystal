@@ -178,13 +178,13 @@ export function InteractiveMap({
   const [showGeothermal, setShowGeothermal] = React.useState(true);
   const [showOtherTypes, setShowOtherTypes] = React.useState(true);
 
+ // Replace the hardcoded timeout effect with data-driven loading
   React.useEffect(() => {
-    // Simulate map loading delay
-    const timer = setTimeout(() => {
+    // Set loading to false once power infrastructure data is loaded (or failed to load)
+    if (powerInfrastructureData !== null) {
       setIsLoading(false);
-    }, 1500);
-    return () => clearTimeout(timer);
-  }, []);
+    }
+  }, [powerInfrastructureData]);
 
   React.useEffect(() => {
     // Update viewport if initial props change

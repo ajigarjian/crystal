@@ -1064,4 +1064,182 @@ export const getPowerPlants = async (
     console.error('Error in getPowerPlants:', error);
     throw error;
   }
+};
+
+export const warmPowerInfrastructure = async () => {
+  const region = functions.region || 'us-central1';
+  const projectId = firebaseConfig.projectId;
+  
+  let baseUrl = '';
+  if (process.env.NODE_ENV === 'development') {
+    baseUrl = `http://localhost:5001/${projectId}/${region}`;
+  } else {
+    baseUrl = `https://${region}-${projectId}.cloudfunctions.net`;
+  }
+  
+  try {
+    await fetch(`${baseUrl}/get_power_infrastructure`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ warming: true })
+    });
+  } catch (error) {
+    console.warn('Failed to warm power infrastructure function:', error);
+  }
+};
+
+// Add comprehensive warming for all functions
+export const warmAllFunctions = async () => {
+  const region = functions.region || 'us-central1';
+  const projectId = firebaseConfig.projectId;
+  
+  let baseUrl = '';
+  if (process.env.NODE_ENV === 'development') {
+    baseUrl = `http://localhost:5001/${projectId}/${region}`;
+  } else {
+    baseUrl = `https://${region}-${projectId}.cloudfunctions.net`;
+  }
+  
+  const warmingPromises = [
+    // Map-related functions (highest priority)
+    fetch(`${baseUrl}/get_power_infrastructure`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ warming: true })
+    }).catch(() => {}),
+    
+    fetch(`${baseUrl}/get_power_generators`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ warming: true })
+    }).catch(() => {}),
+    
+    fetch(`${baseUrl}/get_power_plants`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ warming: true })
+    }).catch(() => {}),
+    
+    fetch(`${baseUrl}/get_dam_locations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ warming: true })
+    }).catch(() => {}),
+    
+    // Dashboard functions
+    fetch(`${baseUrl}/get_dashboard_section_cards_data`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ warming: true })
+    }).catch(() => {}),
+    
+    fetch(`${baseUrl}/get_inflow_timeseries`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ warming: true })
+    }).catch(() => {}),
+    
+    // Search functions
+    fetch(`${baseUrl}/evaluate_search_query`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ warming: true })
+    }).catch(() => {}),
+  ];
+  
+  try {
+    await Promise.allSettled(warmingPromises);
+    console.log('Function warming completed');
+  } catch (error) {
+    console.warn('Some functions failed to warm:', error);
+  }
+};
+
+// Warm functions on app initialization
+export const initializeAppWarmers = async () => {
+  // Warm critical functions immediately
+  warmAllFunctions();
+  
+  // Set up periodic warming (every 10 minutes to keep functions hot)
+  setInterval(warmAllFunctions, 10 * 60 * 1000);
+};
+
+// Implement intelligent caching with TTL and invalidation
+class APICache {
+  private cache = new Map<string, { data: any; timestamp: number; ttl: number }>();
+  
+  set(key: string, data: any, ttl: number = 5 * 60 * 1000) {
+    this.cache.set(key, { data, timestamp: Date.now(), ttl });
+  }
+  
+  get(key: string): any | null {
+    const entry = this.cache.get(key);
+    if (!entry) return null;
+    
+    if (Date.now() - entry.timestamp > entry.ttl) {
+      this.cache.delete(key);
+      return null;
+    }
+    
+    return entry.data;
+  }
+  
+  invalidatePattern(pattern: RegExp) {
+    for (const [key] of this.cache) {
+      if (pattern.test(key)) {
+        this.cache.delete(key);
+      }
+    }
+  }
+}
+
+const apiCache = new APICache();
+
+// Use different TTLs for different data types
+export const getPowerInfrastructureOptimized = async (bbox?: string, zoom?: number) => {
+  const cacheKey = `power_infra_${bbox || 'all'}_${zoom || 5}`;
+  
+  // Try cache first
+  const cached = apiCache.get(cacheKey);
+  if (cached) return cached;
+  
+  // Make API call
+  const data = await getPowerInfrastructure(bbox, zoom);
+  
+  // Cache with appropriate TTL (longer for static data, shorter for dynamic)
+  const ttl = zoom && zoom > 10 ? 2 * 60 * 1000 : 10 * 60 * 1000; // 2min for detailed, 10min for overview
+  apiCache.set(cacheKey, data, ttl);
+  
+  return data;
+};
+
+// Dashboard cards need shorter cache since they're more dynamic
+export const getDashboardSectionCardsOptimized = async (damId: number) => {
+  const cacheKey = `dashboard_cards_${damId}`;
+  
+  const cached = apiCache.get(cacheKey);
+  if (cached) return cached;
+  
+  const data = await getDashboardSectionCards(damId);
+  apiCache.set(cacheKey, data, 30 * 1000); // 30 seconds cache for dashboard
+  
+  return data;
+};
+
+// Deduplicate simultaneous identical requests
+const pendingRequests = new Map<string, Promise<any>>();
+
+export const deduplicatedFetch = async (url: string, options: RequestInit) => {
+  const key = `${url}_${JSON.stringify(options)}`;
+  
+  if (pendingRequests.has(key)) {
+    return pendingRequests.get(key);
+  }
+  
+  const promise = fetch(url, options).finally(() => {
+    pendingRequests.delete(key);
+  });
+  
+  pendingRequests.set(key, promise);
+  return promise;
 }; 
