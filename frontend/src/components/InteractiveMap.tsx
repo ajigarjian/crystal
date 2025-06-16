@@ -693,10 +693,10 @@ export function InteractiveMap({
                     "interpolate",
                     ["linear"],
                     ["zoom"],
-                    8, 9,    // At zoom 8, text size 9
-                    10, 11,  // At zoom 10, text size 11
-                    12, 12,  // At zoom 12, text size 12
-                    16, 14   // At zoom 16, text size 14
+                    8, 12,   // At zoom 8, text size 12 (increased from 9)
+                    10, 14,  // At zoom 10, text size 14 (increased from 11)
+                    12, 16,  // At zoom 12, text size 16 (increased from 12)
+                    16, 18   // At zoom 16, text size 18 (increased from 14)
                   ],
                   "symbol-placement": "line",
                   "text-rotation-alignment": "map",
