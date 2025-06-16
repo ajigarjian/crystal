@@ -179,8 +179,11 @@ export function InteractiveMap({
   const [showOtherTypes, setShowOtherTypes] = React.useState(true);
 
   // Add collapsible section state
-  const [isTransmissionCollapsed, setIsTransmissionCollapsed] = React.useState(false);
-  const [isGenerationCollapsed, setIsGenerationCollapsed] = React.useState(false);
+  const [isTransmissionCollapsed, setIsTransmissionCollapsed] = React.useState(true);
+  const [isGenerationCollapsed, setIsGenerationCollapsed] = React.useState(true);
+
+  // Add hover state for dam markers
+  const [hoveredMarker, setHoveredMarker] = React.useState<MapMarker | null>(null);
 
  // Replace the hardcoded timeout effect with data-driven loading
   React.useEffect(() => {
@@ -643,13 +646,13 @@ export function InteractiveMap({
               />
             )}
 
-            {/* Transmission Line Labels - Show at zoom 8+ */}
+            {/* Transmission Line Labels - Show at zoom 6+ */}
             {showPowerLines && (
               <Layer
                 id="power-line-labels"
                 type="symbol"
                 filter={["==", ["get", "geometry_type"], "ST_LineString"]}
-                minzoom={8}
+                minzoom={6}
                 layout={{
                   "text-field": [
                     "case",
@@ -984,6 +987,8 @@ export function InteractiveMap({
                 e.stopPropagation();
                 handleMarkerClick(marker);
               }}
+              onMouseEnter={() => setHoveredMarker(marker)}
+              onMouseLeave={() => setHoveredMarker(null)}
               style={{
                 border: 'none',
                 background: 'transparent',
@@ -1021,6 +1026,20 @@ export function InteractiveMap({
             </button>
           </Marker>
         ))}
+
+        {/* Dam hover popup */}
+        {hoveredMarker && (
+          <Popup
+            latitude={hoveredMarker.latitude}
+            longitude={hoveredMarker.longitude}
+            closeButton={false}
+            closeOnClick={false}
+            offset={[0, -10]}
+            className="dam-hover-popup"
+          >
+            {hoveredMarker.name || 'Dam'}
+          </Popup>
+        )}
       </ReactMapGL>
       
       {/* Columbia River System Label Overlay with Full Screen Button */}
