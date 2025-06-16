@@ -677,11 +677,11 @@ export const getDashboardSectionCards = async (damId: number): Promise<SectionCa
   }
 };
 
-// Define the expected structure for a single data point from the inflow timeseries
+// Updated interface to include forecast_error data type
 export interface InflowDataPoint {
   ts_utc: string;
   value_num: number;
-  data_type: 'observed' | 'forecast';
+  data_type: 'observed' | 'forecast' | 'forecast_error';
 }
 
 // Define the new time range options type here as well to be used by the function

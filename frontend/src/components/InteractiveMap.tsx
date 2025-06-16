@@ -973,7 +973,7 @@ export function InteractiveMap({
         )}
 
         {/* Existing dam markers */}
-        {showDams && markers.map((marker) => (
+        {showDams && markers && markers.length > 0 && markers.map((marker) => (
           <Marker
             key={`marker-${marker.id}`}
             latitude={marker.latitude}
