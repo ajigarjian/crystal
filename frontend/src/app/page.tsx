@@ -147,6 +147,14 @@ export default function Home() {
   // Animation loop for the trail effect
   const animate = (time: number) => {
     if (previousTimeRef.current !== undefined) {
+      const deltaTime = time - previousTimeRef.current;
+      
+      // Throttle animation to ~30fps instead of 60fps to reduce performance impact
+      if (deltaTime < 33) {
+        requestRef.current = requestAnimationFrame(animate);
+        return;
+      }
+      
       // Update trail positions with physics
       const mousePos = { x: mousePosition.x, y: mousePosition.y };
       
@@ -176,17 +184,21 @@ export default function Home() {
         }
       }
       
-      // Update CSS variables for all trail points
+      // Batch DOM updates to reduce layout thrashing
       if (containerRef.current) {
-        // Main spotlight follows the mouse directly
-        containerRef.current.style.setProperty('--mouse-x', `${mousePos.x}px`);
-        containerRef.current.style.setProperty('--mouse-y', `${mousePos.y}px`);
+        // Use transform instead of individual property updates for better performance
+        const updates: string[] = [];
+        updates.push(`--mouse-x: ${mousePos.x}px`);
+        updates.push(`--mouse-y: ${mousePos.y}px`);
         
         // Trail points
         trailPositions.current.forEach((pos, i) => {
-          containerRef.current?.style.setProperty(`--trail-x-${i}`, `${pos.x}px`);
-          containerRef.current?.style.setProperty(`--trail-y-${i}`, `${pos.y}px`);
+          updates.push(`--trail-x-${i}: ${pos.x}px`);
+          updates.push(`--trail-y-${i}: ${pos.y}px`);
         });
+        
+        // Apply all updates at once
+        containerRef.current.style.cssText += ';' + updates.join(';');
       }
     }
     

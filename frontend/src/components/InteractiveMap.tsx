@@ -4,7 +4,7 @@ import * as React from 'react';
 import ReactMapGL, { Marker, Popup, NavigationControl, ViewStateChangeEvent, Source, Layer } from 'react-map-gl/mapbox';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { MapSkeleton } from "@/components/MapSkeleton";
-import { getPowerInfrastructure, PowerInfrastructureData } from "@/lib/firebase";
+import { getPowerInfrastructure, PowerInfrastructureData, getPowerGenerators, GeneratorData, getPowerPlants, PlantData } from "@/lib/firebase";
 
 interface MapMarker {
   latitude: number;
@@ -46,6 +46,86 @@ const DEFAULT_ZOOM = 5.8;
 // Use monochrome style as base - everything will be grey
 const BASE_STYLE = "mapbox://styles/mapbox/light-v11";
 
+// Add this helper function near the top of the component, after the imports
+const formatVoltageToKV = (voltage: string | undefined): string => {
+  if (!voltage || voltage === 'Unknown' || voltage === '') {
+    return 'Unknown';
+  }
+  
+  // Clean the input string and handle semicolon-separated duplicates
+  let cleanVoltage = voltage.trim();
+  
+  // If there's a semicolon, take only the first value
+  if (cleanVoltage.includes(';')) {
+    cleanVoltage = cleanVoltage.split(';')[0].trim();
+  }
+  
+  // If it already contains 'kV', check if it's properly formatted
+  if (cleanVoltage.toLowerCase().includes('kv')) {
+    // Extract the numeric part before 'kV'
+    const kvMatch = cleanVoltage.match(/^(\d+(?:\.\d+)?)\s*kv$/i);
+    if (kvMatch) {
+      // It's already properly formatted, return as is
+      const value = parseFloat(kvMatch[1]);
+      if (!isNaN(value)) {
+        if (value >= 100) {
+          return `${Math.round(value)} kV`;
+        } else if (value >= 10) {
+          return `${value.toFixed(1)} kV`;
+        } else {
+          return `${value.toFixed(2)} kV`;
+        }
+      }
+    }
+    
+    // If it contains kV but isn't properly formatted, try to extract just the number
+    const numericPart = cleanVoltage.replace(/[^\d.]/g, '');
+    const numericValue = parseFloat(numericPart);
+    
+    if (!isNaN(numericValue)) {
+      // If the number is already reasonable for kV (< 1000), use it directly
+      if (numericValue < 1000) {
+        if (numericValue >= 100) {
+          return `${Math.round(numericValue)} kV`;
+        } else if (numericValue >= 10) {
+          return `${numericValue.toFixed(1)} kV`;
+        } else {
+          return `${numericValue.toFixed(2)} kV`;
+        }
+      } else {
+        // If it's a large number, convert from V to kV
+        const kVValue = numericValue / 1000;
+        if (kVValue >= 100) {
+          return `${Math.round(kVValue)} kV`;
+        } else if (kVValue >= 10) {
+          return `${kVValue.toFixed(1)} kV`;
+        } else {
+          return `${kVValue.toFixed(2)} kV`;
+        }
+      }
+    }
+  }
+  
+  // If it doesn't contain 'kV', assume it's in volts and convert
+  const numericValue = parseFloat(cleanVoltage.replace(/[^\d.]/g, ''));
+  
+  if (isNaN(numericValue)) {
+    return cleanVoltage; // Return original if can't parse
+  }
+  
+  // Convert to kV (divide by 1000)
+  const kVValue = numericValue / 1000;
+  
+  // Format with appropriate decimal places
+  if (kVValue >= 100) {
+    return `${Math.round(kVValue)} kV`;
+  } else if (kVValue >= 10) {
+    return `${kVValue.toFixed(1)} kV`;
+  } else {
+    return `${kVValue.toFixed(2)} kV`;
+  }
+};
+
 export function InteractiveMap({
   initialLatitude = DEFAULT_LATITUDE,
   initialLongitude = DEFAULT_LONGITUDE,
@@ -70,6 +150,10 @@ export function InteractiveMap({
   const [powerInfrastructureData, setPowerInfrastructureData] = React.useState<PowerInfrastructureData | null>(null);
   const [selectedFlowgateGroup, setSelectedFlowgateGroup] = React.useState<string | null>(null);
   const [clickedLineId, setClickedLineId] = React.useState<number | null>(null);
+  const [generatorData, setGeneratorData] = React.useState<GeneratorData | null>(null);
+  const [plantData, setPlantData] = React.useState<PlantData | null>(null);
+  const [showGenerators, setShowGenerators] = React.useState(true);
+  const [showPlants, setShowPlants] = React.useState(true);
   
   // Visibility controls for legend items
   const [showDams, setShowDams] = React.useState(true);
@@ -82,6 +166,17 @@ export function InteractiveMap({
   const [show230kV, setShow230kV] = React.useState(true);
   const [show115kV, setShow115kV] = React.useState(true);
   const [showOtherVoltages, setShowOtherVoltages] = React.useState(true);
+
+  // Add generator type filters
+  const [showNuclear, setShowNuclear] = React.useState(true);
+  const [showSolar, setShowSolar] = React.useState(true);
+  const [showWind, setShowWind] = React.useState(true);
+  const [showHydro, setShowHydro] = React.useState(true);
+  const [showGas, setShowGas] = React.useState(true);
+  const [showCoal, setShowCoal] = React.useState(true);
+  const [showBiomass, setShowBiomass] = React.useState(true);
+  const [showGeothermal, setShowGeothermal] = React.useState(true);
+  const [showOtherTypes, setShowOtherTypes] = React.useState(true);
 
   React.useEffect(() => {
     // Simulate map loading delay
@@ -133,33 +228,137 @@ export function InteractiveMap({
     };
   }, [isFullScreen, handleEscapeKey]);
 
+  // Add this helper function to calculate bounding box
+  const calculateBbox = (viewport: any) => {
+    // Simple approximation - you might want to use a proper library for more accuracy
+    const latDelta = 180 / Math.pow(2, viewport.zoom);
+    const lngDelta = 360 / Math.pow(2, viewport.zoom);
+    
+    const minLng = viewport.longitude - lngDelta;
+    const maxLng = viewport.longitude + lngDelta;
+    const minLat = viewport.latitude - latDelta;
+    const maxLat = viewport.latitude + latDelta;
+    
+    return `${minLng},${minLat},${maxLng},${maxLat}`;
+  };
+
+  // Then modify the loadPowerInfrastructure function:
   React.useEffect(() => {
     async function loadPowerInfrastructure() {
       try {
-        const data = await getPowerInfrastructure();
+        // Calculate current viewport bounds
+        const bbox = calculateBbox(viewport);
+        
+        // Load power infrastructure with bbox
+        const data = await getPowerInfrastructure(bbox);
         console.log("Power infrastructure data received:", data);
-        console.log("Number of features:", data?.features?.length);
         
-        // Debug: Check first few features to see flowgate data
-        if (data?.features?.length > 0) {
-          console.log("First 5 features:", data.features.slice(0, 5));
-          
-          // Debug: Extract all unique flowgates to see what we're working with
-          const allFlowgates = data.features.map(f => f.properties.flowgate);
-          const uniqueFlowgates = Array.from(new Set(allFlowgates));
-          console.log("All flowgates found:", uniqueFlowgates);
-          console.log("Non-null flowgates:", uniqueFlowgates.filter(fg => fg && fg !== 'null'));
+        // Format voltage values in the data
+        if (data && data.features) {
+          const formattedData = {
+            ...data,
+            features: data.features.map(feature => ({
+              ...feature,
+              properties: {
+                ...feature.properties,
+                voltage_formatted: formatVoltageToKV(feature.properties.voltage)
+              }
+            }))
+          };
+          setPowerInfrastructureData(formattedData);
+        } else {
+          setPowerInfrastructureData(data);
         }
-        
-        setPowerInfrastructureData(data);
       } catch (error) {
         console.error("Failed to load power infrastructure data:", error);
         setPowerInfrastructureData(null);
       }
     }
     
-    loadPowerInfrastructure();
-  }, []);
+    // Debounce the loading to avoid too many requests during pan/zoom
+    const timeoutId = setTimeout(loadPowerInfrastructure, 300);
+    return () => clearTimeout(timeoutId);
+  }, [viewport.zoom, viewport.latitude, viewport.longitude]);
+
+  // Add new effect for loading generators
+  React.useEffect(() => {
+    async function loadGenerators() {
+      try {
+        // Calculate current viewport bounds
+        const bbox = calculateBbox(viewport);
+        
+        // Build filter types based on user selections
+        const enabledTypes = [];
+        if (showNuclear) enabledTypes.push('nuclear');
+        if (showSolar) enabledTypes.push('solar', 'photovoltaic');
+        if (showWind) enabledTypes.push('wind');
+        if (showHydro) enabledTypes.push('hydro', 'water');
+        if (showGas) enabledTypes.push('gas', 'natural_gas');
+        if (showCoal) enabledTypes.push('coal');
+        if (showBiomass) enabledTypes.push('biomass', 'biogas');
+        if (showGeothermal) enabledTypes.push('geothermal');
+        if (showOtherTypes) enabledTypes.push('oil', 'diesel', 'waste');
+        
+        const typesFilter = enabledTypes.length > 0 ? enabledTypes.join(',') : undefined;
+        
+        // Load generators with bbox, zoom, and type filters
+        const data = await getPowerGenerators(bbox, viewport.zoom, typesFilter);
+        console.log("Generator data received:", data);
+        setGeneratorData(data);
+      } catch (error) {
+        console.error("Failed to load generator data:", error);
+        setGeneratorData(null);
+      }
+    }
+    
+    // Only load generators if they're enabled and at zoom level 6+
+    if (showGenerators && viewport.zoom >= 6) {
+      const timeoutId = setTimeout(loadGenerators, 300);
+      return () => clearTimeout(timeoutId);
+    } else {
+      setGeneratorData(null);
+    }
+  }, [viewport.zoom, viewport.latitude, viewport.longitude, showGenerators, showNuclear, showSolar, showWind, showHydro, showGas, showCoal, showBiomass, showGeothermal, showOtherTypes]);
+
+  // Add new effect for loading plants
+  React.useEffect(() => {
+    async function loadPlants() {
+      try {
+        // Calculate current viewport bounds
+        const bbox = calculateBbox(viewport);
+        
+        // Build filter types based on user selections
+        const enabledTypes = [];
+        if (showNuclear) enabledTypes.push('nuclear');
+        if (showSolar) enabledTypes.push('solar', 'photovoltaic');
+        if (showWind) enabledTypes.push('wind');
+        if (showHydro) enabledTypes.push('hydro', 'water');
+        if (showGas) enabledTypes.push('gas', 'natural_gas');
+        if (showCoal) enabledTypes.push('coal');
+        if (showBiomass) enabledTypes.push('biomass', 'biogas');
+        if (showGeothermal) enabledTypes.push('geothermal');
+        if (showOtherTypes) enabledTypes.push('oil', 'diesel', 'waste');
+        
+        const typesFilter = enabledTypes.length > 0 ? enabledTypes.join(',') : undefined;
+        
+        // Load plants with bbox, zoom, and type filters
+        const data = await getPowerPlants(bbox, viewport.zoom, typesFilter);
+        console.log("Plant data received:", data);
+        setPlantData(data);
+      } catch (error) {
+        console.error("Failed to load plant data:", error);
+        setPlantData(null);
+      }
+    }
+    
+    // Only load plants if they're enabled and at zoom level 6+
+    if (showPlants && viewport.zoom >= 6) {
+      const timeoutId = setTimeout(loadPlants, 300);
+      return () => clearTimeout(timeoutId);
+    } else {
+      setPlantData(null);
+    }
+  }, [viewport.zoom, viewport.latitude, viewport.longitude, showPlants, showNuclear, showSolar, showWind, showHydro, showGas, showCoal, showBiomass, showGeothermal, showOtherTypes]);
 
   // Add effect to sync external selectedFlowgate prop with internal state
   React.useEffect(() => {
@@ -445,6 +644,118 @@ export function InteractiveMap({
               />
             )}
 
+            {/* Transmission Line Labels - Show at zoom 8+ */}
+            {showPowerLines && (
+              <Layer
+                id="power-line-labels"
+                type="symbol"
+                filter={["==", ["get", "geometry_type"], "ST_LineString"]}
+                minzoom={8}
+                layout={{
+                  "text-field": [
+                    "case",
+                    // If line has both name and voltage, combine them
+                    [
+                      "all",
+                      ["!=", ["get", "name"], null],
+                      ["!=", ["get", "name"], ""],
+                      ["!=", ["get", "voltage_formatted"], null],
+                      ["!=", ["get", "voltage_formatted"], ""]
+                    ],
+                    [
+                      "concat",
+                      ["get", "name"],
+                      " - ",
+                      ["get", "voltage_formatted"]
+                    ],
+                    // If line has name but no voltage, use name only
+                    [
+                      "all",
+                      ["!=", ["get", "name"], null],
+                      ["!=", ["get", "name"], ""]
+                    ],
+                    ["get", "name"],
+                    // If no name but has voltage, show formatted voltage
+                    [
+                      "all",
+                      ["!=", ["get", "voltage_formatted"], null],
+                      ["!=", ["get", "voltage_formatted"], ""]
+                    ],
+                    ["get", "voltage_formatted"],
+                    // If no name or voltage but has operator, show operator
+                    ["!=", ["get", "operator"], null],
+                    ["get", "operator"],
+                    // Default fallback
+                    "Transmission Line"
+                  ],
+                  "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
+                  "text-size": [
+                    "interpolate",
+                    ["linear"],
+                    ["zoom"],
+                    8, 9,    // At zoom 8, text size 9
+                    10, 11,  // At zoom 10, text size 11
+                    12, 12,  // At zoom 12, text size 12
+                    16, 14   // At zoom 16, text size 14
+                  ],
+                  "symbol-placement": "line",
+                  "text-rotation-alignment": "map",
+                  "text-pitch-alignment": "viewport",
+                  "text-max-angle": 30,
+                  "text-padding": 5,
+                  "text-allow-overlap": false,
+                  "text-ignore-placement": false
+                }}
+                paint={{
+                  "text-color": [
+                    "case",
+                    // If this line is selected/highlighted, use cyan
+                    [
+                      "any",
+                      ["==", ["get", "flowgate"], selectedFlowgateGroup || ""],
+                      ["==", ["get", "gid"], clickedLineId || -1]
+                    ],
+                    "#00bcd4",
+                    // Otherwise use dark color for contrast
+                    "#333333"
+                  ],
+                  "text-halo-color": "#ffffff",
+                  "text-halo-width": 2,
+                  "text-opacity": [
+                    "case",
+                    // Hide labels based on voltage visibility settings
+                    [
+                      "all",
+                      ["in", "500", ["to-string", ["get", "voltage"]]],
+                      !show500kV
+                    ],
+                    0, // Hide 500kV labels if disabled
+                    [
+                      "all", 
+                      ["in", "230", ["to-string", ["get", "voltage"]]],
+                      !show230kV
+                    ],
+                    0, // Hide 230kV labels if disabled
+                    [
+                      "all",
+                      ["in", "115", ["to-string", ["get", "voltage"]]],
+                      !show115kV
+                    ],
+                    0, // Hide 115kV labels if disabled
+                    [
+                      "all",
+                      ["!", ["in", "500", ["to-string", ["get", "voltage"]]]],
+                      ["!", ["in", "230", ["to-string", ["get", "voltage"]]]],
+                      ["!", ["in", "115", ["to-string", ["get", "voltage"]]]],
+                      !showOtherVoltages
+                    ],
+                    0, // Hide other voltage labels if disabled
+                    0.9 // Default opacity
+                  ]
+                }}
+              />
+            )}
+
             {/* Power stations and plants (polygons) */}
             {showPowerPlants && (
               <Layer
@@ -491,6 +802,175 @@ export function InteractiveMap({
           </Source>
         )}
         
+        {/* Power Plant Layers */}
+        {plantData && showPlants && (
+          <Source
+            id="power-plants"
+            type="geojson"
+            data={plantData}
+          >
+            {/* Plant polygons/points */}
+            <Layer
+              id="plant-points"
+              type="circle"
+              paint={{
+                "circle-color": [
+                  "case",
+                  // Check plant_source, plant_method, and type fields
+                  ["in", ["downcase", ["coalesce", ["get", "plant_source"], ""]], ["literal", ["nuclear"]]],
+                  "#ff4500", // Nuclear - orange-red
+                  ["in", ["downcase", ["coalesce", ["get", "plant_source"], ""]], ["literal", ["solar", "photovoltaic"]]],
+                  "#ffd700", // Solar - gold
+                  ["in", ["downcase", ["coalesce", ["get", "plant_source"], ""]], ["literal", ["wind"]]],
+                  "#32cd32", // Wind - lime green
+                  ["in", ["downcase", ["coalesce", ["get", "plant_source"], ""]], ["literal", ["hydro", "water"]]],
+                  "#1e90ff", // Hydro - dodger blue
+                  ["in", ["downcase", ["coalesce", ["get", "plant_source"], ""]], ["literal", ["gas", "natural_gas"]]],
+                  "#ff69b4", // Gas - hot pink
+                  ["in", ["downcase", ["coalesce", ["get", "plant_source"], ""]], ["literal", ["coal"]]],
+                  "#8b4513", // Coal - saddle brown
+                  ["in", ["downcase", ["coalesce", ["get", "plant_source"], ""]], ["literal", ["biomass", "biogas"]]],
+                  "#228b22", // Biomass - forest green
+                  ["in", ["downcase", ["coalesce", ["get", "plant_source"], ""]], ["literal", ["geothermal"]]],
+                  "#dc143c", // Geothermal - crimson
+                  // Check plant_method as fallback
+                  ["in", ["downcase", ["coalesce", ["get", "plant_method"], ""]], ["literal", ["nuclear"]]],
+                  "#ff4500",
+                  ["in", ["downcase", ["coalesce", ["get", "plant_method"], ""]], ["literal", ["solar", "photovoltaic"]]],
+                  "#ffd700",
+                  ["in", ["downcase", ["coalesce", ["get", "plant_method"], ""]], ["literal", ["wind"]]],
+                  "#32cd32",
+                  ["in", ["downcase", ["coalesce", ["get", "plant_method"], ""]], ["literal", ["hydro", "water"]]],
+                  "#1e90ff",
+                  ["in", ["downcase", ["coalesce", ["get", "plant_method"], ""]], ["literal", ["gas", "natural_gas"]]],
+                  "#ff69b4",
+                  ["in", ["downcase", ["coalesce", ["get", "plant_method"], ""]], ["literal", ["coal"]]],
+                  "#8b4513",
+                  ["in", ["downcase", ["coalesce", ["get", "plant_method"], ""]], ["literal", ["biomass", "biogas"]]],
+                  "#228b22",
+                  ["in", ["downcase", ["coalesce", ["get", "plant_method"], ""]], ["literal", ["geothermal"]]],
+                  "#dc143c",
+                  // Check type as final fallback
+                  ["in", ["downcase", ["coalesce", ["get", "type"], ""]], ["literal", ["nuclear"]]],
+                  "#ff4500",
+                  ["in", ["downcase", ["coalesce", ["get", "type"], ""]], ["literal", ["solar", "photovoltaic"]]],
+                  "#ffd700",
+                  ["in", ["downcase", ["coalesce", ["get", "type"], ""]], ["literal", ["wind"]]],
+                  "#32cd32",
+                  ["in", ["downcase", ["coalesce", ["get", "type"], ""]], ["literal", ["hydro", "water"]]],
+                  "#1e90ff",
+                  ["in", ["downcase", ["coalesce", ["get", "type"], ""]], ["literal", ["gas", "natural_gas"]]],
+                  "#ff69b4",
+                  ["in", ["downcase", ["coalesce", ["get", "type"], ""]], ["literal", ["coal"]]],
+                  "#8b4513",
+                  ["in", ["downcase", ["coalesce", ["get", "type"], ""]], ["literal", ["biomass", "biogas"]]],
+                  "#228b22",
+                  ["in", ["downcase", ["coalesce", ["get", "type"], ""]], ["literal", ["geothermal"]]],
+                  "#dc143c",
+                  "#9370db" // Other - medium purple (default)
+                ],
+                "circle-radius": [
+                  "interpolate",
+                  ["linear"],
+                  ["zoom"],
+                  6, 4,
+                  10, 8,
+                  14, 12
+                ],
+                "circle-opacity": 0.7,
+                "circle-stroke-color": "#ffffff",
+                "circle-stroke-width": 2
+              }}
+            />
+            
+            {/* Plant labels at high zoom */}
+            <Layer
+              id="plant-labels"
+              type="symbol"
+              minzoom={10}
+              layout={{
+                "text-field": ["get", "name"],
+                "text-font": ["Open Sans Bold"],
+                "text-size": 11,
+                "text-offset": [0, 2],
+                "text-anchor": "top"
+              }}
+              paint={{
+                "text-color": "#333333",
+                "text-halo-color": "#ffffff",
+                "text-halo-width": 2
+              }}
+            />
+          </Source>
+        )}
+        
+        {/* Power Generator Layers */}
+        {generatorData && showGenerators && (
+          <Source
+            id="power-generators"
+            type="geojson"
+            data={generatorData}
+          >
+            {/* Generator points */}
+            <Layer
+              id="generator-points"
+              type="circle"
+              paint={{
+                "circle-color": [
+                  "case",
+                  // Use fuel_type field (which combines generator_source and generator_type)
+                  ["in", ["downcase", ["coalesce", ["get", "fuel_type"], ""]], ["literal", ["nuclear"]]],
+                  "#ff4500", // Nuclear - orange-red
+                  ["in", ["downcase", ["coalesce", ["get", "fuel_type"], ""]], ["literal", ["solar", "photovoltaic"]]],
+                  "#ffd700", // Solar - gold
+                  ["in", ["downcase", ["coalesce", ["get", "fuel_type"], ""]], ["literal", ["wind"]]],
+                  "#32cd32", // Wind - lime green
+                  ["in", ["downcase", ["coalesce", ["get", "fuel_type"], ""]], ["literal", ["hydro", "water"]]],
+                  "#1e90ff", // Hydro - dodger blue
+                  ["in", ["downcase", ["coalesce", ["get", "fuel_type"], ""]], ["literal", ["gas", "natural_gas"]]],
+                  "#ff69b4", // Gas - hot pink
+                  ["in", ["downcase", ["coalesce", ["get", "fuel_type"], ""]], ["literal", ["coal"]]],
+                  "#8b4513", // Coal - saddle brown
+                  ["in", ["downcase", ["coalesce", ["get", "fuel_type"], ""]], ["literal", ["biomass", "biogas"]]],
+                  "#228b22", // Biomass - forest green
+                  ["in", ["downcase", ["coalesce", ["get", "fuel_type"], ""]], ["literal", ["geothermal"]]],
+                  "#dc143c", // Geothermal - crimson
+                  "#9370db" // Other - medium purple (default)
+                ],
+                "circle-radius": [
+                  "interpolate",
+                  ["linear"],
+                  ["zoom"],
+                  8, 2,
+                  12, 4,
+                  16, 6
+                ],
+                "circle-opacity": 0.8,
+                "circle-stroke-color": "#ffffff",
+                "circle-stroke-width": 1
+              }}
+            />
+            
+            {/* Generator labels at very high zoom */}
+            <Layer
+              id="generator-labels"
+              type="symbol"
+              minzoom={14}
+              layout={{
+                "text-field": ["coalesce", ["get", "name"], ["get", "plant_name"]],
+                "text-font": ["Open Sans Regular"],
+                "text-size": 9,
+                "text-offset": [0, 1.2],
+                "text-anchor": "top"
+              }}
+              paint={{
+                "text-color": "#333333",
+                "text-halo-color": "#ffffff",
+                "text-halo-width": 1
+              }}
+            />
+          </Source>
+        )}
 
         {/* Existing dam markers */}
         {showDams && markers.map((marker) => (
@@ -700,6 +1180,137 @@ export function InteractiveMap({
                 </div>
               </div>
             </>
+          )}
+
+          {/* Power Generation Controls */}
+          {(viewport.zoom >= 6 || showPlants || showGenerators) && (
+            <div className="border-t pt-2">
+              <div className="font-medium text-gray-800 mb-1 text-xs">Power Generation</div>
+              <div className="space-y-1">
+                {/* Plants control - show at zoom 6+ */}
+                {viewport.zoom >= 6 && (
+                  <label className="flex items-center space-x-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={showPlants}
+                      onChange={(e) => setShowPlants(e.target.checked)}
+                      className="w-3 h-3"
+                    />
+                    <span className="text-gray-600 text-xs">Power Plants</span>
+                  </label>
+                )}
+                
+                {/* Generators control - show at zoom 6+ */}
+                {viewport.zoom >= 6 && (
+                  <label className="flex items-center space-x-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={showGenerators}
+                      onChange={(e) => setShowGenerators(e.target.checked)}
+                      className="w-3 h-3"
+                    />
+                    <span className="text-gray-600 text-xs">Generators</span>
+                  </label>
+                )}
+                
+                {/* Type filters - show when either plants or generators are enabled */}
+                {(showPlants || showGenerators) && (
+                  <div className="ml-5 space-y-1">
+                    <div className="text-xs text-gray-500 mb-1">Filter by Type:</div>
+                    <label className="flex items-center space-x-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={showNuclear}
+                        onChange={(e) => setShowNuclear(e.target.checked)}
+                        className="w-3 h-3"
+                      />
+                      <div className="w-2 h-2 rounded-full bg-orange-500"></div>
+                      <span className="text-gray-600 text-xs">Nuclear</span>
+                    </label>
+                    <label className="flex items-center space-x-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={showSolar}
+                        onChange={(e) => setShowSolar(e.target.checked)}
+                        className="w-3 h-3"
+                      />
+                      <div className="w-2 h-2 rounded-full bg-yellow-500"></div>
+                      <span className="text-gray-600 text-xs">Solar</span>
+                    </label>
+                    <label className="flex items-center space-x-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={showWind}
+                        onChange={(e) => setShowWind(e.target.checked)}
+                        className="w-3 h-3"
+                      />
+                      <div className="w-2 h-2 rounded-full bg-green-400"></div>
+                      <span className="text-gray-600 text-xs">Wind</span>
+                    </label>
+                    <label className="flex items-center space-x-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={showHydro}
+                        onChange={(e) => setShowHydro(e.target.checked)}
+                        className="w-3 h-3"
+                      />
+                      <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+                      <span className="text-gray-600 text-xs">Hydro</span>
+                    </label>
+                    <label className="flex items-center space-x-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={showGas}
+                        onChange={(e) => setShowGas(e.target.checked)}
+                        className="w-3 h-3"
+                      />
+                      <div className="w-2 h-2 rounded-full bg-pink-500"></div>
+                      <span className="text-gray-600 text-xs">Natural Gas</span>
+                    </label>
+                    <label className="flex items-center space-x-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={showCoal}
+                        onChange={(e) => setShowCoal(e.target.checked)}
+                        className="w-3 h-3"
+                      />
+                      <div className="w-2 h-2 rounded-full bg-amber-800"></div>
+                      <span className="text-gray-600 text-xs">Coal</span>
+                    </label>
+                    <label className="flex items-center space-x-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={showBiomass}
+                        onChange={(e) => setShowBiomass(e.target.checked)}
+                        className="w-3 h-3"
+                      />
+                      <div className="w-2 h-2 rounded-full bg-green-600"></div>
+                      <span className="text-gray-600 text-xs">Biomass</span>
+                    </label>
+                    <label className="flex items-center space-x-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={showGeothermal}
+                        onChange={(e) => setShowGeothermal(e.target.checked)}
+                        className="w-3 h-3"
+                      />
+                      <div className="w-2 h-2 rounded-full bg-red-600"></div>
+                      <span className="text-gray-600 text-xs">Geothermal</span>
+                    </label>
+                    <label className="flex items-center space-x-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={showOtherTypes}
+                        onChange={(e) => setShowOtherTypes(e.target.checked)}
+                        className="w-3 h-3"
+                      />
+                      <div className="w-2 h-2 rounded-full bg-purple-500"></div>
+                      <span className="text-gray-600 text-xs">Other</span>
+                    </label>
+                  </div>
+                )}
+              </div>
+            </div>
           )}
         </div>
       </div>
