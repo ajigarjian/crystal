@@ -847,4 +847,221 @@ export const getPowerInfrastructure = async (bbox?: string): Promise<PowerInfras
     console.error('Error in getPowerInfrastructure:', error);
     throw error;
   }
+};
+
+// Define the expected structure for a single TTC data point
+export interface TTCDataPoint {
+  ttc_id: number;
+  flowgate_id: number;
+  metric_id: number;
+  source_id: number;
+  datetime_utc: string;
+  hour_ending: number;
+  value_mw: number;
+  quality: 'F' | 'R'; // Forecast or Real
+  ingestion_timestamp: string;
+}
+
+// Export a helper for calling the TTC flowgate data function
+export const getTTCFlowgateData = async (flowgate: string, date: string): Promise<TTCDataPoint[]> => {
+  const region = functions.region || 'us-central1';
+  const projectId = firebaseConfig.projectId;
+  let baseUrl = '';
+
+  if (process.env.NODE_ENV === 'development') {
+    baseUrl = `http://localhost:5001/${projectId}/${region}`;
+  } else {
+    baseUrl = `https://${region}-${projectId}.cloudfunctions.net`;
+  }
+
+  // The name of the new Python Cloud Function
+  const url = `${baseUrl}/get_ttc_flowgate_data?flowgate=${encodeURIComponent(flowgate)}&date=${date}`;
+
+  try {
+    // This is a GET request to fetch data
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      let errorData = { error: "Failed to fetch TTC flowgate data" };
+      try {
+        errorData = await response.json();
+      } catch (e) {
+        console.error("Failed to parse error response from getTTCFlowgateData: ", e);
+      }
+      console.error('Error fetching TTC flowgate data:', response.status, errorData);
+      throw new Error(errorData.error || `Failed to fetch TTC flowgate data. Status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data as TTCDataPoint[];
+  } catch (error: any) {
+    console.error('Error calling getTTCFlowgateData function:', error);
+    return []; 
+  }
+};
+
+// Add this interface near your other interfaces
+export interface GeneratorData {
+  type: "FeatureCollection";
+  features: Array<{
+    type: "Feature";
+    id: number;
+    geometry: any;
+    properties: {
+      id: number;
+      name: string;
+      operator?: string;
+      fuel_type?: string;
+      technology?: string;
+      capacity_mw?: string;
+      status?: string;
+      commissioning_date?: string;
+      plant_name?: string;
+      geometry_type: string;
+    };
+  }>;
+}
+
+/**
+ * Fetch power generator data as GeoJSON with zoom-based progressive disclosure
+ * @param bbox Optional bounding box in format "minLng,minLat,maxLng,maxLat"
+ * @param zoom Zoom level for progressive disclosure
+ * @param types Optional comma-separated list of generator types to filter
+ */
+export const getPowerGenerators = async (
+  bbox?: string, 
+  zoom?: number, 
+  types?: string
+): Promise<GeneratorData> => {
+  const region = functions.region || 'us-central1';
+  const projectId = firebaseConfig.projectId;
+  
+  let baseUrl = '';
+  if (process.env.NODE_ENV === 'development') {
+    baseUrl = `http://localhost:5001/${projectId}/${region}`;
+  } else {
+    baseUrl = `https://${region}-${projectId}.cloudfunctions.net`;
+  }
+  
+  let url = `${baseUrl}/get_power_generators`;
+  const params = new URLSearchParams();
+  
+  if (bbox) params.append('bbox', bbox);
+  if (zoom !== undefined) params.append('zoom', zoom.toString());
+  if (types) params.append('types', types);
+  
+  if (params.toString()) {
+    url += `?${params.toString()}`;
+  }
+  
+  console.log("Calling getPowerGenerators API at URL:", url);
+  
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    console.log("Generators API response status:", response.status);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Error fetching power generators:', errorText);
+      throw new Error(`Failed to fetch power generators: ${response.status}`);
+    }
+
+    const data = await response.json();
+    console.log("Raw generators API response data:", data);
+    return data;
+  } catch (error) {
+    console.error('Error in getPowerGenerators:', error);
+    throw error;
+  }
+};
+
+export interface PowerPlantsData {
+  type: "FeatureCollection";
+  features: Array<{
+    type: "Feature";
+    id: number;
+    geometry: any;
+    properties: {
+      id: number;
+      name: string;
+      operator?: string;
+      fuel_type?: string;
+      technology?: string;
+      capacity_mw?: string;
+      status?: string;
+      commissioning_date?: string;
+      plant_name?: string;
+      geometry_type: string;
+    };
+  }>;
+}
+
+/**
+ * Fetch power plants data as GeoJSON with zoom-based progressive disclosure
+ * @param bbox Optional bounding box in format "minLng,minLat,maxLng,maxLat"
+ * @param zoom Zoom level for progressive disclosure
+ * @param types Optional comma-separated list of plant types to filter
+ */
+export const getPowerPlants = async (
+  bbox?: string, 
+  zoom?: number, 
+  types?: string
+): Promise<PowerPlantsData> => {
+  const region = functions.region || 'us-central1';
+  const projectId = firebaseConfig.projectId;
+  
+  let baseUrl = '';
+  if (process.env.NODE_ENV === 'development') {
+    baseUrl = `http://localhost:5001/${projectId}/${region}`;
+  } else {
+    baseUrl = `https://${region}-${projectId}.cloudfunctions.net`;
+  }
+  
+  let url = `${baseUrl}/get_power_plants`;
+  const params = new URLSearchParams();
+  
+  if (bbox) params.append('bbox', bbox);
+  if (zoom !== undefined) params.append('zoom', zoom.toString());
+  if (types) params.append('types', types);
+  
+  if (params.toString()) {
+    url += `?${params.toString()}`;
+  }
+  
+  console.log("Calling getPowerPlants API at URL:", url);
+  
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    console.log("Plants API response status:", response.status);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Error fetching power plants:', errorText);
+      throw new Error(`Failed to fetch power plants: ${response.status}`);
+    }
+
+    const data = await response.json();
+    console.log("Raw plants API response data:", data);
+    return data;
+  } catch (error) {
+    console.error('Error in getPowerPlants:', error);
+    throw error;
+  }
 }; 

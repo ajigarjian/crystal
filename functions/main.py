@@ -7,9 +7,6 @@ import math # Add import for math
 # Set the DJANGO_SETTINGS_MODULE environment variable
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "factchecker.settings")
 
-# Initialize Django
-django.setup()
-
 from firebase_functions import https_fn, options
 from firebase_admin import initialize_app, firestore
 import requests
@@ -20,10 +17,8 @@ import time
 import json
 import traceback
 import numpy as np
-import concurrent.futures
 from threading import Lock
 import random
-import django
 
 from dotenv import load_dotenv
 
@@ -55,8 +50,7 @@ except Exception as django_setup_error:
                 logger.info("Attempting to use fallback database configuration")
                 settings.DATABASES = settings.DB_FALLBACK
                 
-                # Retry Django setup with fallback configuration
-                django.setup()
+                # Note: Don't call django.setup() again here - it's already been called
         except Exception as fallback_error:
             logger.error(f"Fallback configuration also failed: {fallback_error}")
             raise
@@ -106,6 +100,168 @@ METRICS_CONFIG = {
     memory=options.MemoryOption.MB_512,
     timeout_sec=30
 )
+def get_ttc_flowgate_data(request: https_fn.Request) -> https_fn.Response:
+    """
+    HTTP Cloud Function to fetch TTC flowgate data for a specific flowgate and date.
+    Accepts 'flowgate' and 'date' query parameters.
+    """
+    logger.info("Received request for TTC flowgate data.")
+
+    # Handle warming requests
+    if request.method == 'POST':
+        try:
+            request_json = request.get_json(silent=True)
+            if request_json and request_json.get('warming'):
+                logger.info("Warming request received for get_ttc_flowgate_data.")
+                return https_fn.Response(
+                    json.dumps({"status": "warmed"}),
+                    status=200,
+                    headers={"Content-Type": "application/json"}
+                )
+        except Exception:
+            pass
+
+    # Parse query params
+    flowgate_param = request.args.get('flowgate', '')
+    date_param = request.args.get('date', '')
+    
+    if not flowgate_param:
+        logger.warning("Missing flowgate parameter.")
+        return https_fn.Response(
+            json.dumps({"error": "Flowgate parameter is required"}),
+            status=400,
+            headers={"Content-Type": "application/json"}
+        )
+    
+    if not date_param:
+        logger.warning("Missing date parameter.")
+        return https_fn.Response(
+            json.dumps({"error": "Date parameter is required (format: YYYY-MM-DD)"}),
+            status=400,
+            headers={"Content-Type": "application/json"}
+        )
+    
+    logger.info(f"Processing TTC request for flowgate: {flowgate_param}, date: {date_param}")
+
+    try:
+        pool = get_connection_pool()
+        conn = pool.getconn()
+        
+        try:
+            with conn.cursor() as cursor:
+                # First, get the flowgate_id from the flowgate_code
+                flowgate_lookup_sql = """
+                    SELECT flowgate_id FROM dim_flowgate 
+                    WHERE flowgate_code = %s AND is_active = true;
+                """
+                cursor.execute(flowgate_lookup_sql, (flowgate_param,))
+                flowgate_row = cursor.fetchone()
+                
+                if not flowgate_row:
+                    logger.warning(f"Flowgate not found: {flowgate_param}")
+                    return https_fn.Response(
+                        json.dumps({"error": f"Flowgate '{flowgate_param}' not found"}),
+                        status=404,
+                        headers={"Content-Type": "application/json"}
+                    )
+                
+                flowgate_id = flowgate_row[0]
+                logger.info(f"Found flowgate_id: {flowgate_id} for flowgate: {flowgate_param}")
+                
+                # Query TTC data for the specific flowgate and date
+                # We'll get all hours for the specified date
+                query_sql = """
+                    SELECT ttc_id, flowgate_id, metric_id, source_id, datetime_utc, 
+                           hour_ending, value_mw, quality, ingestion_timestamp
+                    FROM fact_ttc_hourly
+                    WHERE flowgate_id = %s 
+                      AND DATE(datetime_utc) = %s
+                    ORDER BY hour_ending ASC;
+                """
+                
+                cursor.execute(query_sql, (flowgate_id, date_param))
+                rows = cursor.fetchall()
+                
+                result = []
+                for row in rows:
+                    ttc_id, flowgate_id_val, metric_id, source_id, datetime_utc, hour_ending, value_mw, quality, ingestion_timestamp = row
+                    
+                    # Format datetime to ISO string
+                    datetime_utc_str = datetime_utc.strftime('%Y-%m-%dT%H:%M:%SZ') if datetime_utc else None
+                    ingestion_timestamp_str = ingestion_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%fZ') if ingestion_timestamp else None
+                    
+                    # Convert value_mw to float if it's a Decimal
+                    value_mw_float = None
+                    if value_mw is not None:
+                        if isinstance(value_mw, decimal.Decimal):
+                            value_mw_float = float(value_mw)
+                        elif isinstance(value_mw, (int, float)):
+                            value_mw_float = float(value_mw)
+                        else:
+                            try:
+                                value_mw_float = float(value_mw)
+                            except (ValueError, TypeError):
+                                logger.warning(f"Could not convert value_mw {value_mw} to float for ttc_id {ttc_id}")
+                                continue
+                    
+                    if value_mw_float is not None:
+                        result.append({
+                            "ttc_id": ttc_id,
+                            "flowgate_id": flowgate_id_val,
+                            "metric_id": metric_id,
+                            "source_id": source_id,
+                            "datetime_utc": datetime_utc_str,
+                            "hour_ending": hour_ending,
+                            "value_mw": value_mw_float,
+                            "quality": quality,
+                            "ingestion_timestamp": ingestion_timestamp_str
+                        })
+                
+                logger.info(f"Returning {len(result)} TTC data points for flowgate {flowgate_param} on {date_param}")
+                
+                return https_fn.Response(
+                    json.dumps(result),
+                    status=200,
+                    headers={"Content-Type": "application/json"}
+                )
+                
+        except Exception as db_error:
+            logger.error(f"Database error in get_ttc_flowgate_data: {db_error}")
+            logger.error(traceback.format_exc())
+            if conn:
+                conn.rollback()
+            return https_fn.Response(
+                json.dumps({"error": "A database error occurred.", "details": str(db_error)}),
+                status=500,
+                headers={"Content-Type": "application/json"}
+            )
+        finally:
+            if conn:
+                pool.putconn(conn)
+                
+    except Exception as e:
+        logger.error(f"General error in get_ttc_flowgate_data: {e}")
+        logger.error(traceback.format_exc())
+        return https_fn.Response(
+            json.dumps({"error": "An internal server error occurred.", "details": str(e)}),
+            status=500,
+            headers={"Content-Type": "application/json"}
+        )
+
+@https_fn.on_request(
+    cors=options.CorsOptions(
+        cors_origins=[
+        "https://crystal-2f87e.web.app",
+        "https://askcrystal.info",
+        "https://www.askcrystal.info",
+        "http://localhost:3000",
+        "http://localhost:5173",
+        ],
+        cors_methods=["get", "post", "options"]
+    ),
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=30
+)
 def get_power_infrastructure(request: https_fn.Request) -> https_fn.Response:
     """
     HTTP Cloud Function to fetch BPA power infrastructure data as GeoJSON.
@@ -137,8 +293,6 @@ def get_power_infrastructure(request: https_fn.Request) -> https_fn.Response:
         try:
             with conn.cursor() as cursor:
                 # Base query to get power infrastructure as GeoJSON with flowgate data
-                # Use DISTINCT ON to ensure only one row per power infrastructure item
-                # Priority: prefer non-NULL flowgate values over NULL ones
                 base_query = """
                     SELECT jsonb_build_object(
                         'type', 'FeatureCollection',
@@ -163,10 +317,10 @@ def get_power_infrastructure(request: https_fn.Request) -> https_fn.Response:
                         FROM power_infra pi
                         LEFT JOIN power_flow_gates pfg ON pi.name = pfg.openinframaplinename
                         WHERE pi.geom IS NOT NULL
-                        ORDER BY pi.gid, (pfg.flowgate IS NOT NULL) DESC, pfg.flowgate
                 """
                 
                 # Add spatial filter if bbox is provided
+                params = []
                 if bbox_param:
                     try:
                         bbox_parts = [float(x.strip()) for x in bbox_param.split(',')]
@@ -174,30 +328,28 @@ def get_power_infrastructure(request: https_fn.Request) -> https_fn.Response:
                             min_lng, min_lat, max_lng, max_lat = bbox_parts
                             base_query += """
                                 AND ST_Intersects(
-                                    geom, 
+                                    pi.geom, 
                                     ST_MakeEnvelope(%s, %s, %s, %s, 4326)
                                 )
                             """
-                            cursor.execute(base_query + ") AS features;", (min_lng, min_lat, max_lng, max_lat))
+                            params.extend([min_lng, min_lat, max_lng, max_lat])
                         else:
                             logger.warning(f"Invalid bbox format: {bbox_param}")
-                            cursor.execute(base_query + ") AS features;")
                     except (ValueError, TypeError) as e:
                         logger.warning(f"Error parsing bbox {bbox_param}: {e}")
-                        cursor.execute(base_query + ") AS features;")
-                else:
-                    cursor.execute(base_query + ") AS features;")
                 
+                # Add ORDER BY and close the subquery
+                base_query += """
+                        ORDER BY pi.gid, (pfg.flowgate IS NOT NULL) DESC, pfg.flowgate
+                    ) AS features;
+                """
+                
+                cursor.execute(base_query, params)
                 result = cursor.fetchone()
                 geojson_data = result[0] if result and result[0] else {
                     "type": "FeatureCollection", 
                     "features": []
                 }
-                
-                # Debug: Log flowgate data
-                if geojson_data and "features" in geojson_data:
-                    flowgates = [f["properties"].get("flowgate") for f in geojson_data["features"] if f["properties"].get("flowgate")]
-                    logger.info(f"Found {len(flowgates)} features with flowgates: {set(flowgates)}")
                 
                 # Debug: Log information about flowgates
                 if geojson_data and geojson_data.get("features"):
@@ -455,7 +607,7 @@ def evaluate_search_query(request):
         "http://localhost:3000",
         "http://localhost:5173",
         ],
-        cors_methods=["get", "post"]
+        cors_methods=["get", "post", "options"]
     ),
     memory=options.MemoryOption.GB_1,
     timeout_sec=180 # Let's increase timeout here to 3 mins.
@@ -1206,16 +1358,16 @@ def submit_feedback(request):
 @https_fn.on_request(
     cors=options.CorsOptions(
         cors_origins=[
-            "https://crystal-2f87e.web.app",
-            "https://askcrystal.info",
-            "https://www.askcrystal.info",
-            "http://localhost:3000",
-            "http://localhost:5173",
+        "https://crystal-2f87e.web.app",
+        "https://askcrystal.info",
+        "https://www.askcrystal.info",
+        "http://localhost:3000",
+        "http://localhost:5173",
         ],
         cors_methods=["get", "post", "options"]
     ),
-    timeout_sec=30,
-    memory=options.MemoryOption.MB_512
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=30
 )
 def get_inflow_timeseries(request: https_fn.Request) -> https_fn.Response:
     """
@@ -1531,19 +1683,17 @@ def get_dashboard_section_cards_data(request: https_fn.Request) -> https_fn.Resp
 @https_fn.on_request(
     cors=options.CorsOptions(
         cors_origins=[
-            "https://crystal-2f87e.web.app",
-            "https://askcrystal.info",
-            "https://www.askcrystal.info",
-            "http://localhost:3000",
-            "http://localhost:5173",
-            # Add any other origins if needed, e.g., for Cloud Scheduler if invoked via authenticated HTTP
+        "https://crystal-2f87e.web.app",
+        "https://askcrystal.info",
+        "https://www.askcrystal.info",
+        "http://localhost:3000",
+        "http://localhost:5173",
         ],
-        cors_methods=["get", "post", "options"] # Allow POST if scheduler uses it
+        cors_methods=["get", "post", "options"]
     ),
-    timeout_sec=540,  # 9 minutes, as per ChatGPT's gcloud example
-    memory=options.MemoryOption.GB_1 # 1GiB, as per ChatGPT's gcloud example
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=300
 )
-
 def generate_inflow_forecast_v0(request: https_fn.Request) -> https_fn.Response:
     """
     HTTP-triggered Cloud Function to generate a deterministic inflow forecast.
@@ -1677,6 +1827,398 @@ def generate_inflow_forecast_v0(request: https_fn.Request) -> https_fn.Response:
         # Consider if traceback.format_exc() is too verbose for client
         return https_fn.Response(
             json.dumps({"status": "error", "message": "An internal server error occurred.", "details": str(e)}),
+            status=500,
+            headers={"Content-Type": "application/json"}
+        )
+
+@https_fn.on_request(
+    cors=options.CorsOptions(
+        cors_origins=[
+        "https://crystal-2f87e.web.app",
+        "https://askcrystal.info",
+        "https://www.askcrystal.info",
+        "http://localhost:3000",
+        "http://localhost:5173",
+        ],
+        cors_methods=["get", "post", "options"]
+    ),
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=30
+)
+def get_power_generators(request: https_fn.Request) -> https_fn.Response:
+    """
+    HTTP Cloud Function to fetch power generator data as GeoJSON.
+    Supports zoom-based progressive disclosure and bbox spatial filtering.
+    """
+    logger.info("Received request for power generators data.")
+
+    # Handle warming requests
+    if request.method == 'POST':
+        try:
+            request_json = request.get_json(silent=True)
+            if request_json and request_json.get('warming'):
+                logger.info("Warming request received for get_power_generators.")
+                return https_fn.Response(
+                    json.dumps({"status": "warmed"}),
+                    status=200,
+                    headers={"Content-Type": "application/json"}
+                )
+        except Exception:
+            pass
+
+    # Parse parameters
+    bbox_param = request.args.get('bbox', None)  # "minLng,minLat,maxLng,maxLat"
+    zoom_param = request.args.get('zoom', '5')
+    generator_types = request.args.get('types', None)  # Comma-separated list
+    
+    try:
+        zoom_level = float(zoom_param)
+    except (ValueError, TypeError):
+        zoom_level = 5.0
+        logger.warning(f"Invalid zoom parameter: {zoom_param}, defaulting to 5")
+    
+    logger.info(f"Processing generators request: zoom={zoom_level}, bbox={bbox_param}, types={generator_types}")
+    
+    try:
+        pool = get_connection_pool()
+        conn = pool.getconn()
+        
+        try:
+            with conn.cursor() as cursor:
+                # Progressive disclosure based on zoom level
+                if zoom_level < 7:
+                    # Don't show generators at low zoom levels to avoid congestion
+                    return https_fn.Response(
+                        json.dumps({"type": "FeatureCollection", "features": []}),
+                        status=200,
+                        headers={
+                            "Content-Type": "application/json",
+                            "Cache-Control": "public, max-age=1800"
+                        }
+                    )
+                elif zoom_level < 8:
+                    # Medium zoom - show larger generators first
+                    capacity_filter = ""
+                    limit_clause = "LIMIT 200"
+                elif zoom_level < 10:
+                    # Closer zoom - show more generators
+                    capacity_filter = ""
+                    limit_clause = "LIMIT 500"
+                else:
+                    # Very close zoom - show all generators
+                    capacity_filter = ""
+                    limit_clause = "LIMIT 1000"
+                
+                # Initialize params list
+                params = []
+                
+                # Base query using your actual table schema
+                base_query = """
+                    SELECT jsonb_build_object(
+                        'type', 'FeatureCollection',
+                        'features', jsonb_agg(feature)
+                    )
+                    FROM (
+                        SELECT jsonb_build_object(
+                            'type', 'Feature',
+                            'id', g.generator_id,
+                            'geometry', ST_AsGeoJSON(COALESCE(g.geom, p.geom))::jsonb,
+                            'properties', jsonb_build_object(
+                                'id', g.generator_id,
+                                'name', COALESCE(p.name, 'Unnamed Generator'),
+                                'plant_name', p.name,
+                                'operator', COALESCE(g.operator, p.operator),
+                                'fuel_type', COALESCE(g.generator_source, g.generator_type),
+                                'generator_method', g.generator_method,
+                                'power', COALESCE(g.power, p.power),
+                                'size', g.size,
+                                'manufacturer', g.manufacturer,
+                                'model', g.model,
+                                'start_date', COALESCE(g.start_date, p.start_date),
+                                'output_electricity', COALESCE(g.output_electricity, p.output_electricity),
+                                'geometry_type', ST_GeometryType(COALESCE(g.geom, p.geom))
+                            )
+                        ) AS feature
+                        FROM dim_generators g
+                        LEFT JOIN dim_plants p ON g.plant_id = p.plant_id
+                        WHERE COALESCE(g.geom, p.geom) IS NOT NULL
+                """
+                
+                # Add capacity filter if needed
+                base_query += capacity_filter
+                
+                # Add generator type filter if specified
+                if generator_types:
+                    type_list = [t.strip().lower() for t in generator_types.split(',')]
+                    type_conditions = []
+                    for generator_type in type_list:
+                        type_conditions.append("(LOWER(COALESCE(g.generator_source, '')) LIKE %s OR LOWER(COALESCE(g.generator_type, '')) LIKE %s)")
+                        params.extend([f'%{generator_type}%', f'%{generator_type}%'])
+                    if type_conditions:
+                        base_query += f" AND ({' OR '.join(type_conditions)})"
+                
+                # Add spatial filter if bbox is provided
+                if bbox_param:
+                    try:
+                        bbox_parts = [float(x.strip()) for x in bbox_param.split(',')]
+                        if len(bbox_parts) == 4:
+                            min_lng, min_lat, max_lng, max_lat = bbox_parts
+                            base_query += """
+                                AND ST_Intersects(
+                                    COALESCE(g.geom, p.geom), 
+                                    ST_MakeEnvelope(%s, %s, %s, %s, 4326)
+                                )
+                            """
+                            params.extend([min_lng, min_lat, max_lng, max_lat])
+                        else:
+                            logger.warning(f"Invalid bbox format: {bbox_param}")
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"Error parsing bbox {bbox_param}: {e}")
+                
+                # Add ordering and limit
+                base_query += f"""
+                        ORDER BY g.generator_id
+                        {limit_clause}
+                    ) AS features;
+                """
+                
+                cursor.execute(base_query, params)
+                result = cursor.fetchone()
+                geojson_data = result[0] if result and result[0] else {
+                    "type": "FeatureCollection", 
+                    "features": []
+                }
+                
+                # Log statistics
+                if geojson_data and geojson_data.get("features"):
+                    total_features = len(geojson_data["features"])
+                    fuel_types = {}
+                    for f in geojson_data["features"]:
+                        fuel_type = f.get("properties", {}).get("fuel_type", "Unknown")
+                        fuel_types[fuel_type] = fuel_types.get(fuel_type, 0) + 1
+                    
+                    logger.info(f"Generators response: {total_features} generators, zoom={zoom_level}, fuel types: {fuel_types}")
+                
+                return https_fn.Response(
+                    json.dumps(geojson_data),
+                    status=200,
+                    headers={
+                        "Content-Type": "application/json",
+                        "Cache-Control": "public, max-age=1800"  # Cache for 30 minutes
+                    }
+                )
+                
+        except Exception as db_error:
+            logger.error(f"Database error in get_power_generators: {db_error}")
+            logger.error(traceback.format_exc())
+            if conn:
+                conn.rollback()
+            return https_fn.Response(
+                json.dumps({"error": "A database error occurred.", "details": str(db_error)}),
+                status=500,
+                headers={"Content-Type": "application/json"}
+            )
+        finally:
+            if conn:
+                pool.putconn(conn)
+                
+    except Exception as e:
+        logger.error(f"General error in get_power_generators: {e}")
+        logger.error(traceback.format_exc())
+        return https_fn.Response(
+            json.dumps({"error": "An internal server error occurred.", "details": str(e)}),
+            status=500,
+            headers={"Content-Type": "application/json"}
+        )
+
+@https_fn.on_request(
+    cors=options.CorsOptions(
+        cors_origins=[
+        "https://crystal-2f87e.web.app",
+        "https://askcrystal.info",
+        "https://www.askcrystal.info",
+        "http://localhost:3000",
+        "http://localhost:5173",
+        ],
+        cors_methods=["get", "post", "options"]
+    ),
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=30
+)
+def get_power_plants(request: https_fn.Request) -> https_fn.Response:
+    """
+    HTTP Cloud Function to fetch power plant data as GeoJSON.
+    Supports zoom-based progressive disclosure and bbox spatial filtering.
+    """
+    logger.info("Received request for power plants data.")
+
+    # Handle warming requests
+    if request.method == 'POST':
+        try:
+            request_json = request.get_json(silent=True)
+            if request_json and request_json.get('warming'):
+                logger.info("Warming request received for get_power_plants.")
+                return https_fn.Response(
+                    json.dumps({"status": "warmed"}),
+                    status=200,
+                    headers={"Content-Type": "application/json"}
+                )
+        except Exception:
+            pass
+
+    # Parse parameters
+    bbox_param = request.args.get('bbox', None)  # "minLng,minLat,maxLng,maxLat"
+    zoom_param = request.args.get('zoom', '5')
+    plant_types = request.args.get('types', None)  # Comma-separated list
+    
+    try:
+        zoom_level = float(zoom_param)
+    except (ValueError, TypeError):
+        zoom_level = 5.0
+        logger.warning(f"Invalid zoom parameter: {zoom_param}, defaulting to 5")
+    
+    logger.info(f"Processing plants request: zoom={zoom_level}, bbox={bbox_param}, types={plant_types}")
+    
+    try:
+        pool = get_connection_pool()
+        conn = pool.getconn()
+        
+        try:
+            with conn.cursor() as cursor:
+                # Progressive disclosure based on zoom level
+                if zoom_level < 7:
+                    # Don't show plants at low zoom levels to avoid congestion
+                    return https_fn.Response(
+                        json.dumps({"type": "FeatureCollection", "features": []}),
+                        status=200,
+                        headers={
+                            "Content-Type": "application/json",
+                            "Cache-Control": "public, max-age=1800"
+                        }
+                    )
+                elif zoom_level < 8:
+                    # Medium zoom - show limited plants
+                    limit_clause = "LIMIT 100"
+                elif zoom_level < 10:
+                    # Closer zoom - show more plants
+                    limit_clause = "LIMIT 300"
+                else:
+                    # Very close zoom - show all plants
+                    limit_clause = "LIMIT 500"
+                
+                # Initialize params list
+                params = []
+                
+                # Base query using your actual table schema
+                base_query = """
+                    SELECT jsonb_build_object(
+                        'type', 'FeatureCollection',
+                        'features', jsonb_agg(feature)
+                    )
+                    FROM (
+                        SELECT jsonb_build_object(
+                            'type', 'Feature',
+                            'id', p.plant_id,
+                            'geometry', ST_AsGeoJSON(p.geom)::jsonb,
+                            'properties', jsonb_build_object(
+                                'id', p.plant_id,
+                                'name', COALESCE(p.name, 'Unnamed Plant'),
+                                'alt_name', p.alt_name,
+                                'operator', p.operator,
+                                'power', p.power,
+                                'plant_source', p.plant_source,
+                                'plant_method', p.plant_method,
+                                'start_date', p.start_date,
+                                'ref_us_eia', p.ref_us_eia,
+                                'type', p.type,
+                                'output_electricity', p.output_electricity,
+                                'geometry_type', ST_GeometryType(p.geom)
+                            )
+                        ) AS feature
+                        FROM dim_plants p
+                        WHERE p.geom IS NOT NULL
+                """
+                
+                # Add plant type filter if specified
+                if plant_types:
+                    type_list = [t.strip().lower() for t in plant_types.split(',')]
+                    type_conditions = []
+                    for plant_type in type_list:
+                        type_conditions.append("(LOWER(COALESCE(p.plant_source, '')) LIKE %s OR LOWER(COALESCE(p.plant_method, '')) LIKE %s OR LOWER(COALESCE(p.type, '')) LIKE %s)")
+                        params.extend([f'%{plant_type}%', f'%{plant_type}%', f'%{plant_type}%'])
+                    if type_conditions:
+                        base_query += f" AND ({' OR '.join(type_conditions)})"
+                
+                # Add spatial filter if bbox is provided
+                if bbox_param:
+                    try:
+                        bbox_parts = [float(x.strip()) for x in bbox_param.split(',')]
+                        if len(bbox_parts) == 4:
+                            min_lng, min_lat, max_lng, max_lat = bbox_parts
+                            base_query += """
+                                AND ST_Intersects(
+                                    p.geom, 
+                                    ST_MakeEnvelope(%s, %s, %s, %s, 4326)
+                                )
+                            """
+                            params.extend([min_lng, min_lat, max_lng, max_lat])
+                        else:
+                            logger.warning(f"Invalid bbox format: {bbox_param}")
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"Error parsing bbox {bbox_param}: {e}")
+                
+                # Add ordering and limit
+                base_query += f"""
+                        ORDER BY p.plant_id
+                        {limit_clause}
+                    ) AS features;
+                """
+                
+                cursor.execute(base_query, params)
+                result = cursor.fetchone()
+                geojson_data = result[0] if result and result[0] else {
+                    "type": "FeatureCollection", 
+                    "features": []
+                }
+                
+                # Log statistics
+                if geojson_data and geojson_data.get("features"):
+                    total_features = len(geojson_data["features"])
+                    plant_types_found = {}
+                    for f in geojson_data["features"]:
+                        plant_type = f.get("properties", {}).get("plant_source", "Unknown")
+                        plant_types_found[plant_type] = plant_types_found.get(plant_type, 0) + 1
+                    
+                    logger.info(f"Plants response: {total_features} plants, zoom={zoom_level}, plant types: {plant_types_found}")
+                
+                return https_fn.Response(
+                    json.dumps(geojson_data),
+                    status=200,
+                    headers={
+                        "Content-Type": "application/json",
+                        "Cache-Control": "public, max-age=1800"  # Cache for 30 minutes
+                    }
+                )
+                
+        except Exception as db_error:
+            logger.error(f"Database error in get_power_plants: {db_error}")
+            logger.error(traceback.format_exc())
+            if conn:
+                conn.rollback()
+            return https_fn.Response(
+                json.dumps({"error": "A database error occurred.", "details": str(db_error)}),
+                status=500,
+                headers={"Content-Type": "application/json"}
+            )
+        finally:
+            if conn:
+                pool.putconn(conn)
+                
+    except Exception as e:
+        logger.error(f"General error in get_power_plants: {e}")
+        logger.error(traceback.format_exc())
+        return https_fn.Response(
+            json.dumps({"error": "An internal server error occurred.", "details": str(e)}),
             status=500,
             headers={"Content-Type": "application/json"}
         )
