@@ -13,9 +13,10 @@ services:
       - "8080:8080"  # Firestore
       - "9150:9150"  # Firestore UI websocket
     volumes:
-     # - ./functions:/app/functions
+      - ./functions:/app/functions
       - ./firebase.json:/app/firebase.json
       - functions-node-modules:/app/functions/node_modules
+      - functions-python-venv:/app/functions/venv
       - ~/.config/configstore:/root/.config/configstore
       - ~/.config/firebase:/root/.config/firebase
     environment:
