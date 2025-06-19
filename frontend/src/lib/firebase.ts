@@ -804,9 +804,9 @@ export interface PowerInfrastructureData {
 
 /**
  * Fetch BPA power infrastructure data as GeoJSON
- * @param bbox Optional bounding box in format "minLng,minLat,maxLng,maxLat"
+ * @param zoom Optional zoom level for simplification
  */
-export const getPowerInfrastructure = async (bbox?: string): Promise<PowerInfrastructureData> => {
+export const getPowerInfrastructure = async (zoom?: number): Promise<PowerInfrastructureData> => {
   const region = functions.region || 'us-central1';
   const projectId = firebaseConfig.projectId;
   
@@ -818,8 +818,8 @@ export const getPowerInfrastructure = async (bbox?: string): Promise<PowerInfras
   }
   
   let url = `${baseUrl}/get_power_infrastructure`;
-  if (bbox) {
-    url += `?bbox=${encodeURIComponent(bbox)}`;
+  if (zoom !== undefined) {
+    url += `?zoom=${zoom}`;
   }
   
   console.log("Calling getPowerInfrastructure API at URL:", url);
@@ -929,12 +929,10 @@ export interface GeneratorData {
 
 /**
  * Fetch power generator data as GeoJSON with zoom-based progressive disclosure
- * @param bbox Optional bounding box in format "minLng,minLat,maxLng,maxLat"
  * @param zoom Zoom level for progressive disclosure
  * @param types Optional comma-separated list of generator types to filter
  */
 export const getPowerGenerators = async (
-  bbox?: string, 
   zoom?: number, 
   types?: string
 ): Promise<GeneratorData> => {
@@ -951,7 +949,6 @@ export const getPowerGenerators = async (
   let url = `${baseUrl}/get_power_generators`;
   const params = new URLSearchParams();
   
-  if (bbox) params.append('bbox', bbox);
   if (zoom !== undefined) params.append('zoom', zoom.toString());
   if (types) params.append('types', types);
   
@@ -1009,12 +1006,10 @@ export interface PowerPlantsData {
 
 /**
  * Fetch power plants data as GeoJSON with zoom-based progressive disclosure
- * @param bbox Optional bounding box in format "minLng,minLat,maxLng,maxLat"
  * @param zoom Zoom level for progressive disclosure
  * @param types Optional comma-separated list of plant types to filter
  */
 export const getPowerPlants = async (
-  bbox?: string, 
   zoom?: number, 
   types?: string
 ): Promise<PowerPlantsData> => {
@@ -1031,7 +1026,6 @@ export const getPowerPlants = async (
   let url = `${baseUrl}/get_power_plants`;
   const params = new URLSearchParams();
   
-  if (bbox) params.append('bbox', bbox);
   if (zoom !== undefined) params.append('zoom', zoom.toString());
   if (types) params.append('types', types);
   
@@ -1204,7 +1198,7 @@ export const getPowerInfrastructureOptimized = async (bbox?: string, zoom?: numb
   if (cached) return cached;
   
   // Make API call
-  const data = await getPowerInfrastructure(bbox, zoom);
+  const data = await getPowerInfrastructure(zoom);
   
   // Cache with appropriate TTL (longer for static data, shorter for dynamic)
   const ttl = zoom && zoom > 10 ? 2 * 60 * 1000 : 10 * 60 * 1000; // 2min for detailed, 10min for overview
