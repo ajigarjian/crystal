@@ -265,7 +265,7 @@ def get_ttc_flowgate_data(request: https_fn.Request) -> https_fn.Response:
 def get_power_infrastructure(request: https_fn.Request) -> https_fn.Response:
     """
     HTTP Cloud Function to fetch BPA power infrastructure data as GeoJSON.
-    Supports optional bbox parameter for spatial filtering.
+    Supports zoom-based simplification.
     """
     logger.info("Received request for power infrastructure data.")
 
@@ -283,8 +283,11 @@ def get_power_infrastructure(request: https_fn.Request) -> https_fn.Response:
         except Exception:
             pass
 
-    # Optional bbox parameter for spatial filtering (format: "minLng,minLat,maxLng,maxLat")
-    bbox_param = request.args.get('bbox', None)
+    zoom_str = request.args.get('zoom')
+    try:
+        zoom = int(zoom_str) if zoom_str else None
+    except (ValueError, TypeError):
+        zoom = None
     
     try:
         pool = get_connection_pool()
@@ -292,8 +295,16 @@ def get_power_infrastructure(request: https_fn.Request) -> https_fn.Response:
         
         try:
             with conn.cursor() as cursor:
+                # Determine geometry transformation based on zoom level
+                if zoom is not None and zoom < 7:
+                    # Simplify geometry for lower zoom levels
+                    geom_sql = "ST_AsGeoJSON(ST_SimplifyPreserveTopology(pi.geom, 0.01))::jsonb"
+                else:
+                    # Use full resolution geometry for higher zoom levels
+                    geom_sql = "ST_AsGeoJSON(pi.geom)::jsonb"
+
                 # Base query to get power infrastructure as GeoJSON with flowgate data
-                base_query = """
+                query = f"""
                     SELECT jsonb_build_object(
                         'type', 'FeatureCollection',
                         'features', jsonb_agg(feature)
@@ -302,7 +313,7 @@ def get_power_infrastructure(request: https_fn.Request) -> https_fn.Response:
                         SELECT DISTINCT ON (pi.gid) jsonb_build_object(
                             'type', 'Feature',
                             'id', pi.gid,
-                            'geometry', ST_AsGeoJSON(pi.geom)::jsonb,
+                            'geometry', {geom_sql},
                             'properties', jsonb_build_object(
                                 'gid', pi.gid,
                                 'name', COALESCE(pi.name, 'Unnamed'),
@@ -317,34 +328,11 @@ def get_power_infrastructure(request: https_fn.Request) -> https_fn.Response:
                         FROM power_infra pi
                         LEFT JOIN power_flow_gates pfg ON pi.name = pfg.openinframaplinename
                         WHERE pi.geom IS NOT NULL
-                """
-                
-                # Add spatial filter if bbox is provided
-                params = []
-                if bbox_param:
-                    try:
-                        bbox_parts = [float(x.strip()) for x in bbox_param.split(',')]
-                        if len(bbox_parts) == 4:
-                            min_lng, min_lat, max_lng, max_lat = bbox_parts
-                            base_query += """
-                                AND ST_Intersects(
-                                    pi.geom, 
-                                    ST_MakeEnvelope(%s, %s, %s, %s, 4326)
-                                )
-                            """
-                            params.extend([min_lng, min_lat, max_lng, max_lat])
-                        else:
-                            logger.warning(f"Invalid bbox format: {bbox_param}")
-                    except (ValueError, TypeError) as e:
-                        logger.warning(f"Error parsing bbox {bbox_param}: {e}")
-                
-                # Add ORDER BY and close the subquery
-                base_query += """
                         ORDER BY pi.gid, (pfg.flowgate IS NOT NULL) DESC, pfg.flowgate
                     ) AS features;
                 """
                 
-                cursor.execute(base_query, params)
+                cursor.execute(query)
                 result = cursor.fetchone()
                 geojson_data = result[0] if result and result[0] else {
                     "type": "FeatureCollection", 
@@ -1529,7 +1517,7 @@ def get_inflow_timeseries(request: https_fn.Request) -> https_fn.Response:
             if conn:
                 conn.rollback()
             return https_fn.Response(
-                json.dumps({"error": "A database error occurred.", "details": str(db_error)}),
+                json.dumps({"error": "A database error seemed to have occurred.", "details": str(db_error)}),
                 status=500,
                 headers={"Content-Type": "application/json"}
             )
@@ -1899,7 +1887,7 @@ def generate_inflow_forecast_v0(request: https_fn.Request) -> https_fn.Response:
 def get_power_generators(request: https_fn.Request) -> https_fn.Response:
     """
     HTTP Cloud Function to fetch power generator data as GeoJSON.
-    Supports zoom-based progressive disclosure and bbox spatial filtering.
+    Supports zoom-based progressive disclosure.
     """
     logger.info("Received request for power generators data.")
 
@@ -1918,7 +1906,6 @@ def get_power_generators(request: https_fn.Request) -> https_fn.Response:
             pass
 
     # Parse parameters
-    bbox_param = request.args.get('bbox', None)  # "minLng,minLat,maxLng,maxLat"
     zoom_param = request.args.get('zoom', '5')
     generator_types = request.args.get('types', None)  # Comma-separated list
     
@@ -1928,7 +1915,7 @@ def get_power_generators(request: https_fn.Request) -> https_fn.Response:
         zoom_level = 5.0
         logger.warning(f"Invalid zoom parameter: {zoom_param}, defaulting to 5")
     
-    logger.info(f"Processing generators request: zoom={zoom_level}, bbox={bbox_param}, types={generator_types}")
+    logger.info(f"Processing generators request: zoom={zoom_level}, types={generator_types}")
     
     try:
         pool = get_connection_pool()
@@ -2008,24 +1995,6 @@ def get_power_generators(request: https_fn.Request) -> https_fn.Response:
                     if type_conditions:
                         base_query += f" AND ({' OR '.join(type_conditions)})"
                 
-                # Add spatial filter if bbox is provided
-                if bbox_param:
-                    try:
-                        bbox_parts = [float(x.strip()) for x in bbox_param.split(',')]
-                        if len(bbox_parts) == 4:
-                            min_lng, min_lat, max_lng, max_lat = bbox_parts
-                            base_query += """
-                                AND ST_Intersects(
-                                    COALESCE(g.geom, p.geom), 
-                                    ST_MakeEnvelope(%s, %s, %s, %s, 4326)
-                                )
-                            """
-                            params.extend([min_lng, min_lat, max_lng, max_lat])
-                        else:
-                            logger.warning(f"Invalid bbox format: {bbox_param}")
-                    except (ValueError, TypeError) as e:
-                        logger.warning(f"Error parsing bbox {bbox_param}: {e}")
-                
                 # Add ordering and limit
                 base_query += f"""
                         ORDER BY g.generator_id
@@ -2099,7 +2068,7 @@ def get_power_generators(request: https_fn.Request) -> https_fn.Response:
 def get_power_plants(request: https_fn.Request) -> https_fn.Response:
     """
     HTTP Cloud Function to fetch power plant data as GeoJSON.
-    Supports zoom-based progressive disclosure and bbox spatial filtering.
+    Supports zoom-based progressive disclosure.
     """
     logger.info("Received request for power plants data.")
 
@@ -2118,7 +2087,6 @@ def get_power_plants(request: https_fn.Request) -> https_fn.Response:
             pass
 
     # Parse parameters
-    bbox_param = request.args.get('bbox', None)  # "minLng,minLat,maxLng,maxLat"
     zoom_param = request.args.get('zoom', '5')
     plant_types = request.args.get('types', None)  # Comma-separated list
     
@@ -2128,7 +2096,7 @@ def get_power_plants(request: https_fn.Request) -> https_fn.Response:
         zoom_level = 5.0
         logger.warning(f"Invalid zoom parameter: {zoom_param}, defaulting to 5")
     
-    logger.info(f"Processing plants request: zoom={zoom_level}, bbox={bbox_param}, types={plant_types}")
+    logger.info(f"Processing plants request: zoom={zoom_level}, types={plant_types}")
     
     try:
         pool = get_connection_pool()
@@ -2199,24 +2167,6 @@ def get_power_plants(request: https_fn.Request) -> https_fn.Response:
                         params.extend([f'%{plant_type}%', f'%{plant_type}%', f'%{plant_type}%'])
                     if type_conditions:
                         base_query += f" AND ({' OR '.join(type_conditions)})"
-                
-                # Add spatial filter if bbox is provided
-                if bbox_param:
-                    try:
-                        bbox_parts = [float(x.strip()) for x in bbox_param.split(',')]
-                        if len(bbox_parts) == 4:
-                            min_lng, min_lat, max_lng, max_lat = bbox_parts
-                            base_query += """
-                                AND ST_Intersects(
-                                    p.geom, 
-                                    ST_MakeEnvelope(%s, %s, %s, %s, 4326)
-                                )
-                            """
-                            params.extend([min_lng, min_lat, max_lng, max_lat])
-                        else:
-                            logger.warning(f"Invalid bbox format: {bbox_param}")
-                    except (ValueError, TypeError) as e:
-                        logger.warning(f"Error parsing bbox {bbox_param}: {e}")
                 
                 # Add ordering and limit
                 base_query += f"""

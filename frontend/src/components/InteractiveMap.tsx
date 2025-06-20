@@ -235,29 +235,12 @@ export function InteractiveMap({
     };
   }, [isFullScreen, handleEscapeKey]);
 
-  // Add this helper function to calculate bounding box
-  const calculateBbox = (viewport: any) => {
-    // Simple approximation - you might want to use a proper library for more accuracy
-    const latDelta = 180 / Math.pow(2, viewport.zoom);
-    const lngDelta = 360 / Math.pow(2, viewport.zoom);
-    
-    const minLng = viewport.longitude - lngDelta;
-    const maxLng = viewport.longitude + lngDelta;
-    const minLat = viewport.latitude - latDelta;
-    const maxLat = viewport.latitude + latDelta;
-    
-    return `${minLng},${minLat},${maxLng},${maxLat}`;
-  };
-
   // Then modify the loadPowerInfrastructure function:
   React.useEffect(() => {
     async function loadPowerInfrastructure() {
       try {
-        // Calculate current viewport bounds
-        const bbox = calculateBbox(viewport);
-        
-        // Load power infrastructure with bbox
-        const data = await getPowerInfrastructure(bbox);
+        // Load power infrastructure with zoom level for simplification
+        const data = await getPowerInfrastructure(viewport.zoom);
         console.log("Power infrastructure data received:", data);
         
         // Format voltage values in the data
@@ -285,15 +268,12 @@ export function InteractiveMap({
     // Debounce the loading to avoid too many requests during pan/zoom
     const timeoutId = setTimeout(loadPowerInfrastructure, 300);
     return () => clearTimeout(timeoutId);
-  }, [viewport.zoom, viewport.latitude, viewport.longitude]);
+  }, [viewport.zoom]);
 
   // Add new effect for loading generators
   React.useEffect(() => {
     async function loadGenerators() {
       try {
-        // Calculate current viewport bounds
-        const bbox = calculateBbox(viewport);
-        
         // Build filter types based on user selections
         const enabledTypes = [];
         if (showNuclear) enabledTypes.push('nuclear');
@@ -308,8 +288,8 @@ export function InteractiveMap({
         
         const typesFilter = enabledTypes.length > 0 ? enabledTypes.join(',') : undefined;
         
-        // Load generators with bbox, zoom, and type filters
-        const data = await getPowerGenerators(bbox, viewport.zoom, typesFilter);
+        // Load generators with zoom, and type filters
+        const data = await getPowerGenerators(viewport.zoom, typesFilter);
         console.log("Generator data received:", data);
         setGeneratorData(data);
       } catch (error) {
@@ -325,15 +305,12 @@ export function InteractiveMap({
     } else {
       setGeneratorData(null);
     }
-  }, [viewport.zoom, viewport.latitude, viewport.longitude, showGenerators, showNuclear, showSolar, showWind, showHydro, showGas, showCoal, showBiomass, showGeothermal, showOtherTypes]);
+  }, [viewport.zoom, showGenerators, showNuclear, showSolar, showWind, showHydro, showGas, showCoal, showBiomass, showGeothermal, showOtherTypes]);
 
   // Add new effect for loading plants
   React.useEffect(() => {
     async function loadPlants() {
       try {
-        // Calculate current viewport bounds
-        const bbox = calculateBbox(viewport);
-        
         // Build filter types based on user selections
         const enabledTypes = [];
         if (showNuclear) enabledTypes.push('nuclear');
@@ -348,8 +325,8 @@ export function InteractiveMap({
         
         const typesFilter = enabledTypes.length > 0 ? enabledTypes.join(',') : undefined;
         
-        // Load plants with bbox, zoom, and type filters
-        const data = await getPowerPlants(bbox, viewport.zoom, typesFilter);
+        // Load plants with zoom, and type filters
+        const data = await getPowerPlants(viewport.zoom, typesFilter);
         console.log("Plant data received:", data);
         setPlantData(data);
       } catch (error) {
@@ -365,7 +342,7 @@ export function InteractiveMap({
     } else {
       setPlantData(null);
     }
-  }, [viewport.zoom, viewport.latitude, viewport.longitude, showPlants, showNuclear, showSolar, showWind, showHydro, showGas, showCoal, showBiomass, showGeothermal, showOtherTypes]);
+  }, [viewport.zoom, showPlants, showNuclear, showSolar, showWind, showHydro, showGas, showCoal, showBiomass, showGeothermal, showOtherTypes]);
 
   // Add effect to sync external selectedFlowgate prop with internal state
   React.useEffect(() => {
