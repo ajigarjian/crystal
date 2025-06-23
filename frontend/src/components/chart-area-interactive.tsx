@@ -122,9 +122,9 @@ const processForecastError = (value: number, dataType: string): number | null =>
   return dataType === 'forecast_error' ? value : null;
 };
 
-// Updated CustomErrorBar with bars positioned closer to the bottom
+// Updated CustomErrorBar with proper relative sizing
 const CustomErrorBar = (props: any) => {
-  const { payload, x, y, width, height, setHoveredErrorBar } = props;
+  const { payload, x, y, width, height, setHoveredErrorBar, maxErrorInData } = props;
   
   if (!payload || payload.forecast_error === null || payload.forecast_error === undefined) {
     return null;
@@ -140,11 +140,13 @@ const CustomErrorBar = (props: any) => {
   
   const maxErrorHeight = 30;
   const errorMagnitude = Math.abs(errorValue);
-  const maxError = 10000;
+  
+  // Use the actual maximum error from the data for relative scaling
+  const maxError = maxErrorInData || 10000; // Fallback to 10000 if no data
   const barHeight = Math.min((errorMagnitude / maxError) * maxErrorHeight, maxErrorHeight);
   
   // Position closer to the actual bottom of the chart area
-  const chartBottom = 220;// Increased from 200 to move bars closer to bottom
+  const chartBottom = 220; // Increased from 200 to move bars closer to bottom
   const barY = chartBottom - barHeight;
   
   return (
@@ -543,7 +545,14 @@ export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProp
               <Bar
                 yAxisId="right"
                 dataKey="forecast_error"
-                shape={(props: any) => <CustomErrorBar {...props} setHoveredErrorBar={setHoveredErrorBar} />}
+                shape={(props: any) => {
+                  // Calculate max error once for all bars
+                  const maxErrorInData = Math.max(...processedChartData
+                    .filter(d => d.forecast_error !== null)
+                    .map(d => Math.abs(d.forecast_error!))
+                  );
+                  return <CustomErrorBar {...props} setHoveredErrorBar={setHoveredErrorBar} maxErrorInData={maxErrorInData} />;
+                }}
                 stroke="none"
                 fill="transparent"
               />
