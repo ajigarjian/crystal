@@ -58,6 +58,7 @@ const AVAILABLE_DAMS: DamInfo[] = [
   { id: 12, name: "McNary Locks and Dam"},
   { id: 13, name: "John Day Lock and Dam"},
   { id: 14, name: "Ice Harbor Lock and Dam"},
+  { id: 15, name: "Lower Monumental Lock and Dam"},
 ];
 
 interface SearchableFeature {
