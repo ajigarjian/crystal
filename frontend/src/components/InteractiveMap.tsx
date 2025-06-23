@@ -584,25 +584,15 @@ export function InteractiveMap({
                 paint={{
                   "line-color": [
                     "case",
-                    // If this line is part of selected flowgate group, highlight in green
+                    // If this line is part of selected flowgate group, highlight in cyan
                     [
                       "any",
                       ["==", ["get", "flowgate"], selectedFlowgateGroup || ""],
                       ["==", ["get", "gid"], clickedLineId || -1]
                     ],
-                    "#00bcd4", // Green for selected flowgate or clicked line
-                    ["has", "voltage"],
-                    [
-                      "case",
-                      ["in", "500", ["to-string", ["get", "voltage"]]],  // String conversion + contains check
-                      "#ff4444", // High voltage - red
-                      ["in", "230", ["to-string", ["get", "voltage"]]],  // String conversion + contains check
-                      "#ff8800", // Medium-high voltage - orange
-                      ["in", "115", ["to-string", ["get", "voltage"]]],  // String conversion + contains check
-                      "#ffcc00", // Medium voltage - yellow
-                      "#666666"  // Unknown/low voltage - gray
-                    ],
-                    "#666666" // Default gray if no voltage
+                    "#00bcd4", // Cyan for selected flowgate or clicked line
+                    // All other lines are neutral gray
+                    "#708090"
                   ],
                   "line-opacity": [
                     "case",
@@ -637,15 +627,24 @@ export function InteractiveMap({
                   ],
                   "line-width": [
                     "case",
-                    // If this line is part of selected flowgate group, make it much thicker
+                    // If this line is part of selected flowgate group, make it extra thick
                     [
                       "any",
                       ["==", ["get", "flowgate"], selectedFlowgateGroup || ""],
                       ["==", ["get", "gid"], clickedLineId || -1]
                     ],
-                    6,
-                    // Default width
-                    1.5
+                    8, // Selected lines get extra thickness
+                    
+                    // Base width on voltage level - thicker = higher voltage
+                    ["in", "500", ["to-string", ["get", "voltage"]]],
+                    4, // 500kV lines - thickest (major transmission backbone)
+                    ["in", "230", ["to-string", ["get", "voltage"]]],
+                    2.5, // 230kV lines - medium-thick (regional transmission)
+                    ["in", "115", ["to-string", ["get", "voltage"]]],
+                    1.5, // 115kV lines - medium (local transmission)
+                    
+                    // Default for other/unknown voltages
+                    1 // Thinnest for other voltages
                   ]
                 }}
                 layout={{
@@ -1157,7 +1156,7 @@ export function InteractiveMap({
                     </label>
                     <div className="ml-5 space-y-1">
                       <div className="flex items-center space-x-1">
-                        <div className="w-3 h-0.5 bg-cyan-500"></div>
+                        <div className="w-3 h-1 bg-cyan-500"></div>
                         <span className="text-gray-600 text-xs">Selected Flowgate</span>
                       </div>
                       <label className="flex items-center space-x-2 cursor-pointer">
@@ -1167,7 +1166,7 @@ export function InteractiveMap({
                           onChange={(e) => setShow500kV(e.target.checked)}
                           className="w-3 h-3"
                         />
-                        <div className="w-3 h-0.5 bg-red-400"></div>
+                        <div className="w-3 h-1 bg-gray-600"></div>
                         <span className="text-gray-600 text-xs">500kV Lines</span>
                       </label>
                       <label className="flex items-center space-x-2 cursor-pointer">
@@ -1177,7 +1176,7 @@ export function InteractiveMap({
                           onChange={(e) => setShow230kV(e.target.checked)}
                           className="w-3 h-3"
                         />
-                        <div className="w-3 h-0.5 bg-orange-500"></div>
+                        <div className="w-3 h-0.5 bg-gray-600" style={{ height: '2.5px' }}></div>
                         <span className="text-gray-600 text-xs">230kV Lines</span>
                       </label>
                       <label className="flex items-center space-x-2 cursor-pointer">
@@ -1187,7 +1186,7 @@ export function InteractiveMap({
                           onChange={(e) => setShow115kV(e.target.checked)}
                           className="w-3 h-3"
                         />
-                        <div className="w-3 h-0.5 bg-yellow-500"></div>
+                        <div className="w-3 h-0.5 bg-gray-600" style={{ height: '1.5px' }}></div>
                         <span className="text-gray-600 text-xs">115kV Lines</span>
                       </label>
                       <label className="flex items-center space-x-2 cursor-pointer">
@@ -1197,7 +1196,7 @@ export function InteractiveMap({
                           onChange={(e) => setShowOtherVoltages(e.target.checked)}
                           className="w-3 h-3"
                         />
-                        <div className="w-3 h-0.5 bg-gray-600"></div>
+                        <div className="w-3 bg-gray-600" style={{ height: '1px' }}></div>
                         <span className="text-gray-600 text-xs">Other Voltages</span>
                       </label>
                     </div>
