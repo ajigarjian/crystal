@@ -52,7 +52,7 @@ const AVAILABLE_DAMS: DamInfo[] = [
   { id: 6, name: "The Dalles Lock and Dam" },
   { id: 7, name: "Bonneville Locks and Dam"},
   { id: 8, name: "Albeni Falls Dam"},
-  
+  { id: 9, name: "Rock Island Dam"},
 ];
 
 interface SearchableFeature {
