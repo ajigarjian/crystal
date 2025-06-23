@@ -54,6 +54,7 @@ const AVAILABLE_DAMS: DamInfo[] = [
   { id: 8, name: "Albeni Falls Dam"},
   { id: 9, name: "Rock Island Dam"},
   { id: 10, name: "Wanapum Dam"},
+  { id: 11, name: "Priest Rapids Dam"},
 ];
 
 interface SearchableFeature {
