@@ -55,6 +55,7 @@ const AVAILABLE_DAMS: DamInfo[] = [
   { id: 9, name: "Rock Island Dam"},
   { id: 10, name: "Wanapum Dam"},
   { id: 11, name: "Priest Rapids Dam"},
+  { id: 12, name: "McNary Locks andDam"},
 ];
 
 interface SearchableFeature {
