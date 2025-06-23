@@ -185,7 +185,39 @@ export function InteractiveMap({
   // Add hover state for dam markers
   const [hoveredMarker, setHoveredMarker] = React.useState<MapMarker | null>(null);
 
- // Replace the hardcoded timeout effect with data-driven loading
+  // Add debouncing for hover events to prevent flickering
+  const hoverTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+
+  const handleMarkerMouseEnter = React.useCallback((marker: MapMarker) => {
+    // Clear any existing timeout
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+    }
+    // Set the hovered marker immediately
+    setHoveredMarker(marker);
+  }, []);
+
+  const handleMarkerMouseLeave = React.useCallback(() => {
+    // Clear any existing timeout
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+    }
+    // Debounce the clearing of hovered marker
+    hoverTimeoutRef.current = setTimeout(() => {
+      setHoveredMarker(null);
+    }, 100); // 100ms delay before clearing
+  }, []);
+
+  // Cleanup timeout on unmount
+  React.useEffect(() => {
+    return () => {
+      if (hoverTimeoutRef.current) {
+        clearTimeout(hoverTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Replace the hardcoded timeout effect with data-driven loading
   React.useEffect(() => {
     // Set loading to false once power infrastructure data is loaded (or failed to load)
     if (powerInfrastructureData !== null) {
@@ -964,8 +996,8 @@ export function InteractiveMap({
                 e.stopPropagation();
                 handleMarkerClick(marker);
               }}
-              onMouseEnter={() => setHoveredMarker(marker)}
-              onMouseLeave={() => setHoveredMarker(null)}
+              onMouseEnter={() => handleMarkerMouseEnter(marker)}
+              onMouseLeave={handleMarkerMouseLeave}
               style={{
                 border: 'none',
                 background: 'transparent',
@@ -1011,10 +1043,13 @@ export function InteractiveMap({
             longitude={hoveredMarker.longitude}
             closeButton={false}
             closeOnClick={false}
-            offset={[0, -10]}
+            offset={[0, -20]}
             className="dam-hover-popup"
+            style={{ pointerEvents: 'none' }}
           >
-            {hoveredMarker.name || 'Dam'}
+            <div style={{ pointerEvents: 'none' }}>
+              {hoveredMarker.name || 'Dam'}
+            </div>
           </Popup>
         )}
       </ReactMapGL>
