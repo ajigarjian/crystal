@@ -61,6 +61,7 @@ const AVAILABLE_DAMS: DamInfo[] = [
   { id: 15, name: "Lower Monumental Lock and Dam"},
   { id: 16, name: "Little Goose Lock and Dam"},
   { id: 17, name: "Lower Granite Lock and Dam"},
+  { id: 18, name: "Dworshak Dam"},
 ];
 
 interface SearchableFeature {
