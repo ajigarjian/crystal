@@ -260,7 +260,8 @@ def get_ttc_flowgate_data(request: https_fn.Request) -> https_fn.Response:
         cors_methods=["get", "post", "options"]
     ),
     memory=options.MemoryOption.MB_512,
-    timeout_sec=30
+    timeout_sec=30,
+    min_instances=1
 )
 def get_power_infrastructure(request: https_fn.Request) -> https_fn.Response:
     """
@@ -395,7 +396,8 @@ def get_power_infrastructure(request: https_fn.Request) -> https_fn.Response:
         cors_methods=["get", "post", "options"]
     ),
     memory=options.MemoryOption.MB_512,
-    timeout_sec=300
+    timeout_sec=300,
+    min_instances=1
 )
 def get_dam_locations(request: https_fn.Request) -> https_fn.Response:
     logger.info("Received request for dam locations.")
