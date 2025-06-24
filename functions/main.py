@@ -337,7 +337,7 @@ def get_power_infrastructure(request: https_fn.Request) -> https_fn.Response:
                                 df.flowgate_code,
                                 fth.value_mw as latest_capacity_factor,
                                 fth.datetime_utc as latest_timestamp,
-                                ROW_NUMBER() OVER (PARTITION BY df.flowgate_code ORDER BY fth.datetime_utc DESC, fth.ingestion_timestamp DESC) as rn
+                                ROW_NUMBER() OVER (PARTITION BY df.flowgate_code ORDER BY ABS(EXTRACT(EPOCH FROM (fth.datetime_utc - NOW()))) ASC, fth.ingestion_timestamp DESC) as rn
                             FROM fact_ttc_hourly fth
                             JOIN dim_flowgate df ON fth.flowgate_id = df.flowgate_id
                             WHERE fth.datetime_utc >= NOW() - INTERVAL '7 days'

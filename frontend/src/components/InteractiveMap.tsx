@@ -21,6 +21,7 @@ interface PowerLineClickData {
   operator?: string;
   ref?: string;
   associatedLines?: string[];
+  capacityFactor: number;
 }
 
 interface InteractiveMapProps {
@@ -483,7 +484,8 @@ export function InteractiveMap({
                   voltage: voltage,
                   operator: operator,
                   ref: ref,
-                  associatedLines: associatedLines
+                  associatedLines: associatedLines,
+                  capacityFactor: powerLineFeature.properties.capacity_factor || 0
                 });
               }
               

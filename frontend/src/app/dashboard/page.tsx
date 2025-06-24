@@ -35,6 +35,7 @@ export interface PowerLineInfo {
   operator?: string;
   ref?: string;
   associatedLines?: string[];
+  capacityFactor: number;
 }
 
 export type SelectedFeatureType = 'dam' | 'powerline';
@@ -246,6 +247,7 @@ export default function Page() {
           voltage: feature.properties.voltage,
           operator: feature.properties.operator,
           ref: feature.properties.ref || '',
+          capacityFactor: feature.properties.capacityFactor,
         }
       }));
   }, [powerInfrastructureData]);
@@ -337,6 +339,7 @@ export default function Page() {
     operator?: string;
     ref?: string;
     associatedLines?: string[];
+    capacityFactor: number;
   }) => {
     console.log('Dashboard handling power line click:', powerLineData);
     
@@ -352,7 +355,8 @@ export default function Page() {
         voltage: powerLineData.voltage,
         operator: powerLineData.operator,
         ref: powerLineData.ref,
-        associatedLines: powerLineData.associatedLines || []
+        associatedLines: powerLineData.associatedLines || [],
+        capacityFactor: powerLineData.capacityFactor,
       }
     });
   };
@@ -392,6 +396,22 @@ export default function Page() {
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [selectedFeature]);
+
+  const formatCapacityFactor = (cf: number) => `${(cf * 100).toFixed(1)}%`
+  const getCapacityFactorStatus = (cf: number) => {
+    if (cf < 0.7) return "Normal"
+    if (cf < 1.0) return "Elevated" 
+    if (cf < 1.3) return "High"
+    return "Critical"
+  }
+
+  // Add the missing badge variant function
+  const getCapacityFactorBadgeVariant = (cf: number): "default" | "secondary" | "destructive" | "outline" => {
+    if (cf < 0.7) return "secondary"  // Green - Normal
+    if (cf < 1.0) return "outline"    // Yellow - Elevated
+    if (cf < 1.3) return "default"    // Orange - High  
+    return "destructive"              // Red - Critical
+  }
 
   return (
     <SidebarProvider
@@ -564,6 +584,15 @@ export default function Page() {
                                   <div className="font-medium">{currentPowerLine.ref}</div>
                                 </div>
                               )}
+                              <div>
+                                <span className="font-medium text-muted-foreground">Line Capacity Factor:</span>
+                                <div className="flex items-center gap-2">
+                                  <div className="font-medium">{formatCapacityFactor(currentPowerLine.capacityFactor)}</div>
+                                  <Badge variant={getCapacityFactorBadgeVariant(currentPowerLine.capacityFactor)}>
+                                    {getCapacityFactorStatus(currentPowerLine.capacityFactor)}
+                                  </Badge>
+                                </div>
+                              </div>
                             </div>
 
                             {/* Flowgate Information */}
@@ -574,6 +603,25 @@ export default function Page() {
                                   <div>
                                     <span className="font-medium text-muted-foreground">Flowgate:</span>
                                     <div className="font-medium">{currentPowerLine.flowgate}</div>
+                                  </div>
+                                  
+                                  {/* Flowgate Capacity Factor - Prominent Display */}
+                                  <div className="p-3 rounded-lg bg-muted/30 border">
+                                    <div className="flex items-center justify-between">
+                                      <div>
+                                        <div className="text-sm font-medium text-muted-foreground">Flowgate Capacity Factor</div>
+                                        <div className="text-lg font-bold">{formatCapacityFactor(currentPowerLine.capacityFactor)}</div>
+                                      </div>
+                                      <Badge 
+                                        variant={getCapacityFactorBadgeVariant(currentPowerLine.capacityFactor)}
+                                        className="text-sm font-medium"
+                                      >
+                                        {getCapacityFactorStatus(currentPowerLine.capacityFactor)}
+                                      </Badge>
+                                    </div>
+                                    <div className="text-xs text-muted-foreground mt-1">
+                                      All lines in this flowgate share this capacity factor
+                                    </div>
                                   </div>
                                   
                                   {currentPowerLine.associatedLines && currentPowerLine.associatedLines.length > 0 ? (
