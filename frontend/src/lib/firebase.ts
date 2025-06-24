@@ -794,6 +794,8 @@ export interface PowerInfrastructureFeature {
     geometry_type: string;
     flowgate: string | null;
     is_flowgate_line: boolean;
+    capacity_factor: number;
+    capacity_factor_timestamp: string | null;
   };
 }
 

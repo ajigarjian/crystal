@@ -287,6 +287,22 @@ export function InteractiveMap({
               }
             }))
           };
+          
+          // Log capacity factor information
+          const flowgateLines = formattedData.features.filter(f => f.properties.is_flowgate_line);
+          const capacityFactorStats = flowgateLines.reduce((acc, line) => {
+            const cf = line.properties.capacity_factor;
+            if (cf < 0.4) acc.green++;
+            else if (cf < 0.6) acc.yellow++;
+            else if (cf < 0.8) acc.orange++;
+            else acc.red++;
+            return acc;
+          }, { green: 0, yellow: 0, orange: 0, red: 0 });
+          
+          console.log(`Capacity factor coloring: ${flowgateLines.length} flowgate lines loaded -`, 
+                     `Green: ${capacityFactorStats.green}, Yellow: ${capacityFactorStats.yellow}, ` +
+                     `Orange: ${capacityFactorStats.orange}, Red: ${capacityFactorStats.red}`);
+          
           setPowerInfrastructureData(formattedData);
         } else {
           setPowerInfrastructureData(data);
@@ -386,6 +402,21 @@ export function InteractiveMap({
     setClickedLineId(selectedPowerLineId || null);
   }, [selectedPowerLineId]);
 
+  const [pulseOpacity, setPulseOpacity] = React.useState(0.8);
+
+  // Add pulsing animation for flowgate lines
+  React.useEffect(() => {
+    const interval = setInterval(() => {
+      setPulseOpacity(prev => {
+        // Create a sine wave between 0.6 and 1.0
+        const time = Date.now() / 1000; // Convert to seconds
+        return 0.6 + 0.2 * (Math.sin(time * 2) + 1); // Oscillates between 0.6 and 1.0
+      });
+    }, 50); // Update every 50ms for smooth animation
+
+    return () => clearInterval(interval);
+  }, []);
+
   if (isLoading) {
     return <MapSkeleton style={{ height, width: '100%' }} />;
   }
@@ -427,7 +458,10 @@ export function InteractiveMap({
                 voltage: voltage,
                 operator: operator,
                 ref: ref,
-                associatedLines: associatedLines
+                associatedLines: associatedLines,
+                capacity_factor: powerLineFeature.properties.capacity_factor,
+                capacity_factor_timestamp: powerLineFeature.properties.capacity_factor_timestamp,
+                is_flowgate_line: powerLineFeature.properties.is_flowgate_line
               });
               
               setClickedLineId(lineId);
@@ -591,12 +625,28 @@ export function InteractiveMap({
                       ["==", ["get", "gid"], clickedLineId || -1]
                     ],
                     "#00bcd4", // Cyan for selected flowgate or clicked line
-                    // All other lines are neutral gray
+                    // Color flowgate lines based on capacity factor (more lenient scale)
+                    ["==", ["get", "is_flowgate_line"], true],
+                    [
+                      "case",
+                      // Green for capacity factor < 0.7
+                      ["<", ["get", "capacity_factor"], 0.7],
+                      "#22c55e", // Green
+                      // Yellow for capacity factor 0.7-1.0
+                      ["<", ["get", "capacity_factor"], 1.0],
+                      "#eab308", // Yellow
+                      // Orange for capacity factor 1.0-1.3
+                      ["<", ["get", "capacity_factor"], 1.3],
+                      "#f97316", // Orange
+                      // Red for capacity factor >= 1.3
+                      "#ef4444" // Red
+                    ],
+                    // All other non-flowgate lines are neutral gray
                     "#708090"
                   ],
                   "line-opacity": [
                     "case",
-                    // Hide lines based on voltage visibility settings
+                    // Hide lines based on voltage visibility settings first
                     [
                       "all",
                       ["in", "500", ["to-string", ["get", "voltage"]]],
@@ -623,7 +673,11 @@ export function InteractiveMap({
                       !showOtherVoltages
                     ],
                     0, // Hide other voltage lines if disabled
-                    0.8 // Default opacity
+                    // For visible flowgate lines, use pulsing opacity
+                    ["==", ["get", "is_flowgate_line"], true],
+                    pulseOpacity, // Animated opacity value
+                    // Default opacity for non-flowgate lines
+                    0.8
                   ],
                   "line-width": [
                     "case",

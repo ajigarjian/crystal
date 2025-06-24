@@ -169,13 +169,15 @@ def get_ttc_flowgate_data(request: https_fn.Request) -> https_fn.Response:
                 logger.info(f"Found flowgate_id: {flowgate_id} for flowgate: {flowgate_param}")
                 
                 # Query TTC data for the specific flowgate and date
-                # We'll get all hours for the specified date
+                # Filter for metric_id = 20 and quality = 'F' (forecast data only)
                 query_sql = """
                     SELECT ttc_id, flowgate_id, metric_id, source_id, datetime_utc, 
                            hour_ending, value_mw, quality, ingestion_timestamp
                     FROM fact_ttc_hourly
                     WHERE flowgate_id = %s 
                       AND DATE(datetime_utc) = %s
+                      AND metric_id = 20
+                      AND quality = 'F'
                     ORDER BY hour_ending ASC;
                 """
                 
@@ -304,7 +306,7 @@ def get_power_infrastructure(request: https_fn.Request) -> https_fn.Response:
                     # Use full resolution geometry for higher zoom levels
                     geom_sql = "ST_AsGeoJSON(pi.geom)::jsonb"
 
-                # Base query to get power infrastructure as GeoJSON with flowgate data
+                # Base query to get power infrastructure as GeoJSON with flowgate data and capacity factors
                 query = f"""
                     SELECT jsonb_build_object(
                         'type', 'FeatureCollection',
@@ -323,11 +325,24 @@ def get_power_infrastructure(request: https_fn.Request) -> https_fn.Response:
                                 'voltage', pi.voltage,
                                 'geometry_type', ST_GeometryType(pi.geom),
                                 'flowgate', pfg.flowgate,
-                                'is_flowgate_line', CASE WHEN pfg.flowgate IS NOT NULL THEN true ELSE false END
+                                'is_flowgate_line', CASE WHEN pfg.flowgate IS NOT NULL THEN true ELSE false END,
+                                'capacity_factor', COALESCE(latest_ttc.latest_capacity_factor, 0.0),
+                                'capacity_factor_timestamp', latest_ttc.latest_timestamp
                             )
                         ) AS feature
                         FROM power_infra pi
                         LEFT JOIN power_flow_gates pfg ON pi.name = pfg.openinframaplinename
+                        LEFT JOIN (
+                            SELECT 
+                                df.flowgate_code,
+                                fth.value_mw as latest_capacity_factor,
+                                fth.datetime_utc as latest_timestamp,
+                                ROW_NUMBER() OVER (PARTITION BY df.flowgate_code ORDER BY fth.datetime_utc DESC, fth.ingestion_timestamp DESC) as rn
+                            FROM fact_ttc_hourly fth
+                            JOIN dim_flowgate df ON fth.flowgate_id = df.flowgate_id
+                            WHERE fth.datetime_utc >= NOW() - INTERVAL '7 days'
+                              AND df.is_active = true
+                        ) AS latest_ttc ON pfg.flowgate = latest_ttc.flowgate_code AND latest_ttc.rn = 1
                         WHERE pi.geom IS NOT NULL
                         ORDER BY pi.gid, (pfg.flowgate IS NOT NULL) DESC, pfg.flowgate
                     ) AS features;
