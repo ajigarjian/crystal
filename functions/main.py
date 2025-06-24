@@ -333,16 +333,17 @@ def get_power_infrastructure(request: https_fn.Request) -> https_fn.Response:
                         FROM power_infra pi
                         LEFT JOIN power_flow_gates pfg ON pi.name = pfg.openinframaplinename
                         LEFT JOIN (
-                            SELECT 
+                            SELECT DISTINCT ON (df.flowgate_code)
                                 df.flowgate_code,
                                 fth.value_mw as latest_capacity_factor,
-                                fth.datetime_utc as latest_timestamp,
-                                ROW_NUMBER() OVER (PARTITION BY df.flowgate_code ORDER BY ABS(EXTRACT(EPOCH FROM (fth.datetime_utc - NOW()))) ASC, fth.ingestion_timestamp DESC) as rn
+                                fth.datetime_utc as latest_timestamp
                             FROM fact_ttc_hourly fth
                             JOIN dim_flowgate df ON fth.flowgate_id = df.flowgate_id
-                            WHERE fth.datetime_utc >= NOW() - INTERVAL '7 days'
+                            WHERE fth.metric_id = 24 -- Capacity Factor metric
                               AND df.is_active = true
-                        ) AS latest_ttc ON pfg.flowgate = latest_ttc.flowgate_code AND latest_ttc.rn = 1
+                              AND fth.datetime_utc = DATE_TRUNC('hour', NOW() AT TIME ZONE 'UTC')
+                            ORDER BY df.flowgate_code, fth.ingestion_timestamp DESC
+                        ) AS latest_ttc ON pfg.flowgate = latest_ttc.flowgate_code
                         WHERE pi.geom IS NOT NULL
                         ORDER BY pi.gid, (pfg.flowgate IS NOT NULL) DESC, pfg.flowgate
                     ) AS features;
