@@ -230,26 +230,49 @@ export default function Page() {
   const searchPowerLines: SearchableFeature[] = React.useMemo(() => {
     if (!powerInfrastructureData?.features) return [];
     
-    return powerInfrastructureData.features
+    interface BasicPowerLineInfo {
+      id: number;
+      name: string;
+      flowgate: string | null;
+      voltage: string;
+      operator: string;
+      ref: string;
+      capacityFactor: number;
+    }
+
+    const allLines: BasicPowerLineInfo[] = powerInfrastructureData.features
       .filter((feature: any) => 
         feature.properties.power_type === 'line' && 
         feature.properties.name && 
         feature.properties.name !== 'Unnamed'
       )
-      .map((feature: any) => ({
+      .map((feature: any): BasicPowerLineInfo => ({
         id: feature.properties.gid,
         name: feature.properties.name,
+        flowgate: feature.properties.flowgate,
+        voltage: feature.properties.voltage,
+        operator: feature.properties.operator,
+        ref: feature.properties.ref || '',
+        capacityFactor: feature.properties.capacityFactor,
+      }));
+
+    return allLines.map((line: BasicPowerLineInfo) => {
+      const associatedLines = (line.flowgate && line.flowgate !== 'null')
+        ? allLines
+            .filter(other => other.flowgate === line.flowgate && other.id !== line.id)
+            .map(other => other.name)
+        : [];
+      
+      return {
+        id: line.id,
+        name: line.name,
         type: 'powerline' as const,
         data: {
-          id: feature.properties.gid,
-          name: feature.properties.name,
-          flowgate: feature.properties.flowgate,
-          voltage: feature.properties.voltage,
-          operator: feature.properties.operator,
-          ref: feature.properties.ref || '',
-          capacityFactor: feature.properties.capacityFactor,
+          ...line,
+          associatedLines: associatedLines
         }
-      }));
+      };
+    });
   }, [powerInfrastructureData]);
 
   const searchFlowgates: SearchableFeature[] = React.useMemo(() => {
@@ -630,15 +653,21 @@ export default function Page() {
                                         Other Lines in this Flowgate ({currentPowerLine.associatedLines.length})
                                       </div>
                                       <div className="space-y-1 max-h-32 overflow-y-auto">
-                                        {currentPowerLine.associatedLines.map((lineName, index) => (
-                                          <Badge 
-                                            key={index} 
-                                            variant="secondary" 
-                                            className="text-xs block w-full justify-start py-1 px-2 font-normal"
-                                          >
-                                            {lineName}
-                                          </Badge>
-                                        ))}
+                                        {currentPowerLine.associatedLines
+                                          .filter(lineName => lineName !== currentPowerLine.name)
+                                          .map((lineName, index) => {
+                                            const lineInfo = searchPowerLines.find(p => p.name === lineName)?.data as PowerLineInfo | undefined;
+                                            return (
+                                              <Badge 
+                                                key={index} 
+                                                variant="secondary"
+                                                className="text-xs block w-full justify-start py-1 px-2 font-normal cursor-pointer hover:bg-muted"
+                                                onClick={() => lineInfo && handleSearchPowerLineSelect(lineInfo)}
+                                              >
+                                                {lineName}
+                                              </Badge>
+                                            )
+                                          })}
                                       </div>
                                     </div>
                                   ) : (
