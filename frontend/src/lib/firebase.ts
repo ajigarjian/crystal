@@ -1173,6 +1173,18 @@ export const warmAllFunctions = async () => {
       body: JSON.stringify({ warming: true })
     }).catch(() => {}),
     
+    fetch(`${baseUrl}/get_snotel_stations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ warming: true })
+    }).catch(() => {}),
+    
+    fetch(`${baseUrl}/get_snotel_station_observations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ warming: true })
+    }).catch(() => {}),
+    
     // Dashboard functions
     fetch(`${baseUrl}/get_dashboard_section_cards_data`, {
       method: 'POST',
@@ -1289,4 +1301,65 @@ export const deduplicatedFetch = async (url: string, options: RequestInit) => {
   
   pendingRequests.set(key, promise);
   return promise;
+};
+
+// Define the expected structure for a single SNOTEL station observation data point
+export interface SnotelObservationDataPoint {
+  ts_utc: string;
+  station_id: number;
+  metric_id: number;
+  value_num: number;
+  quality: string;
+  source_id: number;
+  inserted_at: string;
+  height_depth_in: number | null;
+}
+
+// Export a helper for calling the SNOTEL station observations function
+export const getSnotelStationObservations = async (stationId: number, days: number = 30): Promise<SnotelObservationDataPoint[]> => {
+  const region = functions.region || 'us-central1';
+  const projectId = firebaseConfig.projectId;
+  let baseUrl = '';
+
+  if (process.env.NODE_ENV === 'development') {
+    baseUrl = `http://localhost:5001/${projectId}/${region}`;
+  } else {
+    baseUrl = `https://${region}-${projectId}.cloudfunctions.net`;
+  }
+
+  // The name of the new Python Cloud Function
+  const url = `${baseUrl}/get_snotel_station_observations?station_id=${stationId}&days=${days}`;
+
+  console.log('Fetching SNOTEL data from URL:', url);
+
+  try {
+    // This is a GET request to fetch data
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    console.log('SNOTEL API response status:', response.status);
+
+    if (!response.ok) {
+      let errorData = { error: "Failed to fetch SNOTEL station observations" };
+      try {
+        errorData = await response.json();
+      } catch (e) {
+        console.error("Failed to parse error response from getSnotelStationObservations: ", e);
+      }
+      console.error('Error fetching SNOTEL station observations:', response.status, errorData);
+      throw new Error(errorData.error || `Failed to fetch SNOTEL station observations. Status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    console.log('SNOTEL API response data:', data);
+    return data as SnotelObservationDataPoint[];
+  } catch (error: any) {
+    console.error('Error calling getSnotelStationObservations function:', error);
+    // Re-throw the error instead of returning empty array so the component can handle it properly
+    throw error;
+  }
 }; 

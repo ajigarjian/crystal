@@ -60,6 +60,7 @@ interface InteractiveMapProps {
   snotelStations?: SnotelStationInfo[];
   onSnotelStationClick?: (stationData: SnotelStationInfo) => void;
   selectedSnotelStationId?: number | null;
+  selectedGeneration?: { id: number; type: 'plant' | 'generator' } | null;
 }
 
 interface SnotelStationInfo {
@@ -176,6 +177,7 @@ export function InteractiveMap({
   snotelStations = [],
   onSnotelStationClick,
   selectedSnotelStationId,
+  selectedGeneration,
 }: InteractiveMapProps) {
   const [viewport, setViewport] = React.useState({
     latitude: initialLatitude,
@@ -191,6 +193,9 @@ export function InteractiveMap({
   const [plantData, setPlantData] = React.useState<PowerPlantsData | null>(null);
   const [isLegendVisible, setIsLegendVisible] = React.useState(false);
   
+  const selectedGenId = selectedGeneration?.id ?? -1;
+  const selectedGenType = selectedGeneration?.type ?? '';
+
   const snotelGeoJsonData = React.useMemo(() => {
     if (!snotelStations || snotelStations.length === 0) {
       return null;
@@ -733,13 +738,15 @@ export function InteractiveMap({
           }
         }}
         onMouseEnter={(event) => {
+          const map = event.target;
+          const existingQueryableLayers = queryableLayers.filter(layerId => map.getLayer(layerId));
           // Check if we're hovering over a power line or generation marker
-          const features = event.target.queryRenderedFeatures(event.point, {
-            layers: queryableLayers
+          const features = map.queryRenderedFeatures(event.point, {
+            layers: existingQueryableLayers
           });
           
           if (features.length > 0) {
-            event.target.getCanvas().style.cursor = 'pointer';
+            map.getCanvas().style.cursor = 'pointer';
           }
         }}
         onMouseLeave={(event) => {
@@ -750,12 +757,14 @@ export function InteractiveMap({
           setHoveredPowerLine(null);
         }}
         onMouseMove={(event) => {
+          const map = event.target;
+          const existingQueryableLayers = queryableLayers.filter(layerId => map.getLayer(layerId));
           // Update cursor based on what we're hovering over
-          const features = event.target.queryRenderedFeatures(event.point, {
-            layers: queryableLayers
+          const features = map.queryRenderedFeatures(event.point, {
+            layers: existingQueryableLayers
           });
           
-          event.target.getCanvas().style.cursor = features.length > 0 ? 'pointer' : '';
+          map.getCanvas().style.cursor = features.length > 0 ? 'pointer' : '';
 
           const plantFeature = features.find(f => f.layer?.id === 'plant-points');
           const generatorFeature = features.find(f => f.layer?.id === 'generator-points');
@@ -1179,6 +1188,9 @@ export function InteractiveMap({
             paint={{
               "circle-color": [
                 "case",
+                // Selected state
+                ["all", ["==", ["get", "id"], selectedGenId], ["==", "plant", selectedGenType]],
+                "#ffeb3b", // Bright Yellow for selected
                 // Check plant_source, plant_method, and type fields
                 ["in", ["downcase", ["coalesce", ["get", "plant_source"], ""]], ["literal", ["nuclear"]]],
                 "#ff4500", // Nuclear - orange-red
@@ -1233,16 +1245,26 @@ export function InteractiveMap({
                 "#9370db" // Other - medium purple (default)
               ],
               "circle-radius": [
-                "interpolate",
-                ["linear"],
-                ["zoom"],
-                6, 4,
-                10, 8,
-                14, 12
+                "case",
+                // Selected state
+                ["all", ["==", ["get", "id"], selectedGenId], ["==", "plant", selectedGenType]],
+                14, // Slightly larger radius when selected
+                // Default radius
+                ["interpolate", ["linear"], ["zoom"], 6, 4, 10, 8, 14, 12]
               ],
-              "circle-opacity": 0.7,
-              "circle-stroke-color": "#ffffff",
-              "circle-stroke-width": 2
+              "circle-opacity": 0.8,
+              "circle-stroke-color": [
+                "case",
+                ["all", ["==", ["get", "id"], selectedGenId], ["==", "plant", selectedGenType]],
+                "#333333", // Dark stroke for selected
+                "#ffffff"
+              ],
+              "circle-stroke-width": [
+                "case",
+                ["all", ["==", ["get", "id"], selectedGenId], ["==", "plant", selectedGenType]],
+                3, // Thicker stroke for selected
+                2
+              ]
             }}
           />
           
@@ -1281,6 +1303,9 @@ export function InteractiveMap({
             paint={{
               "circle-color": [
                 "case",
+                // Selected state
+                ["all", ["==", ["get", "id"], selectedGenId], ["==", "generator", selectedGenType]],
+                "#ffeb3b", // Bright Yellow for selected
                 // Use fuel_type field (which combines generator_source and generator_type)
                 ["in", ["downcase", ["coalesce", ["get", "fuel_type"], ""]], ["literal", ["nuclear"]]],
                 "#ff4500", // Nuclear - orange-red
@@ -1301,16 +1326,26 @@ export function InteractiveMap({
                 "#9370db" // Other - medium purple (default)
               ],
               "circle-radius": [
-                "interpolate",
-                ["linear"],
-                ["zoom"],
-                8, 2,
-                12, 4,
-                16, 6
+                "case",
+                // Selected state
+                ["all", ["==", ["get", "id"], selectedGenId], ["==", "generator", selectedGenType]],
+                8, // Slightly larger radius when selected
+                // Default radius
+                ["interpolate", ["linear"], ["zoom"], 8, 2, 12, 4, 16, 6]
               ],
               "circle-opacity": 0.8,
-              "circle-stroke-color": "#ffffff",
-              "circle-stroke-width": 1
+              "circle-stroke-color": [
+                "case",
+                ["all", ["==", ["get", "id"], selectedGenId], ["==", "generator", selectedGenType]],
+                "#333333", // Dark stroke for selected
+                "#ffffff"
+              ],
+              "circle-stroke-width": [
+                "case",
+                ["all", ["==", ["get", "id"], selectedGenId], ["==", "generator", selectedGenType]],
+                2, // Thicker stroke for selected
+                1
+              ]
             }}
           />
           

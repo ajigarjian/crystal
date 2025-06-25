@@ -17,6 +17,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { TradingSummary } from "@/components/TradingSummary"
 import { ChartAreaInteractive } from '@/components/chart-area-interactive'
 import { ChartTTCFlowgate } from '@/components/chart-ttc-flowgate'
+import { ChartSnotelWTEQ } from '@/components/chart-snotel-wteq'
 import { Terminal, Mic, Square } from "lucide-react"
 import { Separator } from "@/components/ui/separator"
 
@@ -578,6 +579,7 @@ export default function Page() {
                         selectedPowerLineId={currentPowerLine?.id}
                         selectedFlowgate={selectedFlowgate}
                         selectedSnotelStationId={currentSnotelStation?.id}
+                        selectedGeneration={currentGeneration ? { id: currentGeneration.id, type: currentGeneration.type } : null}
                       />
                     ) : (
                       <div className="flex h-full items-center justify-center rounded-xl border border-dashed bg-muted/50 p-4 text-center">
@@ -847,6 +849,9 @@ export default function Page() {
 
                     {selectedFeature?.type === 'snotel' && currentSnotelStation && (
                       <>
+                        {/* SNOTEL Station WTEQ Chart */}
+                        <ChartSnotelWTEQ selectedStationId={currentSnotelStation.id} stationName={currentSnotelStation.name} />
+                        
                         {/* SNOTEL Station Details */}
                         <Card className="flex-shrink-0">
                           <CardHeader>

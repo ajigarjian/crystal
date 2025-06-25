@@ -2326,3 +2326,150 @@ def get_snotel_stations(request: https_fn.Request) -> https_fn.Response:
             status=500,
             headers={"Content-Type": "application/json"}
         )
+
+@https_fn.on_request(
+    cors=options.CorsOptions(
+        cors_origins=[
+        "https://crystal-2f87e.web.app",
+        "https://askcrystal.info",
+        "https://www.askcrystal.info",
+        "http://localhost:3000",
+        "http://localhost:5173",
+        ],
+        cors_methods=["get", "post", "options"]
+    ),
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=30
+)
+def get_snotel_station_observations(request: https_fn.Request) -> https_fn.Response:
+    """
+    HTTP Cloud Function to fetch SNOTEL station observation data for WTEQ (metric_id = 25).
+    Accepts 'station_id' and optional 'days' query parameters.
+    """
+    logger.info("Received request for SNOTEL station observations.")
+
+    # Handle warming requests
+    if request.method == 'POST':
+        try:
+            request_json = request.get_json(silent=True)
+            if request_json and request_json.get('warming'):
+                logger.info("Warming request received for get_snotel_station_observations.")
+                return https_fn.Response(
+                    json.dumps({"status": "warmed"}),
+                    status=200,
+                    headers={"Content-Type": "application/json"}
+                )
+        except Exception:
+            pass
+
+    # Parse query params
+    station_id_param = request.args.get('station_id', '')
+    days_param = request.args.get('days', '30')  # Default to 30 days
+    
+    if not station_id_param:
+        logger.warning("Missing station_id parameter.")
+        return https_fn.Response(
+            json.dumps({"error": "station_id parameter is required"}),
+            status=400,
+            headers={"Content-Type": "application/json"}
+        )
+    
+    try:
+        station_id = int(station_id_param)
+        days = int(days_param)
+        days = max(1, min(days, 90))  # Limit between 1 and 90 days
+    except ValueError:
+        logger.warning(f"Invalid station_id or days parameter: {station_id_param}, {days_param}")
+        return https_fn.Response(
+            json.dumps({"error": "station_id and days must be valid integers"}),
+            status=400,
+            headers={"Content-Type": "application/json"}
+        )
+    
+    logger.info(f"Processing SNOTEL observations request for station_id: {station_id}, days: {days}")
+
+    try:
+        pool = get_connection_pool()
+        conn = pool.getconn()
+        
+        try:
+            with conn.cursor() as cursor:
+                # Query SNOTEL station observation data for WTEQ (metric_id = 25)
+                query_sql = """
+                    SELECT ts_utc, station_id, metric_id, value_num, quality, 
+                           source_id, inserted_at, height_depth_in
+                    FROM fact_station_observation
+                    WHERE station_id = %s 
+                      AND metric_id = 25
+                      AND ts_utc >= NOW() - INTERVAL '%s days'
+                      AND value_num IS NOT NULL
+                    ORDER BY ts_utc ASC;
+                """
+                
+                cursor.execute(query_sql, (station_id, days))
+                rows = cursor.fetchall()
+                
+                result = []
+                for row in rows:
+                    ts_utc, station_id_val, metric_id, value_num, quality, source_id, inserted_at, height_depth_in = row
+                    
+                    # Format datetime to ISO string
+                    ts_utc_str = ts_utc.strftime('%Y-%m-%dT%H:%M:%SZ') if ts_utc else None
+                    inserted_at_str = inserted_at.strftime('%Y-%m-%dT%H:%M:%S.%fZ') if inserted_at else None
+                    
+                    # Convert value_num to float if it's a Decimal
+                    value_num_float = None
+                    if value_num is not None:
+                        if isinstance(value_num, decimal.Decimal):
+                            value_num_float = float(value_num)
+                        elif isinstance(value_num, (int, float)):
+                            value_num_float = float(value_num)
+                        else:
+                            try:
+                                value_num_float = float(value_num)
+                            except (ValueError, TypeError):
+                                logger.warning(f"Could not convert value_num {value_num} to float for station_id {station_id}")
+                                continue
+                    
+                    if value_num_float is not None:
+                        result.append({
+                            "ts_utc": ts_utc_str,
+                            "station_id": station_id_val,
+                            "metric_id": metric_id,
+                            "value_num": value_num_float,
+                            "quality": quality,
+                            "source_id": source_id,
+                            "inserted_at": inserted_at_str,
+                            "height_depth_in": height_depth_in
+                        })
+                
+                logger.info(f"Returning {len(result)} SNOTEL observation data points for station_id {station_id}")
+                
+                return https_fn.Response(
+                    json.dumps(result),
+                    status=200,
+                    headers={"Content-Type": "application/json"}
+                )
+                
+        except Exception as db_error:
+            logger.error(f"Database error in get_snotel_station_observations: {db_error}")
+            logger.error(traceback.format_exc())
+            if conn:
+                conn.rollback()
+            return https_fn.Response(
+                json.dumps({"error": "A database error occurred.", "details": str(db_error)}),
+                status=500,
+                headers={"Content-Type": "application/json"}
+            )
+        finally:
+            if conn:
+                pool.putconn(conn)
+                
+    except Exception as e:
+        logger.error(f"General error in get_snotel_station_observations: {e}")
+        logger.error(traceback.format_exc())
+        return https_fn.Response(
+            json.dumps({"error": "An internal server error occurred.", "details": str(e)}),
+            status=500,
+            headers={"Content-Type": "application/json"}
+        )
