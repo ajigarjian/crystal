@@ -558,12 +558,11 @@ export default function Page() {
           onPowerLineSelect={handleSearchPowerLineSelect}
           onFlowgateSelect={handleSearchFlowgateSelect}
         />
-        <div className="flex flex-1 flex-col pt-4">
+        <div className="flex flex-1 flex-col">
           <div className="flex flex-1 flex-col">
-            <div className="@container/main flex flex-1 flex-col gap-2">
-              <div className="flex flex-col gap-4 pt-2 md:gap-6 min-h-[calc(100vh-200px)]">
-                <div className="flex grid grid-cols-5 gap-4 px-4 lg:px-6 flex-1">
-                  <div className="col-span-3 min-h-[600px] h-[85vh]">
+            <div className="@container/main flex flex-1 flex-col">
+              <div className="flex flex-col lg:grid lg:grid-cols-5 gap-2 lg:gap-4 p-2 lg:px-4 lg:py-4 flex-1 h-[calc(100vh-4rem)] lg:h-[calc(100vh-6rem)]">
+                <div className="lg:col-span-3 min-h-[45vh] lg:min-h-[600px] h-[45vh] lg:h-full flex-shrink-0">
                     {mapboxToken ? (
                       <InteractiveMap 
                         mapboxAccessToken={mapboxToken} 
@@ -590,7 +589,7 @@ export default function Page() {
                       </div>
                     )}
                   </div>
-                  <div className="col-span-2 flex flex-col gap-6">
+                  <div className="lg:col-span-2 flex flex-col gap-4 lg:gap-6 min-h-0 flex-1 overflow-y-auto">
                     {/* Selected Feature Header with Clear Button */}
                     {selectedDisplay && (
                       <div className="pb-2 border-b flex items-center justify-between">
@@ -881,7 +880,6 @@ export default function Page() {
               </div>
             </div>
           </div>
-        </div>
       </SidebarInset>
     </SidebarProvider>
   )
