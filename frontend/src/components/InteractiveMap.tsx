@@ -861,16 +861,16 @@ export function InteractiveMap({
                     ["==", ["get", "is_flowgate_line"], true],
                     [
                       "case",
-                      // Green for capacity factor < 0.7
-                      ["<", ["get", "capacity_factor"], 0.7],
+                      // Green for capacity factor >= 1.0
+                      [">=", ["get", "capacity_factor"], 1.0],
                       "#22c55e", // Green
-                      // Yellow for capacity factor 0.7-1.0
-                      ["<", ["get", "capacity_factor"], 1.0],
+                      // Yellow for capacity factor 0.8 to < 1.0
+                      [">=", ["get", "capacity_factor"], 0.8],
                       "#eab308", // Yellow
-                      // Orange for capacity factor 1.0-1.3
-                      ["<", ["get", "capacity_factor"], 1.3],
+                      // Orange for capacity factor 0.5 to < 0.8
+                      [">=", ["get", "capacity_factor"], 0.5],
                       "#f97316", // Orange
-                      // Red for capacity factor >= 1.3
+                      // Red for capacity factor < 0.5
                       "#ef4444" // Red
                     ],
                     // All other non-flowgate lines are neutral gray

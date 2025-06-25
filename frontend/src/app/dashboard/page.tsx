@@ -522,18 +522,18 @@ export default function Page() {
 
   const formatCapacityFactor = (cf: number) => `${(cf * 100).toFixed(1)}%`
   const getCapacityFactorStatus = (cf: number) => {
-    if (cf < 0.7) return "Normal"
-    if (cf < 1.0) return "Elevated" 
-    if (cf < 1.3) return "High"
-    return "Critical"
+    if (cf < 0.5) return "Critical"
+    if (cf < 0.8) return "Warning"
+    if (cf < 1.0) return "Normal"
+    return "Good"
   }
 
   // Add the missing badge variant function
   const getCapacityFactorBadgeVariant = (cf: number): "default" | "secondary" | "destructive" | "outline" => {
-    if (cf < 0.7) return "secondary"  // Green - Normal
-    if (cf < 1.0) return "outline"    // Yellow - Elevated
-    if (cf < 1.3) return "default"    // Orange - High  
-    return "destructive"              // Red - Critical
+    if (cf < 0.5) return "destructive"  // Red - Critical
+    if (cf < 0.8) return "default"    // Orange - Warning
+    if (cf < 1.0) return "outline"    // Yellow - Normal
+    return "secondary"              // Green - Good
   }
 
   return (
