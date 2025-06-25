@@ -7,6 +7,11 @@ import { MapSkeleton } from "@/components/MapSkeleton";
 import { getPowerInfrastructure, PowerInfrastructureData, getPowerGenerators, GeneratorData, getPowerPlants, PowerPlantsData } from "@/lib/firebase";
 import { Switch } from "@/components/ui/switch";
 
+interface PointGeometry {
+  type: 'Point';
+  coordinates: [number, number];
+}
+
 interface MapMarker {
   latitude: number;
   longitude: number;
@@ -25,6 +30,19 @@ interface PowerLineClickData {
   capacityFactor: number;
 }
 
+interface GenerationClickData {
+  id: number;
+  name: string;
+  type: 'plant' | 'generator';
+  fuelType?: string;
+  capacity?: string;
+  operator?: string;
+  status?: string;
+  commissioningDate?: string;
+  plantName?: string;
+  technology?: string;
+}
+
 interface InteractiveMapProps {
   initialLatitude?: number;
   initialLongitude?: number;
@@ -34,9 +52,11 @@ interface InteractiveMapProps {
   height?: string | number;
   onMarkerClick?: (marker: MapMarker) => void;
   onPowerLineClick?: (powerLineData: PowerLineClickData) => void;
+  onGenerationClick?: (generationData: GenerationClickData) => void;
   onEmptyMapClick?: () => void;
   selectedMarkerId?: string | number;
   selectedPowerLineId?: number | null;
+
   selectedFlowgate?: string | null;
 }
 
@@ -137,6 +157,7 @@ export function InteractiveMap({
   height = "300px",
   onMarkerClick,
   onPowerLineClick,
+  onGenerationClick,
   onEmptyMapClick,
   selectedMarkerId,
   selectedPowerLineId,
@@ -211,10 +232,10 @@ export function InteractiveMap({
   const updateFilter = React.useCallback((path: string[], value: boolean | object) => {
     setFilters(prev => {
       const newFilters = { ...prev };
-      let current = newFilters as Record<string, any>;
+      let current = newFilters as Record<string, unknown>;
       for (let i = 0; i < path.length - 1; i++) {
         current[path[i]] = { ...current[path[i]] };
-        current = current[path[i]];
+        current = current[path[i]] as Record<string, unknown>;
       }
       current[path[path.length - 1]] = value;
       return newFilters;
@@ -223,6 +244,9 @@ export function InteractiveMap({
 
   // Add hover state for dam markers
   const [hoveredMarker, setHoveredMarker] = React.useState<MapMarker | null>(null);
+  
+  // Add hover state for generation markers
+  const [hoveredGeneration, setHoveredGeneration] = React.useState<{id: number, name: string, type: string, longitude: number, latitude: number} | null>(null);
 
   // Add debouncing for hover events to prevent flickering
   const hoverTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
@@ -390,7 +414,7 @@ export function InteractiveMap({
     }
     
     // Client-side filtering based on enabled types
-    const enabledTypes = [];
+    const enabledTypes: string[] = [];
     if (showNuclear) enabledTypes.push('nuclear');
     if (showSolar) enabledTypes.push('solar', 'photovoltaic');
     if (showWind) enabledTypes.push('wind');
@@ -447,7 +471,7 @@ export function InteractiveMap({
     }
     
     // Client-side filtering based on enabled types
-    const enabledTypes = [];
+    const enabledTypes: string[] = [];
     if (showNuclear) enabledTypes.push('nuclear');
     if (showSolar) enabledTypes.push('solar', 'photovoltaic');
     if (showWind) enabledTypes.push('wind');
@@ -515,8 +539,52 @@ export function InteractiveMap({
         mapStyle={BASE_STYLE}
         onMove={(evt: ViewStateChangeEvent) => setViewport(evt.viewState)}
         onClick={(event) => {
-          // Handle click events on power lines
+          // Handle click events on power lines and generation markers
           const features = event.features;
+          
+          // Check if we clicked on a generation marker first
+          if (features && features.length > 0) {
+            const plantFeature = features.find(f => f.source === 'power-plants' && f.layer?.id === 'plant-points');
+            const generatorFeature = features.find(f => f.source === 'power-generators' && f.layer?.id === 'generator-points');
+            
+            if (plantFeature && plantFeature.properties) {
+              const plantData: GenerationClickData = {
+                id: plantFeature.properties.id,
+                name: plantFeature.properties.name || 'Unnamed Plant',
+                type: 'plant',
+                fuelType: plantFeature.properties.plant_source || plantFeature.properties.plant_method || plantFeature.properties.type,
+                capacity: plantFeature.properties.capacity_mw,
+                operator: plantFeature.properties.operator,
+                status: plantFeature.properties.status,
+                commissioningDate: plantFeature.properties.commissioning_date
+              };
+              
+              if (onGenerationClick) {
+                onGenerationClick(plantData);
+              }
+              return;
+            }
+            
+            if (generatorFeature && generatorFeature.properties) {
+              const generatorData: GenerationClickData = {
+                id: generatorFeature.properties.id,
+                name: generatorFeature.properties.name || generatorFeature.properties.plant_name || 'Unnamed Generator',
+                type: 'generator',
+                fuelType: generatorFeature.properties.fuel_type,
+                capacity: generatorFeature.properties.capacity_mw,
+                operator: generatorFeature.properties.operator,
+                status: generatorFeature.properties.status,
+                commissioningDate: generatorFeature.properties.commissioning_date,
+                plantName: generatorFeature.properties.plant_name,
+                technology: generatorFeature.properties.technology
+              };
+              
+              if (onGenerationClick) {
+                onGenerationClick(generatorData);
+              }
+              return;
+            }
+          }
           
           // Check if we clicked on a power line
           if (features && features.length > 0) {
@@ -597,28 +665,79 @@ export function InteractiveMap({
           }
         }}
         onMouseEnter={(event) => {
-          // Check if we're hovering over a power line
+          // Check if we're hovering over a power line or generation marker
           const features = event.target.queryRenderedFeatures(event.point, {
-            layers: ['power-lines', 'power-lines-clickable']
+            layers: ['power-lines', 'power-lines-clickable', 'plant-points', 'generator-points']
           });
           
           if (features.length > 0) {
             event.target.getCanvas().style.cursor = 'pointer';
+            
+            // Check for generation markers to show tooltip
+            const plantFeature = features.find(f => f.layer?.id === 'plant-points');
+            const generatorFeature = features.find(f => f.layer?.id === 'generator-points');
+            
+            if (plantFeature && plantFeature.properties && plantFeature.geometry && plantFeature.geometry.type === 'Point') {
+              const coords = (plantFeature.geometry as PointGeometry).coordinates;
+              setHoveredGeneration({
+                id: plantFeature.properties.id,
+                name: plantFeature.properties.name || 'Unnamed Plant',
+                type: plantFeature.properties.plant_source || plantFeature.properties.plant_method || 'Power Plant',
+                longitude: coords[0],
+                latitude: coords[1]
+              });
+            } else if (generatorFeature && generatorFeature.properties && generatorFeature.geometry && generatorFeature.geometry.type === 'Point') {
+              const coords = (generatorFeature.geometry as PointGeometry).coordinates;
+              setHoveredGeneration({
+                id: generatorFeature.properties.id,
+                name: generatorFeature.properties.name || generatorFeature.properties.plant_name || 'Unnamed Generator',
+                type: generatorFeature.properties.fuel_type || 'Generator',
+                longitude: coords[0],
+                latitude: coords[1]
+              });
+            }
           }
         }}
         onMouseLeave={(event) => {
-          // Reset cursor when leaving power lines
+          // Reset cursor and clear generation hover
           event.target.getCanvas().style.cursor = '';
+          setHoveredGeneration(null);
         }}
         onMouseMove={(event) => {
           // Update cursor based on what we're hovering over
           const features = event.target.queryRenderedFeatures(event.point, {
-            layers: ['power-lines', 'power-lines-clickable']
+            layers: ['power-lines', 'power-lines-clickable', 'plant-points', 'generator-points']
           });
           
           event.target.getCanvas().style.cursor = features.length > 0 ? 'pointer' : '';
+          
+          // Update generation hover state
+          const plantFeature = features.find(f => f.layer?.id === 'plant-points');
+          const generatorFeature = features.find(f => f.layer?.id === 'generator-points');
+          
+          if (plantFeature && plantFeature.properties && plantFeature.geometry && plantFeature.geometry.type === 'Point') {
+            const coords = (plantFeature.geometry as PointGeometry).coordinates;
+            setHoveredGeneration({
+              id: plantFeature.properties.id,
+              name: plantFeature.properties.name || 'Unnamed Plant',
+              type: plantFeature.properties.plant_source || plantFeature.properties.plant_method || 'Power Plant',
+              longitude: coords[0],
+              latitude: coords[1]
+            });
+          } else if (generatorFeature && generatorFeature.properties && generatorFeature.geometry && generatorFeature.geometry.type === 'Point') {
+            const coords = (generatorFeature.geometry as PointGeometry).coordinates;
+            setHoveredGeneration({
+              id: generatorFeature.properties.id,
+              name: generatorFeature.properties.name || generatorFeature.properties.plant_name || 'Unnamed Generator',
+              type: generatorFeature.properties.fuel_type || 'Generator',
+              longitude: coords[0],
+              latitude: coords[1]
+            });
+          } else {
+            setHoveredGeneration(null);
+          }
         }}
-        interactiveLayerIds={['power-lines', 'power-lines-clickable']}
+        interactiveLayerIds={['power-lines', 'power-lines-clickable', 'plant-points', 'generator-points']}
         minZoom={4}
         maxZoom={22}
         scrollZoom={true}
@@ -1191,8 +1310,26 @@ export function InteractiveMap({
             className="dam-hover-popup"
             style={{ pointerEvents: 'none' }}
           >
-            <div style={{ pointerEvents: 'none' }}>
-              {hoveredMarker.name || 'Dam'}
+            <div style={{ pointerEvents: 'none', color: '#333333', fontWeight: '500', fontSize: '14px' }}>
+              {hoveredMarker.name || `Dam ${hoveredMarker.id}`}
+            </div>
+          </Popup>
+        )}
+
+        {/* Generation hover popup */}
+        {hoveredGeneration && (
+          <Popup
+            latitude={hoveredGeneration.latitude}
+            longitude={hoveredGeneration.longitude}
+            closeButton={false}
+            closeOnClick={false}
+            offset={[0, -20]}
+            className="generation-hover-popup"
+            style={{ pointerEvents: 'none' }}
+          >
+            <div style={{ pointerEvents: 'none', color: '#333333', fontWeight: '500', fontSize: '14px' }}>
+              <div className="font-medium">{hoveredGeneration.name}</div>
+              <div className="text-xs text-gray-600 capitalize">{hoveredGeneration.type}</div>
             </div>
           </Popup>
         )}

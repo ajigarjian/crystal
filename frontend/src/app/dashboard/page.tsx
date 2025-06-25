@@ -38,11 +38,24 @@ export interface PowerLineInfo {
   capacityFactor: number;
 }
 
-export type SelectedFeatureType = 'dam' | 'powerline';
+export interface GenerationInfo {
+  id: number;
+  name: string;
+  type: 'plant' | 'generator';
+  fuelType?: string;
+  capacity?: string;
+  operator?: string;
+  status?: string;
+  commissioningDate?: string;
+  plantName?: string;
+  technology?: string;
+}
+
+export type SelectedFeatureType = 'dam' | 'powerline' | 'generation';
 
 export interface SelectedFeature {
   type: SelectedFeatureType;
-  data: DamInfo | PowerLineInfo;
+  data: DamInfo | PowerLineInfo | GenerationInfo;
 }
 
 const AVAILABLE_DAMS: DamInfo[] = [
@@ -176,6 +189,10 @@ export default function Page() {
     return selectedFeature?.type === 'powerline' ? selectedFeature.data as PowerLineInfo : null;
   };
 
+  const getCurrentGeneration = (): GenerationInfo | null => {
+    return selectedFeature?.type === 'generation' ? selectedFeature.data as GenerationInfo : null;
+  };
+
   React.useEffect(() => {
     async function loadSectionCards() {
       setIsLoadingCards(true);
@@ -184,6 +201,9 @@ export default function Page() {
           const damData = selectedFeature.data as DamInfo;
           const data = await getDashboardSectionCards(damData.id);
           setCurrentSectionCardData(data);
+        } else if (selectedFeature?.type === 'generation') {
+          // For now, generation nodes don't have section cards
+          setCurrentSectionCardData([]);
         } else {
           setCurrentSectionCardData([]);
         }
@@ -338,6 +358,40 @@ export default function Page() {
     }
   };
 
+  const handleGenerationClick = (generationData: {
+    id: number;
+    name: string;
+    type: 'plant' | 'generator';
+    fuelType?: string;
+    capacity?: string;
+    operator?: string;
+    status?: string;
+    commissioningDate?: string;
+    plantName?: string;
+    technology?: string;
+  }) => {
+    console.log('Dashboard handling generation click:', generationData);
+    
+    // Clear flowgate selection when clicking generation
+    setSelectedFlowgate(null);
+    
+    setSelectedFeature({
+      type: 'generation',
+      data: {
+        id: generationData.id,
+        name: generationData.name,
+        type: generationData.type,
+        fuelType: generationData.fuelType,
+        capacity: generationData.capacity,
+        operator: generationData.operator,
+        status: generationData.status,
+        commissioningDate: generationData.commissioningDate,
+        plantName: generationData.plantName,
+        technology: generationData.technology,
+      }
+    });
+  };
+
   const handleMapMarkerClick = (marker: { id: string | number; name?: string; latitude: number; longitude: number }) => {
     // Clear flowgate selection when clicking dam
     setSelectedFlowgate(null);
@@ -394,12 +448,16 @@ export default function Page() {
     } else if (selectedFeature.type === 'powerline') {
       const powerLine = selectedFeature.data as PowerLineInfo;
       return powerLine.name;
+    } else if (selectedFeature.type === 'generation') {
+      const generation = selectedFeature.data as GenerationInfo;
+      return generation.name;
     }
     return null;
   };
 
   const currentDam = getCurrentDam();
   const currentPowerLine = getCurrentPowerLine();
+  const currentGeneration = getCurrentGeneration();
   const selectedDisplay = getSelectedFeatureDisplay();
 
   // Add deselection handler
@@ -470,6 +528,7 @@ export default function Page() {
                         markers={damMarkers} 
                         onMarkerClick={handleMapMarkerClick}
                         onPowerLineClick={handlePowerLineClick}
+                        onGenerationClick={handleGenerationClick}
                         onEmptyMapClick={handleDeselection}
                         selectedMarkerId={currentDam?.id}
                         selectedPowerLineId={currentPowerLine?.id}
@@ -678,6 +737,64 @@ export default function Page() {
                                 </div>
                               </>
                             )}
+                          </CardContent>
+                        </Card>
+                      </>
+                    )}
+
+                    {selectedFeature?.type === 'generation' && currentGeneration && (
+                      <>
+                        {/* Generation Details */}
+                        <Card className="flex-shrink-0">
+                          <CardHeader>
+                            <CardTitle className="text-sm text-muted-foreground">
+                              {currentGeneration.type === 'plant' ? 'Power Plant' : 'Generator'} Details
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent className="space-y-4">
+                            {/* Basic Generation Information */}
+                            <div className="grid grid-cols-2 gap-3 text-sm">
+                              <div>
+                                <span className="font-medium text-muted-foreground">Type:</span>
+                                <div className="font-medium capitalize">{currentGeneration.fuelType || 'Unknown'}</div>
+                              </div>
+                              {currentGeneration.capacity && (
+                                <div>
+                                  <span className="font-medium text-muted-foreground">Capacity:</span>
+                                  <div className="font-medium">{currentGeneration.capacity} MW</div>
+                                </div>
+                              )}
+                              {currentGeneration.operator && (
+                                <div>
+                                  <span className="font-medium text-muted-foreground">Operator:</span>
+                                  <div className="font-medium">{currentGeneration.operator}</div>
+                                </div>
+                              )}
+                              {currentGeneration.status && (
+                                <div>
+                                  <span className="font-medium text-muted-foreground">Status:</span>
+                                  <div className="font-medium capitalize">{currentGeneration.status}</div>
+                                </div>
+                              )}
+                              {currentGeneration.commissioningDate && (
+                                <div className="col-span-2">
+                                  <span className="font-medium text-muted-foreground">Commissioning Date:</span>
+                                  <div className="font-medium">{currentGeneration.commissioningDate}</div>
+                                </div>
+                              )}
+                              {currentGeneration.plantName && currentGeneration.type === 'generator' && (
+                                <div className="col-span-2">
+                                  <span className="font-medium text-muted-foreground">Plant:</span>
+                                  <div className="font-medium">{currentGeneration.plantName}</div>
+                                </div>
+                              )}
+                              {currentGeneration.technology && (
+                                <div className="col-span-2">
+                                  <span className="font-medium text-muted-foreground">Technology:</span>
+                                  <div className="font-medium">{currentGeneration.technology}</div>
+                                </div>
+                              )}
+                            </div>
                           </CardContent>
                         </Card>
                       </>
