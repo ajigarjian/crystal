@@ -1245,12 +1245,27 @@ export function InteractiveMap({
                 "#9370db" // Other - medium purple (default)
               ],
               "circle-radius": [
-                "case",
-                // Selected state
-                ["all", ["==", ["get", "id"], selectedGenId], ["==", "plant", selectedGenType]],
-                14, // Slightly larger radius when selected
-                // Default radius
-                ["interpolate", ["linear"], ["zoom"], 6, 4, 10, 8, 14, 12]
+                "interpolate",
+                ["linear"],
+                ["zoom"],
+                6, [
+                  "case",
+                  ["all", ["==", ["get", "id"], selectedGenId], ["==", "plant", selectedGenType]],
+                  8, // Slightly larger radius when selected
+                  4  // Default radius at zoom 6
+                ],
+                10, [
+                  "case",
+                  ["all", ["==", ["get", "id"], selectedGenId], ["==", "plant", selectedGenType]],
+                  12, // Slightly larger radius when selected
+                  8   // Default radius at zoom 10
+                ],
+                14, [
+                  "case",
+                  ["all", ["==", ["get", "id"], selectedGenId], ["==", "plant", selectedGenType]],
+                  16, // Slightly larger radius when selected
+                  12  // Default radius at zoom 14
+                ]
               ],
               "circle-opacity": 0.8,
               "circle-stroke-color": [
@@ -1326,12 +1341,27 @@ export function InteractiveMap({
                 "#9370db" // Other - medium purple (default)
               ],
               "circle-radius": [
-                "case",
-                // Selected state
-                ["all", ["==", ["get", "id"], selectedGenId], ["==", "generator", selectedGenType]],
-                8, // Slightly larger radius when selected
-                // Default radius
-                ["interpolate", ["linear"], ["zoom"], 8, 2, 12, 4, 16, 6]
+                "interpolate",
+                ["linear"],
+                ["zoom"],
+                8, [
+                  "case",
+                  ["all", ["==", ["get", "id"], selectedGenId], ["==", "generator", selectedGenType]],
+                  4, // Slightly larger radius when selected
+                  2  // Default radius at zoom 8
+                ],
+                12, [
+                  "case",
+                  ["all", ["==", ["get", "id"], selectedGenId], ["==", "generator", selectedGenType]],
+                  6, // Slightly larger radius when selected
+                  4  // Default radius at zoom 12
+                ],
+                16, [
+                  "case",
+                  ["all", ["==", ["get", "id"], selectedGenId], ["==", "generator", selectedGenType]],
+                  8, // Slightly larger radius when selected
+                  6  // Default radius at zoom 16
+                ]
               ],
               "circle-opacity": 0.8,
               "circle-stroke-color": [
