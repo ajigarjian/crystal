@@ -354,7 +354,7 @@ export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProp
                 }
               })()
             ) : (
-              "Daily inflow (cubic feet per second) for the selected period (times in UTC)."
+              "Daily inflow (cubic feet per second) for the selected period."
             )}
           </span>
           <span className="@[540px]/card:hidden">
