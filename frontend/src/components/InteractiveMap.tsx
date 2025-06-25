@@ -330,12 +330,12 @@ export function InteractiveMap({
     };
   }, [isFullScreen, handleEscapeKey]);
 
-  // Then modify the loadPowerInfrastructure function:
+  // Load power infrastructure data once on component mount
   React.useEffect(() => {
     async function loadPowerInfrastructure() {
       try {
-        // Load power infrastructure with zoom level for simplification
-        const data = await getPowerInfrastructure(viewport.zoom);
+        // Load power infrastructure data without zoom-based filtering
+        const data = await getPowerInfrastructure();
         console.log("Power infrastructure data received:", data);
         
         // Format voltage values in the data
@@ -376,10 +376,8 @@ export function InteractiveMap({
       }
     }
     
-    // Debounce the loading to avoid too many requests during pan/zoom
-    const timeoutId = setTimeout(loadPowerInfrastructure, 300);
-    return () => clearTimeout(timeoutId);
-  }, [viewport.zoom]);
+    loadPowerInfrastructure();
+  }, []); // Empty dependency array - only run once on mount
 
   // Optimized generator loading - only load once or when generation is toggled
   const [generatorDataLoaded, setGeneratorDataLoaded] = React.useState(false);
