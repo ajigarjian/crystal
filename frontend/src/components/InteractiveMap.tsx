@@ -286,7 +286,7 @@ export function InteractiveMap({
     const layers = ['power-lines', 'power-lines-clickable'];
     if (showPlants && plantData) layers.push('plant-points');
     if (showGenerators && generatorData) layers.push('generator-points');
-    if (showSnotelStations && snotelGeoJsonData && viewport.zoom > 7) {
+    if (showSnotelStations && snotelGeoJsonData && viewport.zoom >= 5.8) {
         layers.push('snotel-points');
     }
     return layers;
@@ -302,7 +302,7 @@ export function InteractiveMap({
   const [hoveredSnotelStation, setHoveredSnotelStation] = React.useState<SnotelStationInfo | null>(null);
 
   // Add hover state for power lines
-  const [hoveredPowerLine, setHoveredPowerLine] = React.useState<{ name: string; voltage: string; longitude: number; latitude: number; } | null>(null);
+  const [hoveredPowerLine, setHoveredPowerLine] = React.useState<{ name: string; voltage: string; longitude: number; latitude: number; flowgate?: string | null; capacityFactor?: number; } | null>(null);
 
   // Add debouncing for hover events to prevent flickering
   const hoverTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
@@ -799,6 +799,8 @@ export function InteractiveMap({
               voltage: powerLineFeature.properties.voltage_formatted,
               longitude: event.lngLat.lng,
               latitude: event.lngLat.lat,
+              flowgate: powerLineFeature.properties.flowgate,
+              capacityFactor: powerLineFeature.properties.capacity_factor,
             });
             setHoveredGeneration(null);
             setHoveredSnotelStation(null);
@@ -1141,7 +1143,7 @@ export function InteractiveMap({
             id="snotel-points"
             type="circle"
             layout={{
-              visibility: showSnotelStations && viewport.zoom > 7 ? 'visible' : 'none'
+              visibility: showSnotelStations && viewport.zoom >= 5.8 ? 'visible' : 'none'
             }}
             paint={{
               'circle-color': [
@@ -1459,9 +1461,23 @@ export function InteractiveMap({
             className="power-line-hover-popup"
             style={{ pointerEvents: 'none' }}
           >
-            <div style={{ pointerEvents: 'none', color: '#333333', fontWeight: '500', fontSize: '14px' }}>
-              <div className="font-medium">{hoveredPowerLine.name}</div>
+            <div style={{ pointerEvents: 'none', color: '#333333', fontSize: '14px' }}>
+              <div className="font-semibold">{hoveredPowerLine.name}</div>
               <div className="text-xs text-gray-600">{hoveredPowerLine.voltage}</div>
+              {hoveredPowerLine.flowgate && hoveredPowerLine.flowgate !== 'null' && (
+                <div className="mt-2 pt-2 border-t border-gray-200">
+                  <div className="text-xs">
+                    <span className="font-medium text-gray-700">Flowgate:</span>
+                    <span className="font-mono text-xs ml-1">{hoveredPowerLine.flowgate}</span>
+                  </div>
+                  {hoveredPowerLine.capacityFactor !== undefined && hoveredPowerLine.capacityFactor !== null && (
+                    <div className="text-xs">
+                      <span className="font-medium text-gray-700">Capacity:</span>
+                      <span className="font-mono text-xs ml-1">{(hoveredPowerLine.capacityFactor * 100).toFixed(1)}%</span>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </Popup>
         )}
@@ -1637,8 +1653,8 @@ export function InteractiveMap({
                         onChange={(e) => updateFilter(['infrastructure', 'snotelStations'], e.target.checked)}
                         className="w-4 h-4 text-sky-600 border-gray-300 rounded focus:ring-sky-500"
                       />
-                      <svg className="w-4 h-4 text-sky-500 fill-current" viewBox="0 0 24 24">
-                        <path d="M12 2l2.12 6.36L20.48 12l-6.36 3.64L12 22l-2.12-6.36L3.52 12l6.36-3.64L12 2zM12 5.5l-1.27 3.82-3.82 1.27 3.82 1.27L12 18.5l1.27-3.82 3.82-1.27-3.82-1.27L12 5.5z"/>
+                      <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <circle cx="8" cy="8" r="5" fill="#0ea5e9" stroke="#FFFFFF" strokeWidth="2"/>
                       </svg>
                     </div>
                     <span className="text-gray-700 font-medium">SNOTEL Stations</span>
