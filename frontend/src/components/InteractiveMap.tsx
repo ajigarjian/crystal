@@ -909,7 +909,7 @@ export function InteractiveMap({
                     ["==", ["get", "is_flowgate_line"], true],
                     pulseOpacity, // Animated opacity value
                     // Default opacity for non-flowgate lines
-                    0.8
+                    0.6
                   ],
                   "line-width": [
                     "case",
