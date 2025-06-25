@@ -781,6 +781,57 @@ export const getDamLocations = async (): Promise<DamLocation[]> => {
   }
 };
 
+// Define the expected structure for a single SNOTEL station
+export interface SnotelStationData {
+  id: number;
+  triplet: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  elevation: number | null;
+}
+
+// Export a helper for calling the new SNOTEL stations function
+export const getSnotelStations = async (): Promise<SnotelStationData[]> => {
+  const region = functions.region || 'us-central1';
+  const projectId = firebaseConfig.projectId;
+  let baseUrl = '';
+
+  if (process.env.NODE_ENV === 'development') {
+    baseUrl = `http://localhost:5001/${projectId}/${region}`;
+  } else {
+    baseUrl = `https://${region}-${projectId}.cloudfunctions.net`;
+  }
+
+  const url = `${baseUrl}/get_snotel_stations`;
+
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      let errorData = { error: "Failed to fetch SNOTEL stations" };
+      try {
+        errorData = await response.json();
+      } catch (e) {
+        console.error("Failed to parse error response from getSnotelStations: ", e);
+      }
+      console.error('Error fetching SNOTEL stations:', response.status, errorData);
+      throw new Error(errorData.error || `Failed to fetch SNOTEL stations. Status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data as SnotelStationData[];
+  } catch (error: any) {
+    console.error('Error calling getSnotelStations function:', error);
+    return [];
+  }
+};
+
 export interface PowerInfrastructureFeature {
   type: "Feature";
   id: number;

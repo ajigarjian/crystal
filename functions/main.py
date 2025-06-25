@@ -2241,3 +2241,88 @@ def get_power_plants(request: https_fn.Request) -> https_fn.Response:
             status=500,
             headers={"Content-Type": "application/json"}
         )
+
+@https_fn.on_request(
+    cors=options.CorsOptions(
+        cors_origins=[
+        "https://crystal-2f87e.web.app",
+        "https://askcrystal.info",
+        "https://www.askcrystal.info",
+        "http://localhost:3000",
+        "http://localhost:5173",
+        ],
+        cors_methods=["get", "post", "options"]
+    ),
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=30,
+)
+def get_snotel_stations(request: https_fn.Request) -> https_fn.Response:
+    logger.info("Received request for SNOTEL station locations.")
+
+    # Handle warming requests
+    if request.method == 'POST':
+        try:
+            request_json = request.get_json(silent=True)
+            if request_json and request_json.get('warming'):
+                logger.info("Warming request received for get_snotel_stations.")
+                return https_fn.Response(json.dumps({"status": "warmed"}), status=200, headers={"Content-Type": "application/json"})
+        except Exception:
+            pass
+
+    try:
+        pool = get_connection_pool()
+        conn = pool.getconn()
+        snotel_stations_list = []
+        try:
+            with conn.cursor() as cursor:
+                # Query to get station metadata, filtering for active stations with valid coordinates
+                query_sql = """
+                    SELECT station_id, station_triplet, name, latitude, longitude, elevation
+                    FROM dim_station 
+                    WHERE is_active = true AND latitude IS NOT NULL AND longitude IS NOT NULL;
+                """
+                cursor.execute(query_sql)
+                rows = cursor.fetchall()
+                
+                for row_data in rows:
+                    station_id, station_triplet, name, lat, lon, elevation = row_data
+                    
+                    try:
+                        # Ensure coordinates and elevation are valid floats
+                        snotel_stations_list.append({
+                            "id": station_id,
+                            "triplet": station_triplet,
+                            "name": name,
+                            "latitude": float(lat),
+                            "longitude": float(lon),
+                            "elevation": float(elevation) if elevation is not None else None
+                        })
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"Could not parse data for station_id {station_id} (name: {name}). Error: {e}. Skipping this station.")
+                        continue
+            
+            return https_fn.Response(
+                json.dumps(snotel_stations_list),
+                status=200,
+                headers={"Content-Type": "application/json"}
+            )
+        except Exception as db_error:
+            logger.error(f"Database error in get_snotel_stations: {db_error}")
+            logger.error(traceback.format_exc())
+            if conn: conn.rollback()
+            return https_fn.Response(
+                json.dumps({"error": "A database error occurred.", "details": str(db_error)}),
+                status=500,
+                headers={"Content-Type": "application/json"}
+            )
+        finally:
+            if conn:
+                pool.putconn(conn)
+    except Exception as e:
+        logger.error(f"General error in get_snotel_stations: {e}")
+        logger.error(traceback.format_exc())
+        return https_fn.Response(
+            json.dumps({"error": "An internal server error occurred.", "details": str(e)}),
+            status=500,
+            headers={"Content-Type": "application/json"}
+        )

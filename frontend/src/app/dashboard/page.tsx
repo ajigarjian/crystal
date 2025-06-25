@@ -20,11 +20,13 @@ import { ChartTTCFlowgate } from '@/components/chart-ttc-flowgate'
 import { Terminal, Mic, Square } from "lucide-react"
 import { Separator } from "@/components/ui/separator"
 
-import { getDashboardSectionCards, SectionCardData, getDamLocations, DamLocation } from "@/lib/firebase"
+import { getDashboardSectionCards, SectionCardData, getDamLocations, DamLocation, getSnotelStations, SnotelStationData } from "@/lib/firebase"
 
 export interface DamInfo {
   id: number;
   name: string;
+  plantName?: string;
+  technology?: string;
 }
 
 export interface PowerLineInfo {
@@ -51,11 +53,20 @@ export interface GenerationInfo {
   technology?: string;
 }
 
-export type SelectedFeatureType = 'dam' | 'powerline' | 'generation';
+export interface SnotelStationInfo {
+  id: number;
+  name: string;
+  triplet: string;
+  elevation: number | null;
+  latitude: number;
+  longitude: number;
+}
+
+export type SelectedFeatureType = 'dam' | 'powerline' | 'generation' | 'snotel';
 
 export interface SelectedFeature {
   type: SelectedFeatureType;
-  data: DamInfo | PowerLineInfo | GenerationInfo;
+  data: DamInfo | PowerLineInfo | GenerationInfo | SnotelStationInfo;
 }
 
 const AVAILABLE_DAMS: DamInfo[] = [
@@ -171,6 +182,7 @@ export default function Page() {
   const [currentSectionCardData, setCurrentSectionCardData] = React.useState<SectionCardData[]>([]);
   const [isLoadingCards, setIsLoadingCards] = React.useState<boolean>(true);
   const [damMarkers, setDamMarkers] = React.useState<DamLocation[]>([]);
+  const [snotelStations, setSnotelStations] = React.useState<SnotelStationData[]>([]);
 
   const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
 
@@ -191,6 +203,10 @@ export default function Page() {
 
   const getCurrentGeneration = (): GenerationInfo | null => {
     return selectedFeature?.type === 'generation' ? selectedFeature.data as GenerationInfo : null;
+  };
+
+  const getCurrentSnotelStation = (): SnotelStationInfo | null => {
+    return selectedFeature?.type === 'snotel' ? selectedFeature.data as SnotelStationInfo : null;
   };
 
   React.useEffect(() => {
@@ -229,6 +245,19 @@ export default function Page() {
     }
   
     loadDamMapData();
+  }, []);
+
+  React.useEffect(() => {
+    async function loadSnotelStations() {
+      try {
+        const stations = await getSnotelStations();
+        setSnotelStations(stations);
+      } catch (error) {
+        console.error("Failed to load SNOTEL stations for map:", error);
+        setSnotelStations([]);
+      }
+    }
+    loadSnotelStations();
   }, []);
 
   // Fetch power infrastructure data for search
@@ -392,6 +421,15 @@ export default function Page() {
     });
   };
 
+  const handleSnotelStationClick = (stationData: SnotelStationInfo) => {
+    console.log('Dashboard handling SNOTEL station click:', stationData);
+    setSelectedFlowgate(null); // Clear other selections
+    setSelectedFeature({
+      type: 'snotel',
+      data: stationData
+    });
+  };
+
   const handleMapMarkerClick = (marker: { id: string | number; name?: string; latitude: number; longitude: number }) => {
     // Clear flowgate selection when clicking dam
     setSelectedFlowgate(null);
@@ -451,6 +489,9 @@ export default function Page() {
     } else if (selectedFeature.type === 'generation') {
       const generation = selectedFeature.data as GenerationInfo;
       return generation.name;
+    } else if (selectedFeature.type === 'snotel') {
+      const station = selectedFeature.data as SnotelStationInfo;
+      return station.name;
     }
     return null;
   };
@@ -458,6 +499,7 @@ export default function Page() {
   const currentDam = getCurrentDam();
   const currentPowerLine = getCurrentPowerLine();
   const currentGeneration = getCurrentGeneration();
+  const currentSnotelStation = getCurrentSnotelStation();
   const selectedDisplay = getSelectedFeatureDisplay();
 
   // Add deselection handler
@@ -526,13 +568,16 @@ export default function Page() {
                         mapboxAccessToken={mapboxToken} 
                         height="100%" 
                         markers={damMarkers} 
+                        snotelStations={snotelStations}
                         onMarkerClick={handleMapMarkerClick}
                         onPowerLineClick={handlePowerLineClick}
                         onGenerationClick={handleGenerationClick}
+                        onSnotelStationClick={handleSnotelStationClick}
                         onEmptyMapClick={handleDeselection}
                         selectedMarkerId={currentDam?.id}
                         selectedPowerLineId={currentPowerLine?.id}
                         selectedFlowgate={selectedFlowgate}
+                        selectedSnotelStationId={currentSnotelStation?.id}
                       />
                     ) : (
                       <div className="flex h-full items-center justify-center rounded-xl border border-dashed bg-muted/50 p-4 text-center">
@@ -794,6 +839,33 @@ export default function Page() {
                                   <div className="font-medium">{currentGeneration.technology}</div>
                                 </div>
                               )}
+                            </div>
+                          </CardContent>
+                        </Card>
+                      </>
+                    )}
+
+                    {selectedFeature?.type === 'snotel' && currentSnotelStation && (
+                      <>
+                        {/* SNOTEL Station Details */}
+                        <Card className="flex-shrink-0">
+                          <CardHeader>
+                            <CardTitle className="text-sm text-muted-foreground">SNOTEL Station Details</CardTitle>
+                          </CardHeader>
+                          <CardContent className="space-y-4">
+                            <div className="grid grid-cols-2 gap-3 text-sm">
+                              <div>
+                                <span className="font-medium text-muted-foreground">Triplet:</span>
+                                <div className="font-medium">{currentSnotelStation.triplet}</div>
+                              </div>
+                              <div>
+                                <span className="font-medium text-muted-foreground">Elevation:</span>
+                                <div className="font-medium">{currentSnotelStation.elevation ? `${currentSnotelStation.elevation.toLocaleString()} ft` : 'N/A'}</div>
+                              </div>
+                              <div className="col-span-2">
+                                <span className="font-medium text-muted-foreground">Coordinates:</span>
+                                <div className="font-medium">Lat: {currentSnotelStation.latitude.toFixed(4)}, Lon: {currentSnotelStation.longitude.toFixed(4)}</div>
+                              </div>
                             </div>
                           </CardContent>
                         </Card>
