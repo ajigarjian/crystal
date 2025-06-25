@@ -5,6 +5,12 @@ import ReactMapGL, { Marker, Popup, NavigationControl, ViewStateChangeEvent, Sou
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { MapSkeleton } from "@/components/MapSkeleton";
 import { getPowerInfrastructure, PowerInfrastructureData, getPowerGenerators, GeneratorData, getPowerPlants, PowerPlantsData } from "@/lib/firebase";
+import { Switch } from "@/components/ui/switch";
+
+interface PointGeometry {
+  type: 'Point';
+  coordinates: [number, number];
+}
 
 interface MapMarker {
   latitude: number;
@@ -24,6 +30,19 @@ interface PowerLineClickData {
   capacityFactor: number;
 }
 
+interface GenerationClickData {
+  id: number;
+  name: string;
+  type: 'plant' | 'generator';
+  fuelType?: string;
+  capacity?: string;
+  operator?: string;
+  status?: string;
+  commissioningDate?: string;
+  plantName?: string;
+  technology?: string;
+}
+
 interface InteractiveMapProps {
   initialLatitude?: number;
   initialLongitude?: number;
@@ -33,9 +52,11 @@ interface InteractiveMapProps {
   height?: string | number;
   onMarkerClick?: (marker: MapMarker) => void;
   onPowerLineClick?: (powerLineData: PowerLineClickData) => void;
+  onGenerationClick?: (generationData: GenerationClickData) => void;
   onEmptyMapClick?: () => void;
   selectedMarkerId?: string | number;
   selectedPowerLineId?: number | null;
+
   selectedFlowgate?: string | null;
 }
 
@@ -136,6 +157,7 @@ export function InteractiveMap({
   height = "300px",
   onMarkerClick,
   onPowerLineClick,
+  onGenerationClick,
   onEmptyMapClick,
   selectedMarkerId,
   selectedPowerLineId,
@@ -153,38 +175,78 @@ export function InteractiveMap({
   const [clickedLineId, setClickedLineId] = React.useState<number | null>(null);
   const [generatorData, setGeneratorData] = React.useState<GeneratorData | null>(null);
   const [plantData, setPlantData] = React.useState<PowerPlantsData | null>(null);
-  const [showGenerators, setShowGenerators] = React.useState(true);
-  const [showPlants, setShowPlants] = React.useState(true);
   
-  // Visibility controls for legend items
-  const [showDams, setShowDams] = React.useState(true);
-  const [showPowerLines, setShowPowerLines] = React.useState(true);
-  const [showSubstations, setShowSubstations] = React.useState(false);
-  const [showPowerPlants, setShowPowerPlants] = React.useState(true);
-  
-  // Voltage-specific visibility controls
-  const [show500kV, setShow500kV] = React.useState(true);
-  const [show230kV, setShow230kV] = React.useState(true);
-  const [show115kV, setShow115kV] = React.useState(true);
-  const [showOtherVoltages, setShowOtherVoltages] = React.useState(true);
+  // Modern organized filter state
+  const [filters, setFilters] = React.useState({
+    infrastructure: {
+      dams: true,
+      transmission: {
+        enabled: true,
+        voltages: {
+          '500kV': true,
+          '230kV': true,
+          '115kV': true,
+          'other': true
+        }
+      },
+      substations: false
+    },
+    generation: {
+      plants: true,
+      generators: true,
+      types: {
+        nuclear: true,
+        solar: true,
+        wind: true,
+        hydro: true,
+        gas: true,
+        coal: true,
+        biomass: true,
+        geothermal: true,
+        other: true
+      }
+    }
+  });
 
-  // Add generator type filters
-  const [showNuclear, setShowNuclear] = React.useState(true);
-  const [showSolar, setShowSolar] = React.useState(true);
-  const [showWind, setShowWind] = React.useState(true);
-  const [showHydro, setShowHydro] = React.useState(true);
-  const [showGas, setShowGas] = React.useState(true);
-  const [showCoal, setShowCoal] = React.useState(true);
-  const [showBiomass, setShowBiomass] = React.useState(true);
-  const [showGeothermal, setShowGeothermal] = React.useState(true);
-  const [showOtherTypes, setShowOtherTypes] = React.useState(true);
+  // Quick access getters for backward compatibility
+  const showDams = filters.infrastructure.dams;
+  const showPowerLines = filters.infrastructure.transmission.enabled;
+  const showSubstations = filters.infrastructure.substations;
+  const showPlants = filters.generation.plants;
+  const showGenerators = filters.generation.generators;
+  const show500kV = filters.infrastructure.transmission.voltages['500kV'];
+  const show230kV = filters.infrastructure.transmission.voltages['230kV'];
+  const show115kV = filters.infrastructure.transmission.voltages['115kV'];
+  const showOtherVoltages = filters.infrastructure.transmission.voltages.other;
+  const showNuclear = filters.generation.types.nuclear;
+  const showSolar = filters.generation.types.solar;
+  const showWind = filters.generation.types.wind;
+  const showHydro = filters.generation.types.hydro;
+  const showGas = filters.generation.types.gas;
+  const showCoal = filters.generation.types.coal;
+  const showBiomass = filters.generation.types.biomass;
+  const showGeothermal = filters.generation.types.geothermal;
+  const showOtherTypes = filters.generation.types.other;
 
-  // Add collapsible section state
-  const [isTransmissionCollapsed, setIsTransmissionCollapsed] = React.useState(true);
-  const [isGenerationCollapsed, setIsGenerationCollapsed] = React.useState(true);
+  // Helper function to update filters with proper typing
+  const updateFilter = React.useCallback((path: string[], value: boolean | object) => {
+    setFilters(prev => {
+      const newFilters = { ...prev };
+      let current = newFilters as Record<string, unknown>;
+      for (let i = 0; i < path.length - 1; i++) {
+        current[path[i]] = { ...current[path[i]] };
+        current = current[path[i]] as Record<string, unknown>;
+      }
+      current[path[path.length - 1]] = value;
+      return newFilters;
+    });
+  }, []);
 
   // Add hover state for dam markers
   const [hoveredMarker, setHoveredMarker] = React.useState<MapMarker | null>(null);
+  
+  // Add hover state for generation markers
+  const [hoveredGeneration, setHoveredGeneration] = React.useState<{id: number, name: string, type: string, longitude: number, latitude: number} | null>(null);
 
   // Add debouncing for hover events to prevent flickering
   const hoverTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
@@ -268,12 +330,12 @@ export function InteractiveMap({
     };
   }, [isFullScreen, handleEscapeKey]);
 
-  // Then modify the loadPowerInfrastructure function:
+  // Load power infrastructure data once on component mount
   React.useEffect(() => {
     async function loadPowerInfrastructure() {
       try {
-        // Load power infrastructure with zoom level for simplification
-        const data = await getPowerInfrastructure(viewport.zoom);
+        // Load power infrastructure data without zoom-based filtering
+        const data = await getPowerInfrastructure();
         console.log("Power infrastructure data received:", data);
         
         // Format voltage values in the data
@@ -314,84 +376,129 @@ export function InteractiveMap({
       }
     }
     
-    // Debounce the loading to avoid too many requests during pan/zoom
-    const timeoutId = setTimeout(loadPowerInfrastructure, 300);
-    return () => clearTimeout(timeoutId);
-  }, [viewport.zoom]);
+    loadPowerInfrastructure();
+  }, []); // Empty dependency array - only run once on mount
 
-  // Add new effect for loading generators
+  // Optimized generator loading - only load once or when generation is toggled
+  const [generatorDataLoaded, setGeneratorDataLoaded] = React.useState(false);
+  const [allGeneratorData, setAllGeneratorData] = React.useState<GeneratorData | null>(null);
+  
   React.useEffect(() => {
-    async function loadGenerators() {
+    async function loadAllGenerators() {
+      if (generatorDataLoaded || !showGenerators) return;
+      
       try {
-        // Build filter types based on user selections
-        const enabledTypes = [];
-        if (showNuclear) enabledTypes.push('nuclear');
-        if (showSolar) enabledTypes.push('solar', 'photovoltaic');
-        if (showWind) enabledTypes.push('wind');
-        if (showHydro) enabledTypes.push('hydro', 'water');
-        if (showGas) enabledTypes.push('gas', 'natural_gas');
-        if (showCoal) enabledTypes.push('coal');
-        if (showBiomass) enabledTypes.push('biomass', 'biogas');
-        if (showGeothermal) enabledTypes.push('geothermal');
-        if (showOtherTypes) enabledTypes.push('oil', 'diesel', 'waste');
-        
-        const typesFilter = enabledTypes.length > 0 ? enabledTypes.join(',') : undefined;
-        
-        // Load generators with zoom, and type filters
-        const data = await getPowerGenerators(viewport.zoom, typesFilter);
-        console.log("Generator data received:", data);
-        setGeneratorData(data);
+        // Load all generator data once with all types
+        const data = await getPowerGenerators(22); // Get all data without type filter
+        console.log("All generator data loaded:", data);
+        setAllGeneratorData(data);
+        setGeneratorDataLoaded(true);
       } catch (error) {
         console.error("Failed to load generator data:", error);
-        setGeneratorData(null);
+        setAllGeneratorData(null);
       }
     }
     
-    // Only load generators if they're enabled and at zoom level 6+
-    if (showGenerators && viewport.zoom >= 6) {
-      const timeoutId = setTimeout(loadGenerators, 300);
-      return () => clearTimeout(timeoutId);
-    } else {
-      setGeneratorData(null);
+    if (showGenerators) {
+      loadAllGenerators();
     }
-  }, [viewport.zoom, showGenerators, showNuclear, showSolar, showWind, showHydro, showGas, showCoal, showBiomass, showGeothermal, showOtherTypes]);
-
-  // Add new effect for loading plants
+  }, [showGenerators, generatorDataLoaded]);
+  
+  // Filter generator data based on current type selections
   React.useEffect(() => {
-    async function loadPlants() {
+    if (!allGeneratorData || !showGenerators) {
+      setGeneratorData(null);
+      return;
+    }
+    
+    // Client-side filtering based on enabled types
+    const enabledTypes: string[] = [];
+    if (showNuclear) enabledTypes.push('nuclear');
+    if (showSolar) enabledTypes.push('solar', 'photovoltaic');
+    if (showWind) enabledTypes.push('wind');
+    if (showHydro) enabledTypes.push('hydro', 'water');
+    if (showGas) enabledTypes.push('gas', 'natural_gas');
+    if (showCoal) enabledTypes.push('coal');
+    if (showBiomass) enabledTypes.push('biomass', 'biogas');
+    if (showGeothermal) enabledTypes.push('geothermal');
+    if (showOtherTypes) enabledTypes.push('oil', 'diesel', 'waste');
+    
+    if (enabledTypes.length === 0) {
+      setGeneratorData({ ...allGeneratorData, features: [] });
+      return;
+    }
+    
+    const filteredFeatures = allGeneratorData.features.filter(feature => {
+      const fuelType = (feature.properties.fuel_type || '').toLowerCase();
+      return enabledTypes.some(type => fuelType.includes(type.toLowerCase()));
+    });
+    
+    setGeneratorData({ ...allGeneratorData, features: filteredFeatures });
+  }, [allGeneratorData, showGenerators, showNuclear, showSolar, showWind, showHydro, showGas, showCoal, showBiomass, showGeothermal, showOtherTypes]);
+
+  // Optimized plant loading - only load once or when plants are toggled
+  const [plantDataLoaded, setPlantDataLoaded] = React.useState(false);
+  const [allPlantData, setAllPlantData] = React.useState<PowerPlantsData | null>(null);
+  
+  React.useEffect(() => {
+    async function loadAllPlants() {
+      if (plantDataLoaded || !showPlants) return;
+      
       try {
-        // Build filter types based on user selections
-        const enabledTypes = [];
-        if (showNuclear) enabledTypes.push('nuclear');
-        if (showSolar) enabledTypes.push('solar', 'photovoltaic');
-        if (showWind) enabledTypes.push('wind');
-        if (showHydro) enabledTypes.push('hydro', 'water');
-        if (showGas) enabledTypes.push('gas', 'natural_gas');
-        if (showCoal) enabledTypes.push('coal');
-        if (showBiomass) enabledTypes.push('biomass', 'biogas');
-        if (showGeothermal) enabledTypes.push('geothermal');
-        if (showOtherTypes) enabledTypes.push('oil', 'diesel', 'waste');
-        
-        const typesFilter = enabledTypes.length > 0 ? enabledTypes.join(',') : undefined;
-        
-        // Load plants with zoom, and type filters
-        const data = await getPowerPlants(viewport.zoom, typesFilter);
-        console.log("Plant data received:", data);
-        setPlantData(data);
+        // Load all plant data once with all types
+        const data = await getPowerPlants(22); // Get all data without type filter
+        console.log("All plant data loaded:", data);
+        setAllPlantData(data);
+        setPlantDataLoaded(true);
       } catch (error) {
         console.error("Failed to load plant data:", error);
-        setPlantData(null);
+        setAllPlantData(null);
       }
     }
     
-    // Only load plants if they're enabled and at zoom level 6+
-    if (showPlants && viewport.zoom >= 6) {
-      const timeoutId = setTimeout(loadPlants, 300);
-      return () => clearTimeout(timeoutId);
-    } else {
-      setPlantData(null);
+    if (showPlants) {
+      loadAllPlants();
     }
-  }, [viewport.zoom, showPlants, showNuclear, showSolar, showWind, showHydro, showGas, showCoal, showBiomass, showGeothermal, showOtherTypes]);
+  }, [showPlants, plantDataLoaded]);
+  
+  // Filter plant data based on current type selections
+  React.useEffect(() => {
+    if (!allPlantData || !showPlants) {
+      setPlantData(null);
+      return;
+    }
+    
+    // Client-side filtering based on enabled types
+    const enabledTypes: string[] = [];
+    if (showNuclear) enabledTypes.push('nuclear');
+    if (showSolar) enabledTypes.push('solar', 'photovoltaic');
+    if (showWind) enabledTypes.push('wind');
+    if (showHydro) enabledTypes.push('hydro', 'water');
+    if (showGas) enabledTypes.push('gas', 'natural_gas');
+    if (showCoal) enabledTypes.push('coal');
+    if (showBiomass) enabledTypes.push('biomass', 'biogas');
+    if (showGeothermal) enabledTypes.push('geothermal');
+    if (showOtherTypes) enabledTypes.push('oil', 'diesel', 'waste');
+    
+    if (enabledTypes.length === 0) {
+      setPlantData({ ...allPlantData, features: [] });
+      return;
+    }
+    
+    const filteredFeatures = allPlantData.features.filter(feature => {
+      const plantSource = (feature.properties.plant_source || '').toLowerCase();
+      const plantMethod = (feature.properties.plant_method || '').toLowerCase();
+      const type = (feature.properties.type || '').toLowerCase();
+      
+      return enabledTypes.some(enabledType => 
+        plantSource.includes(enabledType.toLowerCase()) ||
+        plantMethod.includes(enabledType.toLowerCase()) ||
+        type.includes(enabledType.toLowerCase())
+      );
+    });
+    
+    setPlantData({ ...allPlantData, features: filteredFeatures });
+  }, [allPlantData, showPlants, showNuclear, showSolar, showWind, showHydro, showGas, showCoal, showBiomass, showGeothermal, showOtherTypes]);
 
   // Add effect to sync external selectedFlowgate prop with internal state
   React.useEffect(() => {
@@ -408,7 +515,7 @@ export function InteractiveMap({
   // Add pulsing animation for flowgate lines
   React.useEffect(() => {
     const interval = setInterval(() => {
-      setPulseOpacity(prev => {
+      setPulseOpacity(() => {
         // Create a sine wave between 0.6 and 1.0
         const time = Date.now() / 1000; // Convert to seconds
         return 0.6 + 0.2 * (Math.sin(time * 2) + 1); // Oscillates between 0.6 and 1.0
@@ -430,8 +537,52 @@ export function InteractiveMap({
         mapStyle={BASE_STYLE}
         onMove={(evt: ViewStateChangeEvent) => setViewport(evt.viewState)}
         onClick={(event) => {
-          // Handle click events on power lines
+          // Handle click events on power lines and generation markers
           const features = event.features;
+          
+          // Check if we clicked on a generation marker first
+          if (features && features.length > 0) {
+            const plantFeature = features.find(f => f.source === 'power-plants' && f.layer?.id === 'plant-points');
+            const generatorFeature = features.find(f => f.source === 'power-generators' && f.layer?.id === 'generator-points');
+            
+            if (plantFeature && plantFeature.properties) {
+              const plantData: GenerationClickData = {
+                id: plantFeature.properties.id,
+                name: plantFeature.properties.name || 'Unnamed Plant',
+                type: 'plant',
+                fuelType: plantFeature.properties.plant_source || plantFeature.properties.plant_method || plantFeature.properties.type,
+                capacity: plantFeature.properties.capacity_mw,
+                operator: plantFeature.properties.operator,
+                status: plantFeature.properties.status,
+                commissioningDate: plantFeature.properties.commissioning_date
+              };
+              
+              if (onGenerationClick) {
+                onGenerationClick(plantData);
+              }
+              return;
+            }
+            
+            if (generatorFeature && generatorFeature.properties) {
+              const generatorData: GenerationClickData = {
+                id: generatorFeature.properties.id,
+                name: generatorFeature.properties.name || generatorFeature.properties.plant_name || 'Unnamed Generator',
+                type: 'generator',
+                fuelType: generatorFeature.properties.fuel_type,
+                capacity: generatorFeature.properties.capacity_mw,
+                operator: generatorFeature.properties.operator,
+                status: generatorFeature.properties.status,
+                commissioningDate: generatorFeature.properties.commissioning_date,
+                plantName: generatorFeature.properties.plant_name,
+                technology: generatorFeature.properties.technology
+              };
+              
+              if (onGenerationClick) {
+                onGenerationClick(generatorData);
+              }
+              return;
+            }
+          }
           
           // Check if we clicked on a power line
           if (features && features.length > 0) {
@@ -512,28 +663,79 @@ export function InteractiveMap({
           }
         }}
         onMouseEnter={(event) => {
-          // Check if we're hovering over a power line
+          // Check if we're hovering over a power line or generation marker
           const features = event.target.queryRenderedFeatures(event.point, {
-            layers: ['power-lines', 'power-lines-clickable']
+            layers: ['power-lines', 'power-lines-clickable', 'plant-points', 'generator-points']
           });
           
           if (features.length > 0) {
             event.target.getCanvas().style.cursor = 'pointer';
+            
+            // Check for generation markers to show tooltip
+            const plantFeature = features.find(f => f.layer?.id === 'plant-points');
+            const generatorFeature = features.find(f => f.layer?.id === 'generator-points');
+            
+            if (plantFeature && plantFeature.properties && plantFeature.geometry && plantFeature.geometry.type === 'Point') {
+              const coords = (plantFeature.geometry as PointGeometry).coordinates;
+              setHoveredGeneration({
+                id: plantFeature.properties.id,
+                name: plantFeature.properties.name || 'Unnamed Plant',
+                type: plantFeature.properties.plant_source || plantFeature.properties.plant_method || 'Power Plant',
+                longitude: coords[0],
+                latitude: coords[1]
+              });
+            } else if (generatorFeature && generatorFeature.properties && generatorFeature.geometry && generatorFeature.geometry.type === 'Point') {
+              const coords = (generatorFeature.geometry as PointGeometry).coordinates;
+              setHoveredGeneration({
+                id: generatorFeature.properties.id,
+                name: generatorFeature.properties.name || generatorFeature.properties.plant_name || 'Unnamed Generator',
+                type: generatorFeature.properties.fuel_type || 'Generator',
+                longitude: coords[0],
+                latitude: coords[1]
+              });
+            }
           }
         }}
         onMouseLeave={(event) => {
-          // Reset cursor when leaving power lines
+          // Reset cursor and clear generation hover
           event.target.getCanvas().style.cursor = '';
+          setHoveredGeneration(null);
         }}
         onMouseMove={(event) => {
           // Update cursor based on what we're hovering over
           const features = event.target.queryRenderedFeatures(event.point, {
-            layers: ['power-lines', 'power-lines-clickable']
+            layers: ['power-lines', 'power-lines-clickable', 'plant-points', 'generator-points']
           });
           
           event.target.getCanvas().style.cursor = features.length > 0 ? 'pointer' : '';
+          
+          // Update generation hover state
+          const plantFeature = features.find(f => f.layer?.id === 'plant-points');
+          const generatorFeature = features.find(f => f.layer?.id === 'generator-points');
+          
+          if (plantFeature && plantFeature.properties && plantFeature.geometry && plantFeature.geometry.type === 'Point') {
+            const coords = (plantFeature.geometry as PointGeometry).coordinates;
+            setHoveredGeneration({
+              id: plantFeature.properties.id,
+              name: plantFeature.properties.name || 'Unnamed Plant',
+              type: plantFeature.properties.plant_source || plantFeature.properties.plant_method || 'Power Plant',
+              longitude: coords[0],
+              latitude: coords[1]
+            });
+          } else if (generatorFeature && generatorFeature.properties && generatorFeature.geometry && generatorFeature.geometry.type === 'Point') {
+            const coords = (generatorFeature.geometry as PointGeometry).coordinates;
+            setHoveredGeneration({
+              id: generatorFeature.properties.id,
+              name: generatorFeature.properties.name || generatorFeature.properties.plant_name || 'Unnamed Generator',
+              type: generatorFeature.properties.fuel_type || 'Generator',
+              longitude: coords[0],
+              latitude: coords[1]
+            });
+          } else {
+            setHoveredGeneration(null);
+          }
         }}
-        interactiveLayerIds={['power-lines', 'power-lines-clickable']}
+        interactiveLayerIds={['power-lines', 'power-lines-clickable', 'plant-points', 'generator-points']}
         minZoom={4}
         maxZoom={22}
         scrollZoom={true}
@@ -823,7 +1025,7 @@ export function InteractiveMap({
             )}
 
             {/* Power stations and plants (polygons) */}
-            {showPowerPlants && (
+            {showPlants && (
               <Layer
                 id="power-polygons"
                 type="fill"
@@ -837,7 +1039,7 @@ export function InteractiveMap({
             )}
 
             {/* Power station and plant outlines */}
-            {showPowerPlants && (
+            {showPlants && (
               <Layer
                 id="power-polygon-outlines"
                 type="line"
@@ -1038,7 +1240,7 @@ export function InteractiveMap({
           </Source>
         )}
 
-        {/* Existing dam markers */}
+        {/* Dam markers with proper dam icons */}
         {showDams && markers && markers.length > 0 && markers.map((marker) => (
           <Marker
             key={`marker-${marker.id}`}
@@ -1060,32 +1262,36 @@ export function InteractiveMap({
                 padding: 0,
                 zIndex: 1000,
               }}
-              aria-label={`View details for ${marker.name || 'marker'}`}
+              aria-label={`View details for ${marker.name || 'dam'}`}
             >
-              {/* Columbia River Basin Dam Marker */}
+              {/* Dam Icon */}
               <div className="relative">
                 <svg 
-                  height="28" 
-                  viewBox="0 0 24 24" 
+                  width="24" 
+                  height="24" 
+                  viewBox="0 0 24 24"
                   style={{
-                    fill: String(marker.id) === String(selectedMarkerId) ? "#2196f3" : "#f44336",
-                    stroke: "#ffffff",
-                    strokeWidth: "2.5",
-                    transform: "translateY(-14px)",
+                    transform: "translateY(-12px)",
+                    filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.3))"
                   }}
                 >
-                  <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
-                  <circle cx="12" cy="10" r="3" fill="#ffffff"></circle> 
+                  {/* Dam structure */}
+                  <path 
+                    d="M2 14h20l-2 6H4l-2-6zm0-2h20V8H2v4zm4-8h12v4H6V4z" 
+                    fill={String(marker.id) === String(selectedMarkerId) ? "#2196f3" : "#1976d2"}
+                    stroke="#ffffff"
+                    strokeWidth="1.5"
+                  />
+                  {/* Water indicator */}
+                  <rect 
+                    x="3" 
+                    y="15" 
+                    width="18" 
+                    height="2" 
+                    fill={String(marker.id) === String(selectedMarkerId) ? "#64b5f6" : "#42a5f5"}
+                    opacity="0.8"
+                  />
                 </svg>
-                {/* Basin indicator */}
-                <div 
-                  className="absolute -bottom-1 left-1/2 transform -translate-x-1/2 w-3 h-3 rounded-full"
-                  style={{
-                    backgroundColor: String(marker.id) === String(selectedMarkerId) ? "#1976d2" : "#d32f2f",
-                    border: "2px solid #ffffff",
-                    boxShadow: "0 1px 3px rgba(0,0,0,0.3)"
-                  }}
-                />
               </div>
             </button>
           </Marker>
@@ -1102,8 +1308,26 @@ export function InteractiveMap({
             className="dam-hover-popup"
             style={{ pointerEvents: 'none' }}
           >
-            <div style={{ pointerEvents: 'none' }}>
-              {hoveredMarker.name || 'Dam'}
+            <div style={{ pointerEvents: 'none', color: '#333333', fontWeight: '500', fontSize: '14px' }}>
+              {hoveredMarker.name || `Dam ${hoveredMarker.id}`}
+            </div>
+          </Popup>
+        )}
+
+        {/* Generation hover popup */}
+        {hoveredGeneration && (
+          <Popup
+            latitude={hoveredGeneration.latitude}
+            longitude={hoveredGeneration.longitude}
+            closeButton={false}
+            closeOnClick={false}
+            offset={[0, -20]}
+            className="generation-hover-popup"
+            style={{ pointerEvents: 'none' }}
+          >
+            <div style={{ pointerEvents: 'none', color: '#333333', fontWeight: '500', fontSize: '14px' }}>
+              <div className="font-medium">{hoveredGeneration.name}</div>
+              <div className="text-xs text-gray-600 capitalize">{hoveredGeneration.type}</div>
             </div>
           </Popup>
         )}
@@ -1138,289 +1362,184 @@ export function InteractiveMap({
         </div>
       </div>
       
-      {/* Legend */}
+      {/* Modern Legend */}
       <div 
-        className="absolute bottom-4 right-4 bg-white/95 rounded-lg px-3 py-2 shadow-lg border"
-        style={{ zIndex: 40, minWidth: '180px' }}
+        className="absolute bottom-4 right-4 bg-white/95 backdrop-blur-sm rounded-xl shadow-xl border border-gray-200"
+        style={{ zIndex: 40, minWidth: '240px', maxWidth: '280px' }}
       >
-        <div className="text-xs space-y-2">
-          <div className="font-medium text-gray-800 mb-2">Legend</div>
+        <div className="p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold text-gray-900 text-sm">Map Layers</h3>
+          </div>
           
           {/* Selected Flowgate Info */}
           {selectedFlowgateGroup && (
-            <div className="border-b pb-2 mb-2">
-              <div className="font-medium text-red-600 mb-1">Selected Flowgate</div>
-              <div className="text-red-700 text-xs font-mono">{selectedFlowgateGroup}</div>
-              <button 
-                onClick={() => {
-                  setSelectedFlowgateGroup(null);
-                  setClickedLineId(null);
-                }}
-                className="text-xs text-gray-500 hover:text-gray-700 mt-1"
-              >
-                Clear selection
-              </button>
+            <div className="bg-cyan-50 border border-cyan-200 rounded-lg p-3 mb-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="font-medium text-cyan-800 text-xs mb-1">Active Selection</div>
+                  <div className="text-cyan-700 text-xs font-mono truncate">{selectedFlowgateGroup}</div>
+                </div>
+                <button 
+                  onClick={() => {
+                    setSelectedFlowgateGroup(null);
+                    setClickedLineId(null);
+                  }}
+                  className="text-cyan-600 hover:text-cyan-800 p-1 rounded-full hover:bg-cyan-100 transition-colors"
+                  title="Clear selection"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
             </div>
           )}
           
-          {/* Dams */}
-          <div className="space-y-1">
-            <label className="flex items-center space-x-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={showDams}
-                onChange={(e) => setShowDams(e.target.checked)}
-                className="w-3 h-3"
-              />
-              <svg height="12" viewBox="0 0 24 24" className="fill-red-500">
-                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
-              </svg>
-              <span className="text-gray-700 text-xs">Dams</span>
-            </label>
-          </div>
-          
-          
-          {/* Power Infrastructure → Transmission */}
-          {powerInfrastructureData && (
-            <>
-              <div className="border-t pt-2">
-                <button 
-                  onClick={() => setIsTransmissionCollapsed(!isTransmissionCollapsed)}
-                  className="flex items-center justify-between w-full text-left"
-                >
-                  <div className="font-medium text-gray-800 mb-1 text-xs">Transmission</div>
-                  <svg 
-                    className={`w-3 h-3 transform transition-transform ${isTransmissionCollapsed ? 'rotate-270' : ''}`}
-                    fill="none" 
-                    stroke="currentColor" 
-                    viewBox="0 0 24 24"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </button>
-                {!isTransmissionCollapsed && (
-                  <div className="space-y-1">
-                    <label className="flex items-center space-x-2 cursor-pointer">
+          <div className="space-y-4 text-xs">
+            {/* Infrastructure Section */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="font-medium text-gray-800 text-xs uppercase tracking-wider">Infrastructure</h4>
+              </div>
+              <div className="space-y-2 pl-1">
+                {/* Dams */}
+                <label className="flex items-center gap-3 cursor-pointer hover:bg-gray-50 p-1.5 rounded-md transition-colors">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={showDams}
+                      onChange={(e) => updateFilter(['infrastructure', 'dams'], e.target.checked)}
+                      className="w-4 h-4 text-red-600 border-gray-300 rounded focus:ring-red-500"
+                    />
+                    <svg className="w-4 h-4 fill-blue-600" viewBox="0 0 24 24">
+                      <path d="M2 14h20l-2 6H4l-2-6zm0-2h20V8H2v4zm4-8h12v4H6V4z"/>
+                    </svg>
+                  </div>
+                  <span className="text-gray-700 font-medium">Dams</span>
+                </label>
+                
+                {/* Transmission */}
+                <div className="space-y-2">
+                  <label className="flex items-center gap-3 cursor-pointer hover:bg-gray-50 p-1.5 rounded-md transition-colors">
+                    <div className="flex items-center gap-2">
                       <input
                         type="checkbox"
                         checked={showPowerLines}
-                        onChange={(e) => setShowPowerLines(e.target.checked)}
-                        className="w-3 h-3"
+                        onChange={(e) => updateFilter(['infrastructure', 'transmission', 'enabled'], e.target.checked)}
+                        className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
                       />
-                      <div className="w-3 h-0.5 bg-gray-600"></div>
-                      <span className="text-gray-600 text-xs">All Power Lines</span>
-                    </label>
-                    <div className="ml-5 space-y-1">
-                      <div className="flex items-center space-x-1">
-                        <div className="w-3 h-1 bg-cyan-500"></div>
-                        <span className="text-gray-600 text-xs">Selected Flowgate</span>
-                      </div>
-                      <label className="flex items-center space-x-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={show500kV}
-                          onChange={(e) => setShow500kV(e.target.checked)}
-                          className="w-3 h-3"
-                        />
-                        <div className="w-3 h-1 bg-gray-600"></div>
-                        <span className="text-gray-600 text-xs">500kV Lines</span>
-                      </label>
-                      <label className="flex items-center space-x-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={show230kV}
-                          onChange={(e) => setShow230kV(e.target.checked)}
-                          className="w-3 h-3"
-                        />
-                        <div className="w-3 h-0.5 bg-gray-600" style={{ height: '2.5px' }}></div>
-                        <span className="text-gray-600 text-xs">230kV Lines</span>
-                      </label>
-                      <label className="flex items-center space-x-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={show115kV}
-                          onChange={(e) => setShow115kV(e.target.checked)}
-                          className="w-3 h-3"
-                        />
-                        <div className="w-3 h-0.5 bg-gray-600" style={{ height: '1.5px' }}></div>
-                        <span className="text-gray-600 text-xs">115kV Lines</span>
-                      </label>
-                      <label className="flex items-center space-x-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={showOtherVoltages}
-                          onChange={(e) => setShowOtherVoltages(e.target.checked)}
-                          className="w-3 h-3"
-                        />
-                        <div className="w-3 bg-gray-600" style={{ height: '1px' }}></div>
-                        <span className="text-gray-600 text-xs">Other Voltages</span>
-                      </label>
+                      <div className="w-4 h-1 bg-gray-600 rounded-full"></div>
                     </div>
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-
-          {/* Power Generation Controls → Generation */}
-          {(viewport.zoom >= 6 || showPlants || showGenerators) && (
-            <div className="border-t pt-2">
-              <button 
-                onClick={() => setIsGenerationCollapsed(!isGenerationCollapsed)}
-                className="flex items-center justify-between w-full text-left"
-              >
-                <div className="font-medium text-gray-800 mb-1 text-xs">Generation</div>
-                <svg 
-                  className={`w-3 h-3 transform transition-transform ${isGenerationCollapsed ? 'rotate-270' : ''}`}
-                  fill="none" 
-                  stroke="currentColor" 
-                  viewBox="0 0 24 24"
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
-              {!isGenerationCollapsed && (
-                <div className="space-y-1">
-                  {/* Plants control - show at zoom 6+ */}
-                  {viewport.zoom >= 6 && (
-                    <label className="flex items-center space-x-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={showPlants}
-                        onChange={(e) => setShowPlants(e.target.checked)}
-                        className="w-3 h-3"
-                      />
-                      <span className="text-gray-600 text-xs">Power Plants</span>
-                    </label>
-                  )}
-                  
-                  {/* Generators control - show at zoom 6+ */}
-                  {viewport.zoom >= 6 && (
-                    <label className="flex items-center space-x-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={showGenerators}
-                        onChange={(e) => setShowGenerators(e.target.checked)}
-                        className="w-3 h-3"
-                      />
-                      <span className="text-gray-600 text-xs">Generators</span>
-                    </label>
-                  )}
-
-                  {/* Substations */}
-                  <label className="flex items-center space-x-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={showSubstations}
-                      onChange={(e) => setShowSubstations(e.target.checked)}
-                      className="w-3 h-3"
-                    />
-                    <div className="w-2 h-2 rounded-full bg-gray-500"></div>
-                    <span className="text-gray-600 text-xs">Substations</span>
+                    <span className="text-gray-700 font-medium">Transmission Lines</span>
                   </label>
                   
-                  {/* Type filters - show when either plants or generators are enabled */}
-                  {(showPlants || showGenerators) && (
-                    <div className="ml-5">
-                      <div className="text-xs text-gray-500 mb-1">Types:</div>
-                      <div className="space-y-1">
-                        <label className="flex items-center space-x-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={showNuclear}
-                            onChange={(e) => setShowNuclear(e.target.checked)}
-                            className="w-3 h-3"
-                          />
-                          <div className="w-2 h-2 rounded-full bg-orange-500"></div>
-                          <span className="text-gray-600 text-xs">Nuclear</span>
-                        </label>
-                        <label className="flex items-center space-x-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={showSolar}
-                            onChange={(e) => setShowSolar(e.target.checked)}
-                            className="w-3 h-3"
-                          />
-                          <div className="w-2 h-2 rounded-full bg-yellow-500"></div>
-                          <span className="text-gray-600 text-xs">Solar</span>
-                        </label>
-                        <label className="flex items-center space-x-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={showWind}
-                            onChange={(e) => setShowWind(e.target.checked)}
-                            className="w-3 h-3"
-                          />
-                          <div className="w-2 h-2 rounded-full bg-green-400"></div>
-                          <span className="text-gray-600 text-xs">Wind</span>
-                        </label>
-                        <label className="flex items-center space-x-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={showHydro}
-                            onChange={(e) => setShowHydro(e.target.checked)}
-                            className="w-3 h-3"
-                          />
-                          <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-                          <span className="text-gray-600 text-xs">Hydro</span>
-                        </label>
-                        <label className="flex items-center space-x-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={showGas}
-                            onChange={(e) => setShowGas(e.target.checked)}
-                            className="w-3 h-3"
-                          />
-                          <div className="w-2 h-2 rounded-full bg-pink-500"></div>
-                          <span className="text-gray-600 text-xs">Natural Gas</span>
-                        </label>
-                        <label className="flex items-center space-x-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={showCoal}
-                            onChange={(e) => setShowCoal(e.target.checked)}
-                            className="w-3 h-3"
-                          />
-                          <div className="w-2 h-2 rounded-full bg-amber-800"></div>
-                          <span className="text-gray-600 text-xs">Coal</span>
-                        </label>
-                        <label className="flex items-center space-x-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={showBiomass}
-                            onChange={(e) => setShowBiomass(e.target.checked)}
-                            className="w-3 h-3"
-                          />
-                          <div className="w-2 h-2 rounded-full bg-green-600"></div>
-                          <span className="text-gray-600 text-xs">Biomass</span>
-                        </label>
-                        <label className="flex items-center space-x-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={showGeothermal}
-                            onChange={(e) => setShowGeothermal(e.target.checked)}
-                            className="w-3 h-3"
-                          />
-                          <div className="w-2 h-2 rounded-full bg-red-600"></div>
-                          <span className="text-gray-600 text-xs">Geothermal</span>
-                        </label>
-                        <label className="flex items-center space-x-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={showOtherTypes}
-                            onChange={(e) => setShowOtherTypes(e.target.checked)}
-                            className="w-3 h-3"
-                          />
-                          <div className="w-2 h-2 rounded-full bg-purple-500"></div>
-                          <span className="text-gray-600 text-xs">Other</span>
-                        </label>
+                  {showPowerLines && (
+                    <div className="ml-6 space-y-2 border-l-2 border-gray-100 pl-3">
+                      <div className="flex items-center gap-2 text-cyan-600 mb-1">
+                        <div className="w-3 h-0.5 bg-cyan-500 rounded"></div>
+                        <span className="text-xs">Selected lines highlighted</span>
+                      </div>
+                      
+                      <div className="grid grid-cols-2 gap-2">
+                        {[
+                          { key: '500kV', label: '500kV', height: '3px', color: 'bg-gray-600' },
+                          { key: '230kV', label: '230kV', height: '2px', color: 'bg-gray-600' },
+                          { key: '115kV', label: '115kV', height: '1.5px', color: 'bg-gray-600' },
+                          { key: 'other', label: 'Other', height: '1px', color: 'bg-gray-600' }
+                        ].map(voltage => (
+                          <label key={voltage.key} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1 rounded transition-colors">
+                            <input
+                              type="checkbox"
+                              checked={filters.infrastructure.transmission.voltages[voltage.key as keyof typeof filters.infrastructure.transmission.voltages]}
+                              onChange={(e) => updateFilter(['infrastructure', 'transmission', 'voltages', voltage.key], e.target.checked)}
+                              className="w-3 h-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                            />
+                            <div className={`w-3 ${voltage.color} rounded`} style={{ height: voltage.height }}></div>
+                            <span className="text-xs text-gray-600">{voltage.label}</span>
+                          </label>
+                        ))}
                       </div>
                     </div>
                   )}
                 </div>
-              )}
+                
+                {/* Substations */}
+                <label className="flex items-center gap-3 cursor-pointer hover:bg-gray-50 p-1.5 rounded-md transition-colors">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={showSubstations}
+                      onChange={(e) => updateFilter(['infrastructure', 'substations'], e.target.checked)}
+                      className="w-4 h-4 text-gray-600 border-gray-300 rounded focus:ring-gray-500"
+                    />
+                    <div className="w-3 h-3 rounded-full bg-gray-500"></div>
+                  </div>
+                  <span className="text-gray-700 font-medium">Substations</span>
+                </label>
+              </div>
             </div>
-          )}
+
+            {/* Generation Section */}
+            <div className="border-t border-gray-200 pt-4">
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="font-medium text-gray-800 text-xs uppercase tracking-wider">Generation</h4>
+              </div>
+              <div className="space-y-2 pl-1">
+                {/* Plants & Generators */}
+                <div className="grid grid-cols-2 gap-x-4">
+                  <div className="flex items-center justify-between">
+                    <label htmlFor="show-plants" className="text-xs text-gray-700 font-medium cursor-pointer">Plants</label>
+                    <Switch
+                      id="show-plants"
+                      checked={showPlants}
+                      onCheckedChange={(checked) => updateFilter(['generation', 'plants'], checked)}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <label htmlFor="show-units" className="text-xs text-gray-700 font-medium cursor-pointer">Units</label>
+                    <Switch
+                      id="show-units"
+                      checked={showGenerators}
+                      onCheckedChange={(checked) => updateFilter(['generation', 'generators'], checked)}
+                    />
+                  </div>
+                </div>
+                
+                {/* Generation Types - show when either plants or generators are enabled */}
+                {(showPlants || showGenerators) && (
+                  <div className="mt-3 border-t border-gray-100 pt-3">
+                    <div className="text-xs text-gray-500 mb-2 font-medium">Filter by Type:</div>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {[
+                        { key: 'nuclear', label: 'Nuclear', color: 'bg-orange-500' },
+                        { key: 'solar', label: 'Solar', color: 'bg-yellow-500' },
+                        { key: 'wind', label: 'Wind', color: 'bg-green-400' },
+                        { key: 'hydro', label: 'Hydro', color: 'bg-blue-500' },
+                        { key: 'gas', label: 'Gas', color: 'bg-pink-500' },
+                        { key: 'coal', label: 'Coal', color: 'bg-amber-800' },
+                        { key: 'biomass', label: 'Biomass', color: 'bg-green-600' },
+                        { key: 'geothermal', label: 'Geo', color: 'bg-red-600' },
+                        { key: 'other', label: 'Other', color: 'bg-purple-500', span: 'col-span-2' }
+                      ].map(type => (
+                        <label key={type.key} className={`flex items-center gap-1.5 cursor-pointer hover:bg-gray-50 p-1 rounded transition-colors ${type.span || ''}`}>
+                          <input
+                            type="checkbox"
+                            checked={filters.generation.types[type.key as keyof typeof filters.generation.types]}
+                            onChange={(e) => updateFilter(['generation', 'types', type.key], e.target.checked)}
+                            className="w-3 h-3 border-gray-300 rounded focus:ring-2"
+                            style={{ accentColor: type.color.replace('bg-', '#') }}
+                          />
+                          <div className={`w-2.5 h-2.5 rounded-full ${type.color}`}></div>
+                          <span className="text-xs text-gray-600">{type.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
