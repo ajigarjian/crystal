@@ -191,6 +191,23 @@ export function InteractiveMap({
   const [plantData, setPlantData] = React.useState<PowerPlantsData | null>(null);
   const [isLegendVisible, setIsLegendVisible] = React.useState(true);
   
+  const snotelGeoJsonData = React.useMemo(() => {
+    if (!snotelStations || snotelStations.length === 0) {
+      return null;
+    }
+    return {
+      type: 'FeatureCollection' as const,
+      features: snotelStations.map(station => ({
+        type: 'Feature' as const,
+        geometry: {
+          type: 'Point' as const,
+          coordinates: [station.longitude, station.latitude],
+        },
+        properties: station,
+      })),
+    };
+  }, [snotelStations]);
+  
   // Modern organized filter state
   const [filters, setFilters] = React.useState({
     infrastructure: {
@@ -249,10 +266,16 @@ export function InteractiveMap({
   const updateFilter = React.useCallback((path: string[], value: boolean | object) => {
     setFilters(prev => {
       const newFilters = { ...prev };
-      let current = newFilters as Record<string, unknown>;
+      let current = newFilters as Record<string, any>;
       for (let i = 0; i < path.length - 1; i++) {
-        current[path[i]] = { ...current[path[i]] };
-        current = current[path[i]] as Record<string, unknown>;
+        const key = path[i];
+        const nextNode = current[key];
+        if (typeof nextNode === 'object' && nextNode !== null) {
+          current[key] = { ...nextNode };
+        } else {
+          current[key] = {};
+        }
+        current = current[key];
       }
       current[path[path.length - 1]] = value;
       return newFilters;
@@ -514,9 +537,9 @@ export function InteractiveMap({
     }
     
     const filteredFeatures = allPlantData.features.filter(feature => {
-      const plantSource = (feature.properties.plant_source || '').toLowerCase();
-      const plantMethod = (feature.properties.plant_method || '').toLowerCase();
-      const type = (feature.properties.type || '').toLowerCase();
+      const plantSource = ((feature.properties as any).plant_source || '').toLowerCase();
+      const plantMethod = ((feature.properties as any).plant_method || '').toLowerCase();
+      const type = ((feature.properties as any).type || '').toLowerCase();
       
       return enabledTypes.some(enabledType => 
         plantSource.includes(enabledType.toLowerCase()) ||
@@ -568,8 +591,16 @@ export function InteractiveMap({
           // Handle click events on power lines and generation markers
           const features = event.features;
           
-          // Check if we clicked on a generation marker first
+          // Check if we clicked on a feature
           if (features && features.length > 0) {
+            // Priority: SNOTEL Station
+            const snotelFeature = features.find(f => f.layer?.id === 'snotel-points');
+            if (snotelFeature && snotelFeature.properties) {
+              handleSnotelStationClick(snotelFeature.properties as SnotelStationInfo);
+              return; // Exit early
+            }
+
+            // Then: Generation (Plant or Generator)
             const plantFeature = features.find(f => f.source === 'power-plants' && f.layer?.id === 'plant-points');
             const generatorFeature = features.find(f => f.source === 'power-generators' && f.layer?.id === 'generator-points');
             
@@ -578,11 +609,11 @@ export function InteractiveMap({
                 id: plantFeature.properties.id,
                 name: plantFeature.properties.name || 'Unnamed Plant',
                 type: 'plant',
-                fuelType: plantFeature.properties.plant_source || plantFeature.properties.plant_method || plantFeature.properties.type,
-                capacity: plantFeature.properties.capacity_mw,
-                operator: plantFeature.properties.operator,
-                status: plantFeature.properties.status,
-                commissioningDate: plantFeature.properties.commissioning_date
+                fuelType: (plantFeature.properties as any).plant_source || (plantFeature.properties as any).plant_method || (plantFeature.properties as any).type,
+                capacity: (plantFeature.properties as any).capacity_mw,
+                operator: (plantFeature.properties as any).operator,
+                status: (plantFeature.properties as any).status,
+                commissioningDate: (plantFeature.properties as any).commissioning_date
               };
               
               if (onGenerationClick) {
@@ -594,15 +625,15 @@ export function InteractiveMap({
             if (generatorFeature && generatorFeature.properties) {
               const generatorData: GenerationClickData = {
                 id: generatorFeature.properties.id,
-                name: generatorFeature.properties.name || generatorFeature.properties.plant_name || 'Unnamed Generator',
+                name: generatorFeature.properties.name || (generatorFeature.properties as any).plant_name || 'Unnamed Generator',
                 type: 'generator',
-                fuelType: generatorFeature.properties.fuel_type,
-                capacity: generatorFeature.properties.capacity_mw,
-                operator: generatorFeature.properties.operator,
-                status: generatorFeature.properties.status,
-                commissioningDate: generatorFeature.properties.commissioning_date,
-                plantName: generatorFeature.properties.plant_name,
-                technology: generatorFeature.properties.technology
+                fuelType: (generatorFeature.properties as any).fuel_type,
+                capacity: (generatorFeature.properties as any).capacity_mw,
+                operator: (generatorFeature.properties as any).operator,
+                status: (generatorFeature.properties as any).status,
+                commissioningDate: (generatorFeature.properties as any).commissioning_date,
+                plantName: (generatorFeature.properties as any).plant_name,
+                technology: (generatorFeature.properties as any).technology
               };
               
               if (onGenerationClick) {
@@ -610,10 +641,8 @@ export function InteractiveMap({
               }
               return;
             }
-          }
-          
-          // Check if we clicked on a power line
-          if (features && features.length > 0) {
+
+            // Finally: Power Line
             const powerLineFeature = features.find(f => f.source === 'power-infrastructure' && (f.layer?.id === 'power-lines' || f.layer?.id === 'power-lines-clickable'));
             if (powerLineFeature && powerLineFeature.properties) {
               const lineId = powerLineFeature.properties.gid;
@@ -693,12 +722,20 @@ export function InteractiveMap({
         onMouseEnter={(event) => {
           // Check if we're hovering over a power line or generation marker
           const features = event.target.queryRenderedFeatures(event.point, {
-            layers: ['power-lines', 'power-lines-clickable', 'plant-points', 'generator-points']
+            layers: ['power-lines', 'power-lines-clickable', 'plant-points', 'generator-points', 'snotel-points']
           });
           
           if (features.length > 0) {
             event.target.getCanvas().style.cursor = 'pointer';
             
+            // SNOTEL Hover Logic
+            const snotelFeature = features.find(f => f.layer?.id === 'snotel-points');
+            if (snotelFeature && snotelFeature.properties) {
+              setHoveredSnotelStation(snotelFeature.properties as SnotelStationInfo);
+            } else {
+              setHoveredSnotelStation(null);
+            }
+
             // Check for generation markers to show tooltip
             const plantFeature = features.find(f => f.layer?.id === 'plant-points');
             const generatorFeature = features.find(f => f.layer?.id === 'generator-points');
@@ -708,7 +745,7 @@ export function InteractiveMap({
               setHoveredGeneration({
                 id: plantFeature.properties.id,
                 name: plantFeature.properties.name || 'Unnamed Plant',
-                type: plantFeature.properties.plant_source || plantFeature.properties.plant_method || 'Power Plant',
+                type: (plantFeature.properties as any).plant_source || (plantFeature.properties as any).plant_method || 'Power Plant',
                 longitude: coords[0],
                 latitude: coords[1]
               });
@@ -716,11 +753,13 @@ export function InteractiveMap({
               const coords = (generatorFeature.geometry as PointGeometry).coordinates;
               setHoveredGeneration({
                 id: generatorFeature.properties.id,
-                name: generatorFeature.properties.name || generatorFeature.properties.plant_name || 'Unnamed Generator',
-                type: generatorFeature.properties.fuel_type || 'Generator',
+                name: generatorFeature.properties.name || (generatorFeature.properties as any).plant_name || 'Unnamed Generator',
+                type: (generatorFeature.properties as any).fuel_type || 'Generator',
                 longitude: coords[0],
                 latitude: coords[1]
               });
+            } else if (!snotelFeature) { // Don't clear if hovering over SNOTEL
+              setHoveredGeneration(null);
             }
           }
         }}
@@ -728,14 +767,23 @@ export function InteractiveMap({
           // Reset cursor and clear generation hover
           event.target.getCanvas().style.cursor = '';
           setHoveredGeneration(null);
+          setHoveredSnotelStation(null);
         }}
         onMouseMove={(event) => {
           // Update cursor based on what we're hovering over
           const features = event.target.queryRenderedFeatures(event.point, {
-            layers: ['power-lines', 'power-lines-clickable', 'plant-points', 'generator-points']
+            layers: ['power-lines', 'power-lines-clickable', 'plant-points', 'generator-points', 'snotel-points']
           });
           
           event.target.getCanvas().style.cursor = features.length > 0 ? 'pointer' : '';
+
+          // SNOTEL Hover Logic
+          const snotelFeature = features.find(f => f.layer?.id === 'snotel-points');
+          if (snotelFeature && snotelFeature.properties) {
+            setHoveredSnotelStation(snotelFeature.properties as SnotelStationInfo);
+          } else {
+            setHoveredSnotelStation(null);
+          }
           
           // Update generation hover state
           const plantFeature = features.find(f => f.layer?.id === 'plant-points');
@@ -746,7 +794,7 @@ export function InteractiveMap({
             setHoveredGeneration({
               id: plantFeature.properties.id,
               name: plantFeature.properties.name || 'Unnamed Plant',
-              type: plantFeature.properties.plant_source || plantFeature.properties.plant_method || 'Power Plant',
+              type: (plantFeature.properties as any).plant_source || (plantFeature.properties as any).plant_method || 'Power Plant',
               longitude: coords[0],
               latitude: coords[1]
             });
@@ -754,8 +802,8 @@ export function InteractiveMap({
             const coords = (generatorFeature.geometry as PointGeometry).coordinates;
             setHoveredGeneration({
               id: generatorFeature.properties.id,
-              name: generatorFeature.properties.name || generatorFeature.properties.plant_name || 'Unnamed Generator',
-              type: generatorFeature.properties.fuel_type || 'Generator',
+              name: generatorFeature.properties.name || (generatorFeature.properties as any).plant_name || 'Unnamed Generator',
+              type: (generatorFeature.properties as any).fuel_type || 'Generator',
               longitude: coords[0],
               latitude: coords[1]
             });
@@ -763,7 +811,7 @@ export function InteractiveMap({
             setHoveredGeneration(null);
           }
         }}
-        interactiveLayerIds={['power-lines', 'power-lines-clickable', 'plant-points', 'generator-points']}
+        interactiveLayerIds={['power-lines', 'power-lines-clickable', 'plant-points', 'generator-points', 'snotel-points']}
         minZoom={4}
         maxZoom={22}
         scrollZoom={true}
@@ -1325,52 +1373,32 @@ export function InteractiveMap({
           </Marker>
         ))}
 
-        {/* SNOTEL station markers */}
-        {showSnotelStations && viewport.zoom > 7 && snotelStations.map((station) => (
-          <Marker
-            key={`snotel-${station.id}`}
-            latitude={station.latitude}
-            longitude={station.longitude}
-          >
-            <button
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                handleSnotelStationClick(station);
+        {/* SNOTEL Stations Layer - More performant than individual markers */}
+        {snotelGeoJsonData && showSnotelStations && viewport.zoom > 7 && (
+          <Source id="snotel-stations" type="geojson" data={snotelGeoJsonData}>
+            <Layer
+              id="snotel-points"
+              type="circle"
+              paint={{
+                'circle-color': [
+                  'case',
+                  ['==', ['to-number', ['get', 'id']], selectedSnotelStationId || -1],
+                  '#2563eb', // Selected: Darker Blue
+                  '#0ea5e9'  // Default: Sky Blue
+                ],
+                'circle-radius': [
+                  'case',
+                  ['==', ['to-number', ['get', 'id']], selectedSnotelStationId || -1],
+                  8, // Selected radius
+                  5  // Default radius
+                ],
+                'circle-stroke-color': '#ffffff',
+                'circle-stroke-width': 2,
+                'circle-opacity': 0.9,
               }}
-              onMouseEnter={() => setHoveredSnotelStation(station)}
-              onMouseLeave={() => setHoveredSnotelStation(null)}
-              style={{
-                border: 'none',
-                background: 'transparent',
-                cursor: 'pointer',
-                padding: 0,
-                zIndex: 999,
-              }}
-              aria-label={`View details for ${station.name}`}
-            >
-              <div className="relative">
-                <svg 
-                  width="20" 
-                  height="20" 
-                  viewBox="0 0 24 24"
-                  className={`transition-all duration-200 ${String(station.id) === String(selectedSnotelStationId) ? 'text-blue-600 scale-125' : 'text-sky-500'}`}
-                  style={{
-                    transform: "translateY(-10px)",
-                    filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.3))"
-                  }}
-                >
-                  <path 
-                    d="M12 2l2.12 6.36L20.48 12l-6.36 3.64L12 22l-2.12-6.36L3.52 12l6.36-3.64L12 2z"
-                    fill={String(station.id) === String(selectedSnotelStationId) ? '#2563eb' : '#0ea5e9'}
-                    stroke="#ffffff"
-                    strokeWidth="1"
-                  />
-                </svg>
-              </div>
-            </button>
-          </Marker>
-        ))}
+            />
+          </Source>
+        )}
 
         {/* Dam hover popup */}
         {hoveredMarker && (
@@ -1459,11 +1487,11 @@ export function InteractiveMap({
       
       {/* Modern Legend */}
       <div 
-        className="absolute top-4 right-4 bg-white/95 backdrop-blur-sm rounded-xl shadow-xl border border-gray-200"
+        className="absolute bottom-2 right-2 bg-white/95 backdrop-blur-sm rounded-md shadow-xl border border-2 border-gray-200"
         style={{ zIndex: 40, minWidth: '240px', maxWidth: '280px' }}
       >
-        <div className="p-4">
-          <div className="flex items-center justify-between mb-3">
+        <div className={isLegendVisible ? "p-4" : "p-3"}>
+          <div className={`flex items-center justify-between ${isLegendVisible ? 'mb-3' : ''}`}>
             <h3 className="font-semibold text-gray-900 text-sm">Map Layers</h3>
             <button
               onClick={() => setIsLegendVisible(!isLegendVisible)}
