@@ -523,18 +523,18 @@ export default function Page() {
 
   const formatCapacityFactor = (cf: number) => `${(cf * 100).toFixed(1)}%`
   const getCapacityFactorStatus = (cf: number) => {
-    if (cf < 0.5) return "Critical"
-    if (cf < 0.8) return "Warning"
-    if (cf < 1.0) return "Normal"
-    return "Good"
+    if (cf < 0.5) return "Excellent"
+    if (cf < 0.8) return "Good" 
+    if (cf < 1.0) return "Fair"
+    return "Critical"
   }
 
-  // Add the missing badge variant function
+  // Badge variant function - keep same colors but with corrected logic
   const getCapacityFactorBadgeVariant = (cf: number): "default" | "secondary" | "destructive" | "outline" => {
-    if (cf < 0.5) return "destructive"  // Red - Critical
-    if (cf < 0.8) return "default"    // Orange - Warning
-    if (cf < 1.0) return "outline"    // Yellow - Normal
-    return "secondary"              // Green - Good
+    if (cf < 0.5) return "secondary"     // Green - Excellent
+    if (cf < 0.8) return "outline"       // Gray - Good
+    if (cf < 1.0) return "default"       // Orange - Fair
+    return "destructive"                 // Red - Critical
   }
 
   return (
@@ -550,7 +550,6 @@ export default function Page() {
       <AppSidebar variant="inset" />
       <SidebarInset>
         <SiteHeader
-          selectedFeature={selectedFeature}
           dams={AVAILABLE_DAMS}
           powerLines={searchPowerLines}
           flowgates={searchFlowgates}
@@ -691,7 +690,7 @@ export default function Page() {
                         )}
 
                         {/* Power Line Details Second - Supporting Context */}
-                        <Card className="flex-shrink-0">
+                        <Card className="flex-shrink-0 relative">
                           <CardHeader>
                             <CardTitle className="text-sm text-muted-foreground">Power Line Details</CardTitle>
                           </CardHeader>
@@ -712,15 +711,21 @@ export default function Page() {
                                   <div className="font-medium">{currentPowerLine.ref}</div>
                                 </div>
                               )}
-                              <div>
-                                <span className="font-medium text-muted-foreground">Line Capacity Factor:</span>
-                                <div className="flex items-center gap-2">
-                                  <div className="font-medium">{formatCapacityFactor(currentPowerLine.capacityFactor)}</div>
-                                  <Badge variant={getCapacityFactorBadgeVariant(currentPowerLine.capacityFactor)}>
-                                    {getCapacityFactorStatus(currentPowerLine.capacityFactor)}
-                                  </Badge>
+                              {/* Only show capacity factor if this line is part of a flowgate */}
+                              {currentPowerLine.flowgate && (
+                                <div className="col-span-2">
+                                  <span className="font-medium text-muted-foreground">Capacity Factor:</span>
+                                  <div className="flex items-center gap-2">
+                                    <div className="font-medium">{formatCapacityFactor(currentPowerLine.capacityFactor)}</div>
+                                    <Badge variant={getCapacityFactorBadgeVariant(currentPowerLine.capacityFactor)}>
+                                      {getCapacityFactorStatus(currentPowerLine.capacityFactor)}
+                                    </Badge>
+                                  </div>
+                                  <div className="text-xs text-muted-foreground mt-1">
+                                    All lines in this flowgate share this capacity factor
+                                  </div>
                                 </div>
-                              </div>
+                              )}
                             </div>
 
                             {/* Flowgate Information */}
@@ -728,30 +733,6 @@ export default function Page() {
                               <>
                                 <Separator />
                                 <div className="space-y-3">
-                                  <div>
-                                    <span className="font-medium text-muted-foreground">Flowgate:</span>
-                                    <div className="font-medium">{currentPowerLine.flowgate}</div>
-                                  </div>
-                                  
-                                  {/* Flowgate Capacity Factor - Prominent Display */}
-                                  <div className="p-3 rounded-lg bg-muted/30 border">
-                                    <div className="flex items-center justify-between">
-                                      <div>
-                                        <div className="text-sm font-medium text-muted-foreground">Flowgate Capacity Factor</div>
-                                        <div className="text-lg font-bold">{formatCapacityFactor(currentPowerLine.capacityFactor)}</div>
-                                      </div>
-                                      <Badge 
-                                        variant={getCapacityFactorBadgeVariant(currentPowerLine.capacityFactor)}
-                                        className="text-sm font-medium"
-                                      >
-                                        {getCapacityFactorStatus(currentPowerLine.capacityFactor)}
-                                      </Badge>
-                                    </div>
-                                    <div className="text-xs text-muted-foreground mt-1">
-                                      All lines in this flowgate share this capacity factor
-                                    </div>
-                                  </div>
-                                  
                                   {currentPowerLine.associatedLines && currentPowerLine.associatedLines.length > 0 ? (
                                     <div>
                                       <div className="text-sm font-medium text-muted-foreground mb-2">
@@ -782,6 +763,15 @@ export default function Page() {
                                   )}
                                 </div>
                               </>
+                            )}
+                            
+                            {/* Flowgate code in bottom right corner */}
+                            {currentPowerLine.flowgate && (
+                              <div className="absolute bottom-4 right-4">
+                                <Badge variant="outline" className="text-xs font-mono">
+                                  {currentPowerLine.flowgate}
+                                </Badge>
+                              </div>
                             )}
                           </CardContent>
                         </Card>
