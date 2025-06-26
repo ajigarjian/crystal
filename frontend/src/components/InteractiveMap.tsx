@@ -192,6 +192,8 @@ export function InteractiveMap({
   const [generatorData, setGeneratorData] = React.useState<GeneratorData | null>(null);
   const [plantData, setPlantData] = React.useState<PowerPlantsData | null>(null);
   const [isLegendVisible, setIsLegendVisible] = React.useState(false);
+  const [isMobileModalOpen, setIsMobileModalOpen] = React.useState(false);
+  const [isMobile, setIsMobile] = React.useState(false);
   
   const selectedGenId = selectedGeneration?.id ?? -1;
   const selectedGenType = selectedGeneration?.type ?? '';
@@ -267,6 +269,17 @@ export function InteractiveMap({
   const showGeothermal = filters.generation.types.geothermal;
   const showOtherTypes = filters.generation.types.other;
 
+  // Mobile detection
+  React.useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768); // Tailwind md breakpoint
+    };
+    
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
   // Helper function to update filters with proper typing
   const updateFilter = React.useCallback((path: string[], value: boolean | object) => {
     setFilters(prev => {
@@ -286,6 +299,15 @@ export function InteractiveMap({
       return newFilters;
     });
   }, []);
+
+  // Handle legend/modal toggle
+  const handleLegendToggle = React.useCallback(() => {
+    if (isMobile && !isFullScreen) {
+      setIsMobileModalOpen(true);
+    } else {
+      setIsLegendVisible(!isLegendVisible);
+    }
+  }, [isMobile, isFullScreen, isLegendVisible]);
 
   const queryableLayers = React.useMemo(() => {
     const layers = ['power-lines', 'power-lines-clickable'];
@@ -593,6 +615,194 @@ export function InteractiveMap({
 
     return () => clearInterval(interval);
   }, []);
+
+  // Legend content component - shared between modal and regular legend
+  const LegendContent = () => (
+    <div className="space-y-4 text-xs">
+      {/* Selected Flowgate Info */}
+      {selectedFlowgateGroup && (
+        <div className="bg-cyan-50 border border-cyan-200 rounded-lg p-3 mb-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="font-medium text-cyan-800 text-xs mb-1">Active Selection</div>
+              <div className="text-cyan-700 text-xs font-mono truncate">{selectedFlowgateGroup}</div>
+            </div>
+            <button 
+              onClick={() => {
+                setSelectedFlowgateGroup(null);
+                setClickedLineId(null);
+              }}
+              className="text-cyan-600 hover:text-cyan-800 p-1 rounded-full hover:bg-cyan-100 transition-colors"
+              title="Clear selection"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
+      
+      {/* Infrastructure Section */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <h4 className="font-medium text-gray-800 text-xs uppercase tracking-wider">Infrastructure</h4>
+        </div>
+        <div className="space-y-2 pl-1">
+          {/* Dams */}
+          <label className="flex items-center gap-3 cursor-pointer hover:bg-gray-50 p-1.5 rounded-md transition-colors">
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={showDams}
+                onChange={(e) => updateFilter(['infrastructure', 'dams'], e.target.checked)}
+                className="w-4 h-4 text-red-600 border-gray-300 rounded focus:ring-red-500"
+              />
+              <svg className="w-4 h-4 fill-blue-600" viewBox="0 0 24 24">
+                <path d="M2 14h20l-2 6H4l-2-6zm0-2h20V8H2v4zm4-8h12v4H6V4z"/>
+              </svg>
+            </div>
+            <span className="text-gray-700 font-medium">Dams</span>
+          </label>
+          
+          {/* Transmission */}
+          <div className="space-y-2">
+            <label className="flex items-center gap-3 cursor-pointer hover:bg-gray-50 p-1.5 rounded-md transition-colors">
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={showPowerLines}
+                  onChange={(e) => updateFilter(['infrastructure', 'transmission', 'enabled'], e.target.checked)}
+                  className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                />
+                <div className="w-4 h-1 bg-gray-600 rounded-full"></div>
+              </div>
+              <span className="text-gray-700 font-medium">Transmission Lines</span>
+            </label>
+            
+            {showPowerLines && (
+              <div className="ml-6 space-y-2 border-l-2 border-gray-100 pl-3">
+                <div className="flex items-center gap-2 text-cyan-600 mb-1">
+                  <div className="w-3 h-0.5 bg-cyan-500 rounded"></div>
+                  <span className="text-xs">Selected lines highlighted</span>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { key: '500kV', label: '500kV', height: '3px', color: 'bg-gray-600' },
+                    { key: '230kV', label: '230kV', height: '2px', color: 'bg-gray-600' },
+                    { key: '115kV', label: '115kV', height: '1.5px', color: 'bg-gray-600' },
+                    { key: 'other', label: 'Other', height: '1px', color: 'bg-gray-600' }
+                  ].map(voltage => (
+                    <label key={voltage.key} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1 rounded transition-colors">
+                      <input
+                        type="checkbox"
+                        checked={filters.infrastructure.transmission.voltages[voltage.key as keyof typeof filters.infrastructure.transmission.voltages]}
+                        onChange={(e) => updateFilter(['infrastructure', 'transmission', 'voltages', voltage.key], e.target.checked)}
+                        className="w-3 h-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                      />
+                      <div className={`w-3 ${voltage.color} rounded`} style={{ height: voltage.height }}></div>
+                      <span className="text-xs text-gray-600">{voltage.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+          
+          {/* Substations */}
+          <label className="flex items-center gap-3 cursor-pointer hover:bg-gray-50 p-1.5 rounded-md transition-colors">
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={showSubstations}
+                onChange={(e) => updateFilter(['infrastructure', 'substations'], e.target.checked)}
+                className="w-4 h-4 text-gray-600 border-gray-300 rounded focus:ring-gray-500"
+              />
+              <div className="w-3 h-3 rounded-full bg-gray-500"></div>
+            </div>
+            <span className="text-gray-700 font-medium">Substations</span>
+          </label>
+
+          {/* SNOTEL Stations */}
+          <label className="flex items-center gap-3 cursor-pointer hover:bg-gray-50 p-1.5 rounded-md transition-colors">
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={showSnotelStations}
+                onChange={(e) => updateFilter(['infrastructure', 'snotelStations'], e.target.checked)}
+                className="w-4 h-4 text-sky-600 border-gray-300 rounded focus:ring-sky-500"
+              />
+              <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="8" cy="8" r="5" fill="#0ea5e9" stroke="#FFFFFF" strokeWidth="2"/>
+              </svg>
+            </div>
+            <span className="text-gray-700 font-medium">SNOTEL Stations</span>
+          </label>
+        </div>
+      </div>
+
+      {/* Generation Section */}
+      <div className="border-t border-gray-200 pt-4">
+        <div className="flex items-center justify-between mb-2">
+          <h4 className="font-medium text-gray-800 text-xs uppercase tracking-wider">Generation</h4>
+        </div>
+        <div className="space-y-2 pl-1">
+          {/* Plants & Generators */}
+          <div className="grid grid-cols-2 gap-x-4">
+            <div className="flex items-center justify-between">
+              <label htmlFor="show-plants" className="text-xs text-gray-700 font-medium cursor-pointer">Plants</label>
+              <Switch
+                id="show-plants"
+                checked={showPlants}
+                onCheckedChange={(checked) => updateFilter(['generation', 'plants'], checked)}
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <label htmlFor="show-units" className="text-xs text-gray-700 font-medium cursor-pointer">Units</label>
+              <Switch
+                id="show-units"
+                checked={showGenerators}
+                onCheckedChange={(checked) => updateFilter(['generation', 'generators'], checked)}
+              />
+            </div>
+          </div>
+          
+          {/* Generation Types - show when either plants or generators are enabled */}
+          {(showPlants || showGenerators) && (
+            <div className="mt-3 border-t border-gray-100 pt-3">
+              <div className="text-xs text-gray-500 mb-2 font-medium">Filter by Type:</div>
+              <div className="grid grid-cols-2 gap-1.5">
+                {[
+                  { key: 'nuclear', label: 'Nuclear', color: 'bg-orange-500' },
+                  { key: 'solar', label: 'Solar', color: 'bg-yellow-500' },
+                  { key: 'wind', label: 'Wind', color: 'bg-green-400' },
+                  { key: 'hydro', label: 'Hydro', color: 'bg-blue-500' },
+                  { key: 'gas', label: 'Gas', color: 'bg-pink-500' },
+                  { key: 'coal', label: 'Coal', color: 'bg-amber-800' },
+                  { key: 'biomass', label: 'Biomass', color: 'bg-green-600' },
+                  { key: 'geothermal', label: 'Geo', color: 'bg-red-600' },
+                  { key: 'other', label: 'Other', color: 'bg-purple-500', span: 'col-span-2' }
+                ].map(type => (
+                  <label key={type.key} className={`flex items-center gap-1.5 cursor-pointer hover:bg-gray-50 p-1 rounded transition-colors ${type.span || ''}`}>
+                    <input
+                      type="checkbox"
+                      checked={filters.generation.types[type.key as keyof typeof filters.generation.types]}
+                      onChange={(e) => updateFilter(['generation', 'types', type.key], e.target.checked)}
+                      className="w-3 h-3 border-gray-300 rounded focus:ring-2"
+                      style={{ accentColor: type.color.replace('bg-', '#') }}
+                    />
+                    <div className={`w-2.5 h-2.5 rounded-full ${type.color}`}></div>
+                    <span className="text-xs text-gray-600">{type.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 
   if (isLoading) {
     return <MapSkeleton style={{ height, width: '100%' }} />;
@@ -1547,6 +1757,39 @@ export function InteractiveMap({
           </Popup>
         )}
       </ReactMapGL>
+
+      {/* Mobile Modal for Map Layers */}
+      {isMobileModalOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-[9999] flex items-end justify-center"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setIsMobileModalOpen(false);
+            }
+          }}
+        >
+          <div className="bg-white rounded-t-2xl w-full max-w-[calc(100vw-2rem)] mx-4 mb-4 max-h-[80vh] overflow-hidden shadow-2xl">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-4 border-b bg-gray-50">
+              <h3 className="font-semibold text-gray-900 text-lg">Map Layers</h3>
+              <button
+                onClick={() => setIsMobileModalOpen(false)}
+                className="p-2 rounded-full hover:bg-gray-200 transition-colors"
+                aria-label="Close modal"
+              >
+                <svg className="w-5 h-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            
+            {/* Modal Content */}
+            <div className="p-4 overflow-y-auto max-h-[calc(80vh-80px)]">
+              <LegendContent />
+            </div>
+          </div>
+        </div>
+      )}
       
       {/* Columbia River System Label Overlay with Full Screen Button */}
       <div 
@@ -1583,14 +1826,14 @@ export function InteractiveMap({
         style={{ zIndex: 40, minWidth: '240px', maxWidth: '280px' }}
       >
         <div className={isLegendVisible ? "p-4" : "p-3"}>
-          <div className={`flex items-center justify-between ${isLegendVisible ? 'mb-3' : ''}`}>
+          <div className={`flex items-center justify-between ${(isLegendVisible && !isMobile) ? 'mb-3' : ''}`}>
             <h3 className="font-semibold text-gray-900 text-sm">Map Layers</h3>
             <button
-              onClick={() => setIsLegendVisible(!isLegendVisible)}
+              onClick={handleLegendToggle}
               className="p-1 rounded-full hover:bg-gray-200 transition-colors"
               title={isLegendVisible ? "Hide legend" : "Show legend"}
             >
-              {isLegendVisible ? (
+              {(isLegendVisible && !isMobile) ? (
                 <svg className="w-4 h-4 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 15l-6-6-6 6" />
                 </svg>
@@ -1602,192 +1845,8 @@ export function InteractiveMap({
             </button>
           </div>
           
-          {/* Selected Flowgate Info */}
-          {isLegendVisible && selectedFlowgateGroup && (
-            <div className="bg-cyan-50 border border-cyan-200 rounded-lg p-3 mb-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="font-medium text-cyan-800 text-xs mb-1">Active Selection</div>
-                  <div className="text-cyan-700 text-xs font-mono truncate">{selectedFlowgateGroup}</div>
-                </div>
-                <button 
-                  onClick={() => {
-                    setSelectedFlowgateGroup(null);
-                    setClickedLineId(null);
-                  }}
-                  className="text-cyan-600 hover:text-cyan-800 p-1 rounded-full hover:bg-cyan-100 transition-colors"
-                  title="Clear selection"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-          )}
-          
-          {isLegendVisible && (
-            <div className="space-y-4 text-xs">
-              {/* Infrastructure Section */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <h4 className="font-medium text-gray-800 text-xs uppercase tracking-wider">Infrastructure</h4>
-                </div>
-                <div className="space-y-2 pl-1">
-                  {/* Dams */}
-                  <label className="flex items-center gap-3 cursor-pointer hover:bg-gray-50 p-1.5 rounded-md transition-colors">
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={showDams}
-                        onChange={(e) => updateFilter(['infrastructure', 'dams'], e.target.checked)}
-                        className="w-4 h-4 text-red-600 border-gray-300 rounded focus:ring-red-500"
-                      />
-                      <svg className="w-4 h-4 fill-blue-600" viewBox="0 0 24 24">
-                        <path d="M2 14h20l-2 6H4l-2-6zm0-2h20V8H2v4zm4-8h12v4H6V4z"/>
-                      </svg>
-                    </div>
-                    <span className="text-gray-700 font-medium">Dams</span>
-                  </label>
-                  
-                  {/* Transmission */}
-                  <div className="space-y-2">
-                    <label className="flex items-center gap-3 cursor-pointer hover:bg-gray-50 p-1.5 rounded-md transition-colors">
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={showPowerLines}
-                          onChange={(e) => updateFilter(['infrastructure', 'transmission', 'enabled'], e.target.checked)}
-                          className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                        />
-                        <div className="w-4 h-1 bg-gray-600 rounded-full"></div>
-                      </div>
-                      <span className="text-gray-700 font-medium">Transmission Lines</span>
-                    </label>
-                    
-                    {showPowerLines && (
-                      <div className="ml-6 space-y-2 border-l-2 border-gray-100 pl-3">
-                        <div className="flex items-center gap-2 text-cyan-600 mb-1">
-                          <div className="w-3 h-0.5 bg-cyan-500 rounded"></div>
-                          <span className="text-xs">Selected lines highlighted</span>
-                        </div>
-                        
-                        <div className="grid grid-cols-2 gap-2">
-                          {[
-                            { key: '500kV', label: '500kV', height: '3px', color: 'bg-gray-600' },
-                            { key: '230kV', label: '230kV', height: '2px', color: 'bg-gray-600' },
-                            { key: '115kV', label: '115kV', height: '1.5px', color: 'bg-gray-600' },
-                            { key: 'other', label: 'Other', height: '1px', color: 'bg-gray-600' }
-                          ].map(voltage => (
-                            <label key={voltage.key} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1 rounded transition-colors">
-                              <input
-                                type="checkbox"
-                                checked={filters.infrastructure.transmission.voltages[voltage.key as keyof typeof filters.infrastructure.transmission.voltages]}
-                                onChange={(e) => updateFilter(['infrastructure', 'transmission', 'voltages', voltage.key], e.target.checked)}
-                                className="w-3 h-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                              />
-                              <div className={`w-3 ${voltage.color} rounded`} style={{ height: voltage.height }}></div>
-                              <span className="text-xs text-gray-600">{voltage.label}</span>
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  
-                  {/* Substations */}
-                  <label className="flex items-center gap-3 cursor-pointer hover:bg-gray-50 p-1.5 rounded-md transition-colors">
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={showSubstations}
-                        onChange={(e) => updateFilter(['infrastructure', 'substations'], e.target.checked)}
-                        className="w-4 h-4 text-gray-600 border-gray-300 rounded focus:ring-gray-500"
-                      />
-                      <div className="w-3 h-3 rounded-full bg-gray-500"></div>
-                    </div>
-                    <span className="text-gray-700 font-medium">Substations</span>
-                  </label>
-
-                  {/* SNOTEL Stations */}
-                  <label className="flex items-center gap-3 cursor-pointer hover:bg-gray-50 p-1.5 rounded-md transition-colors">
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={showSnotelStations}
-                        onChange={(e) => updateFilter(['infrastructure', 'snotelStations'], e.target.checked)}
-                        className="w-4 h-4 text-sky-600 border-gray-300 rounded focus:ring-sky-500"
-                      />
-                      <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <circle cx="8" cy="8" r="5" fill="#0ea5e9" stroke="#FFFFFF" strokeWidth="2"/>
-                      </svg>
-                    </div>
-                    <span className="text-gray-700 font-medium">SNOTEL Stations</span>
-                  </label>
-                </div>
-              </div>
-
-              {/* Generation Section */}
-              <div className="border-t border-gray-200 pt-4">
-                <div className="flex items-center justify-between mb-2">
-                  <h4 className="font-medium text-gray-800 text-xs uppercase tracking-wider">Generation</h4>
-                </div>
-                <div className="space-y-2 pl-1">
-                  {/* Plants & Generators */}
-                  <div className="grid grid-cols-2 gap-x-4">
-                    <div className="flex items-center justify-between">
-                      <label htmlFor="show-plants" className="text-xs text-gray-700 font-medium cursor-pointer">Plants</label>
-                      <Switch
-                        id="show-plants"
-                        checked={showPlants}
-                        onCheckedChange={(checked) => updateFilter(['generation', 'plants'], checked)}
-                      />
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <label htmlFor="show-units" className="text-xs text-gray-700 font-medium cursor-pointer">Units</label>
-                      <Switch
-                        id="show-units"
-                        checked={showGenerators}
-                        onCheckedChange={(checked) => updateFilter(['generation', 'generators'], checked)}
-                      />
-                    </div>
-                  </div>
-                  
-                  {/* Generation Types - show when either plants or generators are enabled */}
-                  {(showPlants || showGenerators) && (
-                    <div className="mt-3 border-t border-gray-100 pt-3">
-                      <div className="text-xs text-gray-500 mb-2 font-medium">Filter by Type:</div>
-                      <div className="grid grid-cols-2 gap-1.5">
-                        {[
-                          { key: 'nuclear', label: 'Nuclear', color: 'bg-orange-500' },
-                          { key: 'solar', label: 'Solar', color: 'bg-yellow-500' },
-                          { key: 'wind', label: 'Wind', color: 'bg-green-400' },
-                          { key: 'hydro', label: 'Hydro', color: 'bg-blue-500' },
-                          { key: 'gas', label: 'Gas', color: 'bg-pink-500' },
-                          { key: 'coal', label: 'Coal', color: 'bg-amber-800' },
-                          { key: 'biomass', label: 'Biomass', color: 'bg-green-600' },
-                          { key: 'geothermal', label: 'Geo', color: 'bg-red-600' },
-                          { key: 'other', label: 'Other', color: 'bg-purple-500', span: 'col-span-2' }
-                        ].map(type => (
-                          <label key={type.key} className={`flex items-center gap-1.5 cursor-pointer hover:bg-gray-50 p-1 rounded transition-colors ${type.span || ''}`}>
-                            <input
-                              type="checkbox"
-                              checked={filters.generation.types[type.key as keyof typeof filters.generation.types]}
-                              onChange={(e) => updateFilter(['generation', 'types', type.key], e.target.checked)}
-                              className="w-3 h-3 border-gray-300 rounded focus:ring-2"
-                              style={{ accentColor: type.color.replace('bg-', '#') }}
-                            />
-                            <div className={`w-2.5 h-2.5 rounded-full ${type.color}`}></div>
-                            <span className="text-xs text-gray-600">{type.label}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
+          {/* Regular legend for desktop or fullscreen */}
+          {isLegendVisible && !isMobile && <LegendContent />}
         </div>
       </div>
     </div>

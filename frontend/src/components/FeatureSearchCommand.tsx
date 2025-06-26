@@ -4,7 +4,6 @@ import * as React from "react"
 import { SearchIcon } from "lucide-react"
 import {
   Command,
-  CommandDialog,
   CommandEmpty,
   CommandGroup,
   CommandInput,
