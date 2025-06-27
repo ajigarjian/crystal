@@ -621,13 +621,15 @@ export const streamAnalyzeDatasets = async (
 
 // Define the expected structure of a single card's data from the backend
 export interface SectionCardData {
-  id: string; // metric_id will be used as id
+  id: string;
   title: string;
-  value: string; // e.g., "123.45 ft" or "N/A %"
-  timestamp: string; // ISO string format from the backend
-  trend: 'up' | 'down' | 'neutral'; // Current placeholder, will be 'neutral'
-  trendDescription: string; // Default description from backend config
+  value: string;
+  timestamp: string;
+  trend: 'up' | 'down' | 'neutral';
+  trendDescription: string;
   footerNote: string;
+  change24h?: number;        // Raw 24-hour change value
+  change24hPercent?: number; // 24-hour percentage change
 }
 
 // Export a helper for calling the new dashboard card data function
@@ -685,11 +687,15 @@ export interface InflowDataPoint {
 }
 
 // Define the new time range options type here as well to be used by the function
-export type TimeRangeOption = "mtd" | "14d" | "7d";
+export type TimeRangeOption = "1d" | "mtd" | "14d" | "7d";
 
-// Export a helper for calling the new inflow timeseries data function
-// Updated to accept new TimeRangeOption types and damId
-export const getInflowTimeseries = async (range: TimeRangeOption, damId: number): Promise<InflowDataPoint[]> => {
+// Export a helper for calling the metric timeseries data function
+// Updated to accept metric_id parameter for any metric
+export const getMetricTimeseries = async (
+  range: TimeRangeOption, 
+  damId: number, 
+  metricId: number = 6  // Default to inflow
+): Promise<InflowDataPoint[]> => {
   const region = functions.region || 'us-central1';
   const projectId = firebaseConfig.projectId;
   let baseUrl = '';
@@ -700,9 +706,8 @@ export const getInflowTimeseries = async (range: TimeRangeOption, damId: number)
     baseUrl = `https://${region}-${projectId}.cloudfunctions.net`;
   }
 
-  // The name of the new Python Cloud Function
-  // Append dam_id to the query parameters
-  const url = `${baseUrl}/get_inflow_timeseries?range=${range}&dam_id=${damId}`;
+  // The name of the Python Cloud Function with metric_id parameter
+  const url = `${baseUrl}/get_inflow_timeseries?range=${range}&dam_id=${damId}&metric_id=${metricId}`;
 
   try {
     // This is a GET request to fetch data
@@ -714,23 +719,27 @@ export const getInflowTimeseries = async (range: TimeRangeOption, damId: number)
     });
 
     if (!response.ok) {
-      let errorData = { error: "Failed to fetch inflow timeseries data" };
+      let errorData = { error: "Failed to fetch metric timeseries data" };
       try {
         errorData = await response.json();
       } catch (e) {
-        console.error("Failed to parse error response from getInflowTimeseries: ", e);
+        console.error("Failed to parse error response from getMetricTimeseries: ", e);
       }
-      console.error('Error fetching inflow timeseries data:', response.status, errorData);
-      throw new Error(errorData.error || `Failed to fetch inflow timeseries data. Status: ${response.status}`);
+      console.error('Error fetching metric timeseries data:', response.status, errorData);
+      throw new Error(errorData.error || `Failed to fetch metric timeseries data. Status: ${response.status}`);
     }
 
     const data = await response.json();
     return data as InflowDataPoint[];
   } catch (error: any) {
-    console.error('Error calling getInflowTimeseries function:', error);
+    console.error('Error calling getMetricTimeseries function:', error);
     return []; 
   }
 };
+
+// Keep backward compatibility - alias for inflow specifically
+export const getInflowTimeseries = (range: TimeRangeOption, damId: number): Promise<InflowDataPoint[]> => 
+  getMetricTimeseries(range, damId, 6);
 
 // Define the expected structure for a single dam location
 export interface DamLocation {

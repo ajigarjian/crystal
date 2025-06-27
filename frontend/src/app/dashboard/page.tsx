@@ -20,6 +20,7 @@ import { ChartTTCFlowgate } from '@/components/chart-ttc-flowgate'
 import { ChartSnotelWTEQ } from '@/components/chart-snotel-wteq'
 import { Terminal, Mic, Square } from "lucide-react"
 import { Separator } from "@/components/ui/separator"
+import { MetricsTable, transformSectionCardDataToMetrics } from "@/components/metrics-table"
 
 import { getDashboardSectionCards, SectionCardData, getDamLocations, DamLocation, getSnotelStations, SnotelStationData } from "@/lib/firebase"
 
@@ -182,7 +183,7 @@ export default function Page() {
   
   const [currentSectionCardData, setCurrentSectionCardData] = React.useState<SectionCardData[]>([]);
   const [isLoadingCards, setIsLoadingCards] = React.useState<boolean>(true);
-  const [damMarkers, setDamMarkers] = React.useState<DamLocation[]>([]);
+  const [damMapData, setDamMapData] = React.useState<DamLocation[]>([]);
   const [snotelStations, setSnotelStations] = React.useState<SnotelStationData[]>([]);
 
   const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
@@ -193,6 +194,8 @@ export default function Page() {
   const [selectedFlowgate, setSelectedFlowgate] = React.useState<string | null>(null);
 
   const [isTradingSummaryLoading, setIsTradingSummaryLoading] = React.useState(true);
+
+  const [selectedMetricId, setSelectedMetricId] = React.useState<string>("6"); // Default to Inflow
 
   const getCurrentDam = (): DamInfo | null => {
     return selectedFeature?.type === 'dam' ? selectedFeature.data as DamInfo : null;
@@ -238,10 +241,10 @@ export default function Page() {
     async function loadDamMapData() {
       try {
         const locations = await getDamLocations();
-        setDamMarkers(locations);
+        setDamMapData(locations);
       } catch (error) {
         console.error("Failed to load dam locations for map:", error);
-        setDamMarkers([]); 
+        setDamMapData([]); 
       }
     }
   
@@ -351,12 +354,9 @@ export default function Page() {
 
   // Updated search handlers
   const handleSearchDamSelect = (dam: DamInfo) => {
-    // Clear flowgate selection when selecting dam
+    setSelectedFeature({ type: 'dam', data: dam });
     setSelectedFlowgate(null);
-    setSelectedFeature({
-      type: 'dam',
-      data: dam
-    });
+    setSelectedMetricId("6"); // Reset to Inflow when dam changes
   };
 
   const handleSearchPowerLineSelect = (powerLine: PowerLineInfo) => {
@@ -432,18 +432,12 @@ export default function Page() {
   };
 
   const handleMapMarkerClick = (marker: { id: string | number; name?: string; latitude: number; longitude: number }) => {
-    // Clear flowgate selection when clicking dam
-    setSelectedFlowgate(null);
-    
-    const clickedDam = AVAILABLE_DAMS.find(dam => dam.id === Number(marker.id));
-    if (clickedDam) {
-      console.log('Dashboard handling dam click:', clickedDam);
-      setSelectedFeature({
-        type: 'dam',
-        data: clickedDam
-      });
-    } else {
-      console.warn(`No matching dam found for marker ID: ${marker.id}`);
+    // Find the dam by ID - handle both string and number types
+    const damInfo = damMapData.find(dam => dam.id.toString() === marker.id.toString());
+    if (damInfo) {
+      setSelectedFeature({ type: 'dam', data: { id: typeof damInfo.id === 'string' ? parseInt(damInfo.id) : damInfo.id, name: damInfo.name } });
+      setSelectedFlowgate(null);
+      setSelectedMetricId("6"); // Reset to Inflow when dam changes
     }
   };
 
@@ -507,6 +501,7 @@ export default function Page() {
   const handleDeselection = () => {
     setSelectedFeature(null);
     setSelectedFlowgate(null);
+    setSelectedMetricId("6"); // Reset to Inflow when deselecting
   };
 
   // Add ESC key handler
@@ -566,7 +561,7 @@ export default function Page() {
                       <InteractiveMap 
                         mapboxAccessToken={mapboxToken} 
                         height="100%" 
-                        markers={damMarkers} 
+                        markers={damMapData} 
                         snotelStations={snotelStations}
                         onMarkerClick={handleMapMarkerClick}
                         onPowerLineClick={handlePowerLineClick}
@@ -659,27 +654,24 @@ export default function Page() {
                     )}
 
                     {selectedFeature?.type === 'dam' && currentDam && (
-                      <>
+                      <div className="flex flex-col gap-2">
                         <div className="min-h-[300px] flex-shrink-0">
-                          <ChartAreaInteractive selectedDamId={currentDam.id} />
+                          <ChartAreaInteractive 
+                            selectedDamId={currentDam.id} 
+                            selectedMetricId={selectedMetricId}
+                          />
                         </div>
-                        {isLoadingCards ? (
-                          <div className="grid grid-cols-2 gap-3">
-                            {Array.from({ length: 6 }).map((_, index) => (
-                              <SectionCardSkeleton key={index} />
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="grid grid-cols-2 gap-3">
-                            {currentSectionCardData.map((card, index) => (
-                              <div key={index} className="p-3 rounded-lg border bg-card text-card-foreground shadow-sm">
-                                <div className="text-sm font-medium text-muted-foreground mb-1">{card.title}</div>
-                                <div className="text-lg font-bold">{card.value}</div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </>
+                        
+                        {/* Replace the cards with the metrics table */}
+                        <MetricsTable 
+                          data={transformSectionCardDataToMetrics(currentSectionCardData)}
+                          isLoading={isLoadingCards}
+                          emptyStateTitle="No operational data available"
+                          emptyStateDescription="Dam operational metrics are currently unavailable. This might be due to a temporary issue or no data being found."
+                          selectedMetricId={selectedMetricId}
+                          onMetricSelect={setSelectedMetricId}
+                        />
+                      </div>
                     )}
 
                     {selectedFeature?.type === 'powerline' && currentPowerLine && (

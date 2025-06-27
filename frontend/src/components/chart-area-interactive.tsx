@@ -30,14 +30,24 @@ import {
   ToggleGroup,
   ToggleGroupItem,
 } from "@/components/ui/toggle-group"
-import { InflowDataPoint, getInflowTimeseries, TimeRangeOption } from "@/lib/firebase" 
+import { InflowDataPoint, getMetricTimeseries, TimeRangeOption } from "@/lib/firebase" 
 
 // Define the new time range options type
 // type TimeRangeOption = "mtd" | "14d" | "7d"; // Already in firebase.ts, no need to redefine if imported
 
+// Metric configuration to match backend METRICS_CONFIG
+const METRICS_CONFIG = {
+  "3": { name: "Headroom", unit: "ft", color: "hsl(var(--chart-1))" },
+  "5": { name: "Reservoir Fill", unit: "%", color: "hsl(var(--chart-2))" },
+  "6": { name: "Inflow", unit: "cfs", color: "hsl(var(--chart-1))" },
+  "8": { name: "Spill", unit: "cfs", color: "hsl(var(--chart-3))" },
+  "9": { name: "Spill %", unit: "%", color: "hsl(var(--chart-4))" },
+  "10": { name: "Gates Open", unit: "gates", color: "hsl(var(--chart-5))" }
+} as const;
+
 interface ProcessedChartData {
   date: string;
-  inflow: number;
+  value: number; // Generic value instead of inflow
   type: 'observed' | 'forecast' | 'forecast_error';
   timestamp: number;
   observed: number | null;
@@ -50,20 +60,20 @@ interface ProcessedChartData {
 // const PACIFIC_TIMEZONE = "America/Los_Angeles"
 
 const chartConfig = {
-  inflow: {
-    label: "Inflow (cfs) - UTC",
+  value: {
+    label: "Value",
     color: "hsl(var(--chart-1))", 
   },
   observed: {
-    label: "Observed Inflow", 
+    label: "Observed", 
     color: "hsl(120, 50%, 30%)", // Darker green
   },
   forecast: {
-    label: "Forecast Inflow",
+    label: "Forecast",
     color: "hsl(340, 50%, 40%)", // Darker red
   },
   forecast_error: {
-    label: "Forecast Error (cfs)",
+    label: "Forecast Error",
     color: "hsl(0, 70%, 50%)", // Red for errors
   },
 } satisfies ChartConfig
@@ -98,6 +108,7 @@ const formatUtcDateForDisplay = (isoString: string): string => {
 
 interface ChartAreaInteractiveProps {
   selectedDamId: number;
+  selectedMetricId: string; // Add selected metric ID
 }
 
 // Add this helper function before the component
@@ -211,7 +222,120 @@ const ErrorBarTooltip = ({ data }: { data: { x: number; y: number; value: number
   );
 };
 
-export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProps) {
+// Smart Y-axis scaling function - UPDATED with better percentage handling
+const calculateOptimalYAxisDomain = (data: ProcessedChartData[], metricId: string): [number, number] => {
+  // Get all valid metric values (observed and forecast, excluding forecast_error)
+  const allValues = data
+    .filter(point => point.observed !== null || point.forecast !== null)
+    .map(point => point.observed || point.forecast)
+    .filter(val => val !== null) as number[];
+
+  if (allValues.length === 0) {
+    return [0, 100]; // Default range if no data
+  }
+
+  const min = Math.min(...allValues);
+  const max = Math.max(...allValues);
+  const range = max - min;
+
+  // If range is very small (flat line), create some padding
+  if (range < 0.01) {
+    const center = (min + max) / 2;
+    const padding = Math.max(center * 0.1, 1); // 10% of center value or minimum 1
+    return [center - padding, center + padding];
+  }
+
+  // Calculate appropriate step size and padding based on metric type and range
+  let stepSize: number;
+  let padding: number;
+
+  if (metricId === "6") { // Inflow - larger values, use existing logic for compatibility
+    stepSize = 5000;
+    padding = 0.05; // 5% padding
+  } else if (metricId === "5" || metricId === "9") { // Percentage metrics (Reservoir Fill, Spill %)
+    // More granular percentage scaling based on actual data range
+    if (range < 1) {
+      stepSize = 0.1; // Very fine granularity for tiny ranges
+    } else if (range < 5) {
+      stepSize = 0.5; // Fine granularity for small ranges
+    } else if (range < 15) {
+      stepSize = 1; // 1% steps for moderate ranges
+    } else if (range < 40) {
+      stepSize = 2; // 2% steps for larger ranges
+    } else if (range < 70) {
+      stepSize = 5; // 5% steps for large ranges
+    } else {
+      stepSize = 10; // 10% steps for very large ranges
+    }
+    padding = 0.15; // 15% padding for better visibility of percentage trends
+  } else if (metricId === "10") { // Gates Open - integer values
+    stepSize = Math.max(1, Math.ceil(range / 8)); // Aim for ~8 ticks
+    padding = 0.15; // 15% padding for better visibility
+  } else { // Headroom, Spill - moderate values
+    if (range < 10) {
+      stepSize = 1;
+    } else if (range < 100) {
+      stepSize = 5;
+    } else if (range < 1000) {
+      stepSize = 50;
+    } else {
+      stepSize = 100;
+    }
+    padding = 0.1; // 10% padding
+  }
+
+  // Apply padding
+  const paddedMin = min - (range * padding);
+  const paddedMax = max + (range * padding);
+
+  // Round to nice numbers based on step size
+  const domainMin = Math.floor(paddedMin / stepSize) * stepSize;
+  const domainMax = Math.ceil(paddedMax / stepSize) * stepSize;
+
+  // Different minimum range logic for different metrics
+  let finalMin: number;
+  let finalMax: number;
+
+  if (metricId === "5" || metricId === "9") { // Percentage metrics
+    // For percentages, be more flexible with the minimum range
+    finalMin = Math.max(0, domainMin); // Don't go below 0%
+    
+    // Smart upper bound for percentages based on actual data
+    if (max <= 15) {
+      // For small percentages (≤15%), cap at reasonable upper bound
+      finalMax = Math.min(25, Math.max(domainMax, finalMin + stepSize * 4));
+    } else if (max <= 50) {
+      // For moderate percentages, allow some room but don't go to 100%
+      finalMax = Math.min(Math.max(max * 1.3, 60), Math.max(domainMax, finalMin + stepSize * 3));
+    } else {
+      // For large percentages, can go up to 100%
+      finalMax = Math.min(100, Math.max(domainMax, finalMin + stepSize * 3));
+    }
+  } else if (metricId === "10") { // Gates Open
+    finalMin = Math.max(0, domainMin);
+    finalMax = Math.max(finalMin + Math.max(2, stepSize * 2), domainMax); // Minimum 2 gates range
+  } else { // Other metrics (Headroom, Spill, Inflow)
+    finalMin = Math.max(0, domainMin);
+    finalMax = Math.max(finalMin + stepSize * 2, domainMax); // Ensure minimum range
+  }
+
+  console.log(`Y-axis domain calculation for ${metricId}:`, {
+    metricName: metricId === "5" ? "Reservoir Fill" : metricId === "9" ? "Spill %" : "Other",
+    dataRange: { min, max, range },
+    stepSize,
+    padding,
+    beforeMinRange: [domainMin, domainMax],
+    finalDomain: [finalMin, finalMax]
+  });
+
+  return [finalMin, finalMax];
+};
+
+// Keep backward compatibility - alias for inflow specifically
+export const getInflowTimeseries = (range: TimeRangeOption, damId: number): Promise<InflowDataPoint[]> => 
+  getMetricTimeseries(range, damId, 6);
+
+export function ChartAreaInteractive({ selectedDamId, selectedMetricId }: ChartAreaInteractiveProps) {
   const isMobile = useIsMobile()
   const [timeRange, setTimeRange] = React.useState<TimeRangeOption>("14d") 
   const [processedChartData, setProcessedChartData] = React.useState<ProcessedChartData[]>([])
@@ -225,6 +349,10 @@ export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProp
     date: string;
   } | null>(null);
 
+  // Get metric configuration
+  const metricConfig = METRICS_CONFIG[selectedMetricId as keyof typeof METRICS_CONFIG];
+  const isInflowMetric = selectedMetricId === "6";
+
   React.useEffect(() => {
     if (isMobile) {
       setTimeRange("7d") // Default to 7d for mobile
@@ -237,10 +365,11 @@ export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProp
     const fetchData = async () => {
       setIsLoading(true)
       try {
-        const rawData: InflowDataPoint[] = await getInflowTimeseries(timeRange, selectedDamId)
+        const rawData: InflowDataPoint[] = await getMetricTimeseries(timeRange, selectedDamId, parseInt(selectedMetricId))
         
         // Add comprehensive logging
-        console.log('=== RAW DATA FROM BACKEND ===')
+        console.log('=== RAW METRIC DATA FROM BACKEND ===')
+        console.log(`Metric ID: ${selectedMetricId}, Metric Name: ${metricConfig?.name}`)
         console.log('Total data points received:', rawData.length)
         console.log('Raw data sample:', rawData.slice(0, 5))
         
@@ -251,38 +380,57 @@ export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProp
         }, {} as Record<string, number>)
         console.log('Data type breakdown:', dataTypeBreakdown)
         
-        // Log forecast_error data specifically
-        const forecastErrorData = rawData.filter(point => point.data_type === 'forecast_error')
-        console.log('Forecast error data points:', forecastErrorData.length)
-        if (forecastErrorData.length > 0) {
-          console.log('Sample forecast error data:', forecastErrorData.slice(0, 3))
+        // Log forecast_error data specifically (only for inflow)
+        if (isInflowMetric) {
+          const forecastErrorData = rawData.filter(point => point.data_type === 'forecast_error')
+          console.log('Forecast error data points:', forecastErrorData.length)
+          if (forecastErrorData.length > 0) {
+            console.log('Sample forecast error data:', forecastErrorData.slice(0, 3))
+          }
         }
         
         const transformed = rawData.map(point => {
           const timestamp = new Date(point.ts_utc).getTime()
-          const inflowValue = Math.trunc(point.value_num);
+          
+          // Smart precision handling based on metric type - FIXED!
+          let metricValue: number;
+          if (metricConfig?.unit === '%') {
+            // For percentage metrics, preserve 1 decimal place
+            metricValue = Math.round(point.value_num * 10) / 10;
+          } else if (metricConfig?.unit === 'ft') {
+            // For feet measurements (Headroom), preserve 1 decimal place
+            metricValue = Math.round(point.value_num * 10) / 10;
+          } else if (metricConfig?.unit === 'gates') {
+            // For gates, use whole numbers
+            metricValue = Math.round(point.value_num);
+          } else {
+            // For flow rates (cfs), truncate to whole numbers for readability
+            metricValue = Math.trunc(point.value_num);
+          }
           
           const processedPoint = {
             date: point.ts_utc,
             timestamp: timestamp,
-            observed: point.data_type === 'observed' ? inflowValue : null,
-            forecast: point.data_type === 'forecast' ? inflowValue : null,
-            inflow: point.data_type !== 'forecast_error' ? inflowValue : Math.abs(inflowValue), // Show absolute value for tooltip
+            observed: point.data_type === 'observed' ? metricValue : null,
+            forecast: point.data_type === 'forecast' ? metricValue : null,
+            value: point.data_type !== 'forecast_error' ? metricValue : Math.abs(metricValue), // Show absolute value for tooltip
             type: point.data_type,
-            // Use actual forecast error - this is the key fix
-            forecast_error: point.data_type === 'forecast_error' ? inflowValue : null
+            // Use actual forecast error - only for inflow metric
+            forecast_error: isInflowMetric && point.data_type === 'forecast_error' ? metricValue : null
           }
           
           // Log observed data processing
           if (point.data_type === 'observed') {
             console.log('Processing observed point:', {
               original: point,
-              processed: processedPoint
+              processed: processedPoint,
+              metricType: metricConfig?.unit,
+              precisionApplied: metricValue
             })
           }
           
-          // Log forecast_error processing
-          if (point.data_type === 'forecast_error') {
+          // Log forecast_error processing (only for inflow)
+          if (isInflowMetric && point.data_type === 'forecast_error') {
             console.log('Processing forecast_error point:', {
               original: point,
               processed: processedPoint
@@ -304,40 +452,42 @@ export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProp
           console.log('Observed data values:', observedData.map(d => ({ timestamp: d.timestamp, observed: d.observed })))
         }
         
-        const processedForecastErrors = transformed.filter(point => point.forecast_error !== null)
-        console.log('Processed forecast error points:', processedForecastErrors.length)
-        if (processedForecastErrors.length > 0) {
-          console.log('Sample processed forecast errors:', processedForecastErrors.slice(0, 3))
+        if (isInflowMetric) {
+          const processedForecastErrors = transformed.filter(point => point.forecast_error !== null)
+          console.log('Processed forecast error points:', processedForecastErrors.length)
+          if (processedForecastErrors.length > 0) {
+            console.log('Sample processed forecast errors:', processedForecastErrors.slice(0, 3))
+          }
         }
         
         // Add debugging for Y-axis domain
-        const allInflowValues = transformed
+        const allMetricValues = transformed
           .filter(point => point.observed !== null || point.forecast !== null)
           .map(point => point.observed || point.forecast)
           .filter(val => val !== null);
         
-        console.log('All inflow values for Y-axis:', {
-          min: Math.min(...allInflowValues),
-          max: Math.max(...allInflowValues),
+        console.log('All metric values for Y-axis:', {
+          min: Math.min(...allMetricValues),
+          max: Math.max(...allMetricValues),
           observedRange: observedData.map(d => d.observed),
           forecastRange: transformed.filter(p => p.forecast !== null).map(d => d.forecast)
         });
         
         setProcessedChartData(transformed)
       } catch (error) {
-        console.error("Failed to fetch or process inflow data:", error)
+        console.error("Failed to fetch or process metric data:", error)
         setProcessedChartData([]) 
       } finally {
         setIsLoading(false)
       }
     }
     fetchData()
-  }, [timeRange, selectedDamId])
+  }, [timeRange, selectedDamId, selectedMetricId, metricConfig?.name, isInflowMetric])
 
   return (
     <Card className="@container/card shadow-none">
       <CardHeader>
-        <CardTitle>Inflows</CardTitle> {/* Title updated to cfs */}
+        <CardTitle>{metricConfig?.name || "Metric"}</CardTitle>
         <CardDescription>
           <span className="hidden @[540px]/card:block">
             {processedChartData.length > 0 ? (
@@ -348,25 +498,38 @@ export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProp
                   .slice(-1)[0]; // Get the last observed point
                 
                 if (latestObserved) {
-                  return `${latestObserved.inflow.toLocaleString()} cfs ${new Date(latestObserved.date).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })} ${new Date(latestObserved.date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' })} UTC`;
+                  // Smart formatting for the description based on metric type
+                  const unit = metricConfig?.unit || '';
+                  let formattedValue: string;
+                  
+                  if (unit === '%' || unit === 'ft') {
+                    // Show 1 decimal place for percentages and feet
+                    formattedValue = Number(latestObserved.value).toFixed(1);
+                  } else {
+                    // Show whole numbers for other metrics
+                    formattedValue = latestObserved.value.toLocaleString();
+                  }
+                  
+                  return `${formattedValue} ${unit} ${new Date(latestObserved.date).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })} ${new Date(latestObserved.date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' })} UTC`;
                 } else {
                   return "No observed data available for the selected period.";
                 }
               })()
             ) : (
-              "Daily inflow (cubic feet per second) for the selected period."
+              `Daily ${metricConfig?.name.toLowerCase() || 'metric'} for the selected period.`
             )}
           </span>
           <span className="@[540px]/card:hidden">
             {/* More dynamic description for mobile */}
-            {timeRange === "mtd" ? "Month to Date (UTC)" : timeRange === "14d" ? "Last 14 days (UTC)" : "Last 7 days (UTC)"}
+            {timeRange === "1d" ? "Last 24 hours (UTC)" : 
+             timeRange === "mtd" ? "Month to Date (UTC)" : 
+             timeRange === "14d" ? "Last 14 days (UTC)" : "Last 7 days (UTC)"}
           </span>
         </CardDescription>
         <CardAction>
           <ToggleGroup
             type="single"
             value={timeRange}
-            // Updated onValueChange type
             onValueChange={(value: TimeRangeOption) => {
               if (value) setTimeRange(value)
             }}
@@ -374,13 +537,13 @@ export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProp
             className="hidden *:data-[slot=toggle-group-item]:!px-4 @[767px]/card:flex"
           >
             {/* Updated ToggleGroupItems */}
-            <ToggleGroupItem value="mtd">Month to Date</ToggleGroupItem>
-            <ToggleGroupItem value="14d">Last 14 days</ToggleGroupItem>
+            <ToggleGroupItem value="1d">Last 24 hours</ToggleGroupItem>
             <ToggleGroupItem value="7d">Last 7 days</ToggleGroupItem>
+            <ToggleGroupItem value="14d">Last 14 days</ToggleGroupItem>
+            <ToggleGroupItem value="mtd">Month to Date</ToggleGroupItem>
           </ToggleGroup>
           <Select
             value={timeRange}
-            // Updated onValueChange type
             onValueChange={(value: TimeRangeOption) => {
                if (value) setTimeRange(value)
             }}
@@ -394,14 +557,17 @@ export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProp
             </SelectTrigger>
             <SelectContent className="rounded-xl">
               {/* Updated SelectItems */}
-              <SelectItem value="mtd" className="rounded-lg">
-                Month to Date
+              <SelectItem value="1d" className="rounded-lg">
+                Last 24 hours
+              </SelectItem>
+              <SelectItem value="7d" className="rounded-lg">
+                Last 7 days
               </SelectItem>
               <SelectItem value="14d" className="rounded-lg">
                 Last 14 days
               </SelectItem>
-              <SelectItem value="7d" className="rounded-lg">
-                Last 7 days
+              <SelectItem value="mtd" className="rounded-lg">
+                Month to Date
               </SelectItem>
             </SelectContent>
           </Select>
@@ -418,7 +584,7 @@ export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProp
             </div>
           ) : processedChartData.length === 0 && !isLoading ? (
              <div className="flex h-full w-full items-center justify-center">
-              <p>No inflow data available for the selected period.</p>
+              <p>No {metricConfig?.name.toLowerCase() || 'metric'} data available for the selected period.</p>
             </div>
           ) : (
             <ComposedChart data={processedChartData} margin={{ left: 30, right: 10, top: 5, bottom: 0 }}>
@@ -440,7 +606,7 @@ export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProp
                   return date.getUTCDate().toString();
                 }}
               />
-              {/* Left Y-axis for inflow lines */}
+              {/* Left Y-axis for metric values with smart scaling */}
               <YAxis 
                 yAxisId="left"
                 tickLine={false}
@@ -448,17 +614,24 @@ export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProp
                 tickMargin={8}
                 tickFormatter={(value) => {
                   if (typeof value === 'number') {
-                    return value.toLocaleString(); 
+                    // Smart formatting for Y-axis labels based on metric type
+                    const unit = metricConfig?.unit || '';
+                    if (unit === '%' || unit === 'ft') {
+                      // Show 1 decimal place for percentages and feet if not whole numbers
+                      return value % 1 === 0 ? value.toString() : value.toFixed(1);
+                    } else {
+                      return value.toLocaleString(); 
+                    }
                   }
                   return String(value);
                 }}
-                domain={[
-                  (dataMin: number) => (Math.floor((dataMin * 0.95) / 5000) * 5000),
-                  (dataMax: number) => (Math.ceil((dataMax * 1.05) / 5000) * 5000)
-                ]}
+                domain={(() => {
+                  const [min, max] = calculateOptimalYAxisDomain(processedChartData, selectedMetricId);
+                  return [min, max];
+                })()}
               >
                 <Label 
-                  value="Inflow (cfs)" 
+                  value={`${metricConfig?.name || 'Value'} (${metricConfig?.unit || ''})`}
                   angle={-90} 
                   position="insideLeft" 
                   style={{ textAnchor: 'middle' }} 
@@ -466,16 +639,18 @@ export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProp
                   offset={-20}
                 />
               </YAxis>
-              {/* Right Y-axis for forecast error bars */}
-              <YAxis 
-                yAxisId="right"
-                orientation="right"
-                hide={true}
-                domain={[
-                  (dataMin: number) => Math.min(dataMin * 1.1, 0), // Allow negative values
-                  (dataMax: number) => Math.max(dataMax * 1.1, 0)  // Allow positive values
-                ]}
-              />
+              {/* Right Y-axis for forecast error bars (only for inflow) */}
+              {isInflowMetric && (
+                <YAxis 
+                  yAxisId="right"
+                  orientation="right"
+                  hide={true}
+                  domain={[
+                    (dataMin: number) => Math.min(dataMin * 1.1, 0), // Allow negative values
+                    (dataMax: number) => Math.max(dataMax * 1.1, 0)  // Allow positive values
+                  ]}
+                />
+              )}
               <ChartTooltip
                 cursor={true}
                 animationDuration={0}
@@ -528,54 +703,66 @@ export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProp
                           const capitalizedType = dataType.charAt(0).toUpperCase() + dataType.slice(1);
                           return `${formattedDate} (${capitalizedType})`;
                         }
-                        return "Inflow (UTC)";
+                        return `${metricConfig?.name || 'Metric'} (UTC)`;
                       }}
                       formatter={(value, name, props) => {
-                        // Remove the type label from the body - just show the value
-                        return [
-                          `${props.payload.inflow.toLocaleString()} cfs`
-                        ];
+                        // Smart formatting based on metric type - FIXED!
+                        const unit = metricConfig?.unit || '';
+                        let formattedValue: string;
+                        
+                        if (unit === '%' || unit === 'ft') {
+                          // Show 1 decimal place for percentages and feet
+                          formattedValue = Number(props.payload.value).toFixed(1);
+                        } else {
+                          // Show whole numbers for other metrics
+                          formattedValue = props.payload.value.toLocaleString();
+                        }
+                        
+                        return [`${formattedValue} ${unit}`];
                       }}
                       indicator="dot"
                     />
                   );
                 }}
               />
-              {/* Forecast error bars */}
-              <Bar
-                yAxisId="right"
-                dataKey="forecast_error"
-                shape={(props: any) => {
-                  // Calculate max error once for all bars
-                  const maxErrorInData = Math.max(...processedChartData
-                    .filter(d => d.forecast_error !== null)
-                    .map(d => Math.abs(d.forecast_error!))
-                  );
-                  return <CustomErrorBar {...props} setHoveredErrorBar={setHoveredErrorBar} maxErrorInData={maxErrorInData} />;
-                }}
-                stroke="none"
-                fill="transparent"
-              />
-              {/* Observed inflow line */}
+              {/* Forecast error bars (only for inflow) */}
+              {isInflowMetric && (
+                <Bar
+                  yAxisId="right"
+                  dataKey="forecast_error"
+                  shape={(props: any) => {
+                    // Calculate max error once for all bars
+                    const maxErrorInData = Math.max(...processedChartData
+                      .filter(d => d.forecast_error !== null)
+                      .map(d => Math.abs(d.forecast_error!))
+                    );
+                    return <CustomErrorBar {...props} setHoveredErrorBar={setHoveredErrorBar} maxErrorInData={maxErrorInData} />;
+                  }}
+                  stroke="none"
+                  fill="transparent"
+                />
+              )}
+              {/* Observed metric line - UPDATED to conditionally show dots */}
               <Line
                 yAxisId="left"
                 dataKey="observed"
                 type="linear" 
                 stroke="hsl(120, 70%, 40%)"
                 strokeWidth={2}
-                activeDot={{ r: 8 }}
+                dot={false}
+                activeDot={isInflowMetric ? { r: 8 } : false}
                 connectNulls={true}
               />
-              {/* Forecast inflow line */}
+              {/* Forecast metric line - UPDATED to conditionally show dots */}
               <Line
                 yAxisId="left"
                 dataKey="forecast"
                 type="linear" 
                 stroke="hsl(340, 50%, 40%)"
                 strokeWidth={2}
-                strokeDasharray="5 5"
+                strokeDasharray={isInflowMetric ? "5 5" : "none"}
                 dot={false}
-                activeDot={{ r: 6, fill: "hsl(340, 50%, 40%)" }}
+                activeDot={isInflowMetric ? { r: 6, fill: "hsl(340, 50%, 40%)" } : false}
                 connectNulls={false}
               />
             </ComposedChart>

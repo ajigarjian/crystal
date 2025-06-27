@@ -1377,123 +1377,139 @@ def submit_feedback(request):
 )
 def get_inflow_timeseries(request: https_fn.Request) -> https_fn.Response:
     """
-    Fetch inflow timeseries combining observed (quality='R'), forecast (quality='F'), 
-    and forecast error data. Returns observed data up to current time, forecast data 
-    from current time forward, and forecast error for historical observed data.
+    Fetch timeseries data for any metric. For inflow (metric_id=6), includes observed, 
+    forecast, and forecast error data. For other metrics, returns simple historical data.
     """
-    logger.info("Received request for inflow timeseries data.")
+    logger.info("Received request for metric timeseries data.")
 
     # Parse query params
     range_param = request.args.get('range', '7d')
     dam_id_param = request.args.get('dam_id', '1')
+    metric_id_param = request.args.get('metric_id', '6')  # Default to inflow
+    
     try:
         dam_id_to_query = int(dam_id_param)
+        metric_id_to_query = int(metric_id_param)
     except ValueError:
-        logger.warning(f"Invalid dam_id parameter: '{dam_id_param}'. Defaulting to dam_id 1.")
+        logger.warning(f"Invalid dam_id or metric_id parameter: '{dam_id_param}', '{metric_id_param}'. Defaulting to dam_id 1, metric_id 6.")
         dam_id_to_query = 1
+        metric_id_to_query = 6
     
-    logger.info(f"Processing inflow request for dam_id: {dam_id_to_query}, range: {range_param}")
+    logger.info(f"Processing timeseries request for dam_id: {dam_id_to_query}, metric_id: {metric_id_to_query}, range: {range_param}")
 
     # Calculate date filter for historical data
     now_utc = datetime.utcnow()
-    if range_param == 'mtd':
-        start_utc = now_utc.replace(day=1, hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
-    elif range_param == '14d':
-        start_of_today_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
-        start_utc = start_of_today_utc - timedelta(days=14)
-    elif range_param == '7d':
-        start_of_today_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
-        start_utc = start_of_today_utc - timedelta(days=7)
-    else:
-        logger.warning(f"Unexpected range_param: {range_param}, defaulting to 7d logic.")
-        start_of_today_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
-        start_utc = start_of_today_utc - timedelta(days=7)
+    if range_param == "1d":
+        start_utc = now_utc - timedelta(days=1)
+    elif range_param == "mtd":
+        start_utc = now_utc.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    elif range_param == "14d":
+        start_utc = now_utc - timedelta(days=14)
+    else:  # Default to 7d
+        start_utc = now_utc - timedelta(days=7)
 
     try:
         pool = get_connection_pool()
         conn = pool.getconn()
+
         try:
             with conn.cursor() as cursor:
-                # Step 1: Get observed data
-                observed_query = """
-                    SELECT ts_utc, value_num, 'observed' as data_type
-                    FROM fact_dam_ops
-                    WHERE dam_id = %s AND metric_id = %s AND quality = 'R' 
-                      AND ts_utc >= %s AND ts_utc <= %s
-                    ORDER BY ts_utc ASC;
-                """
-                    
-                cursor.execute(observed_query, (dam_id_to_query, 6, start_utc, now_utc))
-                observed_rows = cursor.fetchall()
-                    
-                # Step 2: Get current forecast data
-                forecast_query = """
-                    SELECT f.ts_utc, f.value_num, 'forecast' as data_type
-                    FROM fact_dam_ops f
-                    INNER JOIN (
-                        SELECT dam_id, metric_id, MAX(ts_utc) as latest_forecast_time
+                # For inflow (metric_id=6), use the existing rich logic with forecasts and errors
+                if metric_id_to_query == 6:
+                    # Step 1: Get observed data
+                    observed_query = """
+                        SELECT ts_utc, value_num, 'observed' as data_type
                         FROM fact_dam_ops
-                        WHERE dam_id = %s AND metric_id = %s AND quality = 'F'
-                        GROUP BY dam_id, metric_id
-                    ) latest ON f.dam_id = latest.dam_id 
-                              AND f.metric_id = latest.metric_id
-                    WHERE f.dam_id = %s AND f.metric_id = %s AND f.quality = 'F'
-                      AND f.ts_utc > %s
-                    ORDER BY f.ts_utc ASC;
-                """
-                
-                cursor.execute(forecast_query, (
-                    dam_id_to_query, 6,
-                    dam_id_to_query, 6, now_utc
-                ))
-                forecast_rows = cursor.fetchall()
-                
-                # Step 3: Calculate forecast errors for observed data points
-                # For daily observed data at 07:00:00Z, compare against average of all forecasts for that same day
-                forecast_error_rows = []
-                
-                logger.info(f"Processing {len(observed_rows)} observed data points for forecast errors")
-                
-                for obs_row in observed_rows:
-                    obs_ts = obs_row[0]
-                    obs_value = float(obs_row[1]) if obs_row[1] is not None else None
-                    
-                    if obs_value is None:
-                        continue
-                    
-                    # Get the date of the observation (ignoring time)
-                    obs_date = obs_ts.date()
-                    
-                    # Find all forecasts for the same day (00:00, 06:00, 12:00, 18:00)
-                    error_query = """
-                        SELECT AVG(value_num) as avg_forecast, COUNT(*) as forecast_count
-                        FROM fact_dam_ops
-                        WHERE dam_id = %s AND metric_id = %s AND quality = 'F'
-                          AND DATE(ts_utc) = %s
-                        GROUP BY DATE(ts_utc);
+                        WHERE dam_id = %s AND metric_id = %s AND quality = 'R' 
+                          AND ts_utc >= %s AND ts_utc <= %s
+                        ORDER BY ts_utc ASC;
+                    """
+                        
+                    cursor.execute(observed_query, (dam_id_to_query, metric_id_to_query, start_utc, now_utc))
+                    observed_rows = cursor.fetchall()
+                        
+                    # Step 2: Get current forecast data
+                    forecast_query = """
+                        SELECT f.ts_utc, f.value_num, 'forecast' as data_type
+                        FROM fact_dam_ops f
+                        INNER JOIN (
+                            SELECT dam_id, metric_id, MAX(ts_utc) as latest_forecast_time
+                            FROM fact_dam_ops
+                            WHERE dam_id = %s AND metric_id = %s AND quality = 'F'
+                            GROUP BY dam_id, metric_id
+                        ) latest ON f.dam_id = latest.dam_id 
+                                  AND f.metric_id = latest.metric_id
+                        WHERE f.dam_id = %s AND f.metric_id = %s AND f.quality = 'F'
+                          AND f.ts_utc > %s
+                        ORDER BY f.ts_utc ASC;
                     """
                     
-                    cursor.execute(error_query, (dam_id_to_query, 6, obs_date))
-                    forecast_result = cursor.fetchone()
+                    cursor.execute(forecast_query, (
+                        dam_id_to_query, metric_id_to_query,
+                        dam_id_to_query, metric_id_to_query, now_utc
+                    ))
+                    forecast_rows = cursor.fetchall()
                     
-                    if forecast_result and forecast_result[0] is not None:
-                        avg_forecast = float(forecast_result[0])
-                        forecast_count = forecast_result[1]
-                        error_value = obs_value - avg_forecast  # positive = under-forecasted, negative = over-forecasted
+                    # Step 3: Calculate forecast errors for observed data points
+                    forecast_error_rows = []
+                    
+                    logger.info(f"Processing {len(observed_rows)} observed data points for forecast errors")
+                    
+                    for obs_row in observed_rows:
+                        obs_ts = obs_row[0]
+                        obs_value = float(obs_row[1]) if obs_row[1] is not None else None
                         
-                        logger.info(f"Forecast error for {obs_ts}: observed={obs_value}, avg_forecast={avg_forecast} (from {forecast_count} forecasts), error={error_value}")
+                        if obs_value is None:
+                            continue
                         
-                        forecast_error_rows.append((obs_ts, error_value, 'forecast_error'))
-                    else:
-                        logger.info(f"No forecasts found for date {obs_date}")
+                        # Get the date of the observation (ignoring time)
+                        obs_date = obs_ts.date()
+                        
+                        # Find all forecasts for the same day (00:00, 06:00, 12:00, 18:00)
+                        error_query = """
+                            SELECT AVG(value_num) as avg_forecast, COUNT(*) as forecast_count
+                            FROM fact_dam_ops
+                            WHERE dam_id = %s AND metric_id = %s AND quality = 'F'
+                              AND DATE(ts_utc) = %s
+                            GROUP BY DATE(ts_utc);
+                        """
+                        
+                        cursor.execute(error_query, (dam_id_to_query, metric_id_to_query, obs_date))
+                        forecast_result = cursor.fetchone()
+                        
+                        if forecast_result and forecast_result[0] is not None:
+                            avg_forecast = float(forecast_result[0])
+                            forecast_count = forecast_result[1]
+                            error_value = obs_value - avg_forecast  # positive = under-forecasted, negative = over-forecasted
+                            
+                            logger.info(f"Forecast error for {obs_ts}: observed={obs_value}, avg_forecast={avg_forecast} (from {forecast_count} forecasts), error={error_value}")
+                            
+                            forecast_error_rows.append((obs_ts, error_value, 'forecast_error'))
+                        else:
+                            logger.info(f"No forecasts found for date {obs_date}")
 
-                logger.info(f"Generated {len(forecast_error_rows)} forecast error data points")
-                
-                # Combine all results
-                all_rows = []
-                all_rows.extend(observed_rows)
-                all_rows.extend(forecast_rows)
-                all_rows.extend(forecast_error_rows)
+                    logger.info(f"Generated {len(forecast_error_rows)} forecast error data points")
+                    
+                    # Combine all results
+                    all_rows = []
+                    all_rows.extend(observed_rows)
+                    all_rows.extend(forecast_rows)
+                    all_rows.extend(forecast_error_rows)
+                else:
+                    # For other metrics, get simple historical time series
+                    historical_query = """
+                        SELECT ts_utc, value_num, 'observed' as data_type
+                        FROM fact_dam_ops
+                        WHERE dam_id = %s AND metric_id = %s 
+                          AND ts_utc >= %s AND ts_utc <= %s
+                          AND value_num IS NOT NULL
+                        ORDER BY ts_utc ASC;
+                    """
+                    
+                    cursor.execute(historical_query, (dam_id_to_query, metric_id_to_query, start_utc, now_utc))
+                    all_rows = cursor.fetchall()
+                    
+                    logger.info(f"Retrieved {len(all_rows)} historical data points for metric_id {metric_id_to_query}")
                 
                 # Sort by timestamp
                 all_rows.sort(key=lambda x: x[0])
@@ -1529,24 +1545,26 @@ def get_inflow_timeseries(request: https_fn.Request) -> https_fn.Response:
                     status=200,
                     headers={"Content-Type": "application/json"}
                 )
+
         except Exception as db_error:
             logger.error(f"Database error in get_inflow_timeseries: {db_error}")
             logger.error(traceback.format_exc())
             if conn:
                 conn.rollback()
             return https_fn.Response(
-                json.dumps({"error": "A database error seemed to have occurred.", "details": str(db_error)}),
+                json.dumps({"error": "A database error occurred.", "details": str(db_error)}),
                 status=500,
                 headers={"Content-Type": "application/json"}
             )
         finally:
             if conn:
                 pool.putconn(conn)
+
     except Exception as e:
-        logger.error(f"General error in get_inflow_timeseries: {e}")
+        logger.error(f"Unexpected error in get_inflow_timeseries: {e}")
         logger.error(traceback.format_exc())
         return https_fn.Response(
-            json.dumps({"error": "An internal server error occurred.", "details": str(e)}),
+            json.dumps({"error": "An unexpected error occurred.", "details": str(e)}),
             status=500,
             headers={"Content-Type": "application/json"}
         )
@@ -1614,96 +1632,178 @@ def get_dashboard_section_cards_data(request: https_fn.Request) -> https_fn.Resp
                 for card_title, config in METRICS_CONFIG.items():
                     metric_id_to_query = config["metric_id"]
                     
-                    # Special handling for Inflow metric to get only observed data (quality = 'R')
-                    if metric_id_to_query == 6:  # Inflow metric
+                    # Enhanced query to get both current and 24-hour previous values
+                    if metric_id_to_query == 6:  # Inflow metric - only observed data
                         query_sql = """
-                            SELECT f.ts_utc, f.value_num
-                            FROM fact_dam_ops f
-                            INNER JOIN (
-                                SELECT metric_id, MAX(ts_utc) as max_ts_utc
-                                FROM fact_dam_ops
-                                WHERE dam_id = %s AND metric_id = %s AND quality = 'R'
-                                GROUP BY metric_id
-                            ) latest_f ON f.metric_id = latest_f.metric_id AND f.ts_utc = latest_f.max_ts_utc
-                            WHERE f.dam_id = %s AND f.metric_id = %s AND f.quality = 'R';
+                            WITH current_data AS (
+                                SELECT f.ts_utc, f.value_num
+                                FROM fact_dam_ops f
+                                INNER JOIN (
+                                    SELECT metric_id, MAX(ts_utc) as max_ts_utc
+                                    FROM fact_dam_ops
+                                    WHERE dam_id = %s AND metric_id = %s AND quality = 'R'
+                                    GROUP BY metric_id
+                                ) latest_f ON f.metric_id = latest_f.metric_id AND f.ts_utc = latest_f.max_ts_utc
+                                WHERE f.dam_id = %s AND f.metric_id = %s AND f.quality = 'R'
+                            ),
+                            previous_data AS (
+                                SELECT f.ts_utc, f.value_num
+                                FROM fact_dam_ops f
+                                INNER JOIN (
+                                    SELECT 
+                                        metric_id, 
+                                        ts_utc,
+                                        ROW_NUMBER() OVER (ORDER BY ABS(EXTRACT(EPOCH FROM (ts_utc - (SELECT ts_utc - INTERVAL '24 hours' FROM current_data))))) as rn
+                                    FROM fact_dam_ops
+                                    WHERE dam_id = %s AND metric_id = %s AND quality = 'R'
+                                      AND ts_utc <= (SELECT ts_utc - INTERVAL '23 hours' FROM current_data)
+                                      AND ts_utc >= (SELECT ts_utc - INTERVAL '25 hours' FROM current_data)
+                                ) nearest_prev ON f.metric_id = nearest_prev.metric_id AND f.ts_utc = nearest_prev.ts_utc AND nearest_prev.rn = 1
+                                WHERE f.dam_id = %s AND f.metric_id = %s AND f.quality = 'R'
+                            )
+                            SELECT 
+                                c.ts_utc as current_ts,
+                                c.value_num as current_value,
+                                p.ts_utc as previous_ts,
+                                p.value_num as previous_value
+                            FROM current_data c
+                            LEFT JOIN previous_data p ON true;
                         """
+                        cursor.execute(query_sql, (
+                            dam_id_to_query, metric_id_to_query, dam_id_to_query, metric_id_to_query,
+                            dam_id_to_query, metric_id_to_query, dam_id_to_query, metric_id_to_query
+                        ))
                     else:
-                        # Default query for other metrics (no quality filter)
+                        # Enhanced query for other metrics (no quality filter)
                         query_sql = """
-                            SELECT f.ts_utc, f.value_num
-                            FROM fact_dam_ops f
-                            INNER JOIN (
-                                SELECT metric_id, MAX(ts_utc) as max_ts_utc
-                                FROM fact_dam_ops
-                                WHERE dam_id = %s AND metric_id = %s
-                                GROUP BY metric_id
-                            ) latest_f ON f.metric_id = latest_f.metric_id AND f.ts_utc = latest_f.max_ts_utc
-                            WHERE f.dam_id = %s AND f.metric_id = %s;
+                            WITH current_data AS (
+                                SELECT f.ts_utc, f.value_num
+                                FROM fact_dam_ops f
+                                INNER JOIN (
+                                    SELECT metric_id, MAX(ts_utc) as max_ts_utc
+                                    FROM fact_dam_ops
+                                    WHERE dam_id = %s AND metric_id = %s
+                                    GROUP BY metric_id
+                                ) latest_f ON f.metric_id = latest_f.metric_id AND f.ts_utc = latest_f.max_ts_utc
+                                WHERE f.dam_id = %s AND f.metric_id = %s
+                            ),
+                            previous_data AS (
+                                SELECT f.ts_utc, f.value_num
+                                FROM fact_dam_ops f
+                                INNER JOIN (
+                                    SELECT 
+                                        metric_id, 
+                                        ts_utc,
+                                        ROW_NUMBER() OVER (ORDER BY ABS(EXTRACT(EPOCH FROM (ts_utc - (SELECT ts_utc - INTERVAL '24 hours' FROM current_data))))) as rn
+                                    FROM fact_dam_ops
+                                    WHERE dam_id = %s AND metric_id = %s
+                                      AND ts_utc <= (SELECT ts_utc - INTERVAL '23 hours' FROM current_data)
+                                      AND ts_utc >= (SELECT ts_utc - INTERVAL '25 hours' FROM current_data)
+                                ) nearest_prev ON f.metric_id = nearest_prev.metric_id AND f.ts_utc = nearest_prev.ts_utc AND nearest_prev.rn = 1
+                                WHERE f.dam_id = %s AND f.metric_id = %s
+                            )
+                            SELECT 
+                                c.ts_utc as current_ts,
+                                c.value_num as current_value,
+                                p.ts_utc as previous_ts,
+                                p.value_num as previous_value
+                            FROM current_data c
+                            LEFT JOIN previous_data p ON true;
                         """
+                        cursor.execute(query_sql, (
+                            dam_id_to_query, metric_id_to_query, dam_id_to_query, metric_id_to_query,
+                            dam_id_to_query, metric_id_to_query, dam_id_to_query, metric_id_to_query
+                        ))
                     
-                    cursor.execute(query_sql, (dam_id_to_query, metric_id_to_query, dam_id_to_query, metric_id_to_query))
                     row = cursor.fetchone()
                     
                     # Initialize defaults
-                    value_display = f"N/A {config['unit']}" 
-                    timestamp_iso = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ') 
-                    trend_val = "neutral" 
+                    value_display = f"N/A {config['unit']}"
+                    timestamp_iso = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+                    trend_val = "neutral"
+                    change_24h = None
+                    change_24h_percent = None
                     
-                    if row: # If a record was found
-                        db_ts_utc, db_value_num = row[0], row[1]
-
-                        if db_ts_utc is not None:
-                            # Ensure the database timestamp is UTC and correctly formatted
-                            if db_ts_utc.tzinfo is None:
-                                # If naive, assume it's UTC and make it aware
-                                aware_utc_datetime = db_ts_utc.replace(tzinfo=timezone.utc)
+                    if row and row[0] is not None:  # If current data exists
+                        current_ts, current_value, previous_ts, previous_value = row
+                        
+                        # Process current timestamp
+                        if current_ts is not None:
+                            if current_ts.tzinfo is None:
+                                aware_utc_datetime = current_ts.replace(tzinfo=timezone.utc)
                             else:
-                                # If already aware, convert to UTC to be certain
-                                aware_utc_datetime = db_ts_utc.astimezone(timezone.utc)
-                            # Ensure Z (Zulu) suffix for UTC timestamps
+                                aware_utc_datetime = current_ts.astimezone(timezone.utc)
                             timestamp_iso = aware_utc_datetime.strftime('%Y-%m-%dT%H:%M:%SZ')
-                        # If db_ts_utc is None, timestamp_iso remains the current UTC time default (already formatted with Z)
-
-                        if db_value_num is not None:
-                            numeric_value_for_processing = None
-                            if isinstance(db_value_num, decimal.Decimal):
-                                numeric_value_for_processing = float(db_value_num)
-                            elif isinstance(db_value_num, (int, float)):
-                                numeric_value_for_processing = db_value_num
+                        
+                        # Process current value
+                        if current_value is not None:
+                            numeric_current = None
+                            if isinstance(current_value, decimal.Decimal):
+                                numeric_current = float(current_value)
+                            elif isinstance(current_value, (int, float)):
+                                numeric_current = current_value
                             else:
                                 try:
-                                    numeric_value_for_processing = float(str(db_value_num))
-                                    logger.info(f"Successfully converted db_value_num '{db_value_num}' (type {type(db_value_num)}) to float for metric_id {metric_id_to_query}.")
+                                    numeric_current = float(str(current_value))
                                 except (ValueError, TypeError):
-                                    logger.warning(f"Value for metric_id {metric_id_to_query} ('{db_value_num}' type: {type(db_value_num)}) is not a recognized number and could not be converted. Defaulting to N/A.")
-                                    # value_display will use the default "N/A {config['unit']}"
-
-                            if numeric_value_for_processing is not None:
-                                temp_value = numeric_value_for_processing
-
+                                    logger.warning(f"Could not convert current value for metric_id {metric_id_to_query}")
+                            
+                            if numeric_current is not None:
+                                # Apply special formatting for Reservoir Fill
+                                display_current = numeric_current
                                 if card_title == "Reservoir Fill":
-                                    temp_value *= 100
+                                    display_current *= 100
                                 
-                                formatted_num_str = "{:,.1f}".format(temp_value)
+                                formatted_num_str = "{:,.1f}".format(display_current)
                                 if formatted_num_str.endswith(".0"):
                                     formatted_num_str = formatted_num_str[:-2]
                                 value_display = f"{formatted_num_str} {config['unit']}"
-                            # If conversion failed or numeric_value_for_processing is None,
-                            # value_display retains its default "N/A {config['unit']}"
-                        # else (if db_value_num is None), value_display remains "N/A {config['unit']}"
-                    # else (if row is None), defaults for value_display and timestamp_iso are used.
-
-                    logger.info(f"DEBUG: Card: {card_title}, Formatted Timestamp: {timestamp_iso}") # <--- ADD THIS
-
-                    card_data_list.append({
-                        "id": str(metric_id_to_query), # Use metric_id as a unique ID for the card
+                                
+                                # Calculate 24-hour change if previous value exists
+                                if previous_value is not None:
+                                    numeric_previous = None
+                                    if isinstance(previous_value, decimal.Decimal):
+                                        numeric_previous = float(previous_value)
+                                    elif isinstance(previous_value, (int, float)):
+                                        numeric_previous = previous_value
+                                    else:
+                                        try:
+                                            numeric_previous = float(str(previous_value))
+                                        except (ValueError, TypeError):
+                                            logger.warning(f"Could not convert previous value for metric_id {metric_id_to_query}")
+                                    
+                                    if numeric_previous is not None:
+                                        # Calculate absolute and percentage change
+                                        change_24h = numeric_current - numeric_previous
+                                        if numeric_previous != 0:
+                                            change_24h_percent = (change_24h / abs(numeric_previous)) * 100
+                                        else:
+                                            change_24h_percent = 0 if change_24h == 0 else float('inf')
+                                        
+                                        # Determine trend based on change
+                                        if abs(change_24h) < 0.01:  # Very small change threshold
+                                            trend_val = "neutral"
+                                        elif change_24h > 0:
+                                            trend_val = "up"
+                                        else:
+                                            trend_val = "down"
+                                        
+                                        logger.info(f"Metric {card_title}: current={numeric_current}, previous={numeric_previous}, change={change_24h}, trend={trend_val}")
+                    
+                    # Build response object with 24-hour change data
+                    card_data = {
+                        "id": str(metric_id_to_query),
                         "title": card_title,
                         "value": value_display,
                         "timestamp": timestamp_iso,
-                        "trend": trend_val, # Placeholder
-                        "trendDescription": config["default_trend_desc"], # Placeholder
-                        "footerNote": f"Latest reading for {card_title.lower()}"
-                    })
+                        "trend": trend_val,
+                        "trendDescription": config["default_trend_desc"],
+                        "footerNote": f"Latest reading for {card_title.lower()}",
+                        "change24h": change_24h,
+                        "change24hPercent": change_24h_percent
+                    }
+                    
+                    card_data_list.append(card_data)
 
             # Ensure consistent ordering of cards based on METRICS_CONFIG keys
             ordered_card_data_list = sorted(card_data_list, key=lambda x: list(METRICS_CONFIG.keys()).index(x["title"]))
@@ -1749,7 +1849,8 @@ def get_dashboard_section_cards_data(request: https_fn.Request) -> https_fn.Resp
         cors_methods=["get", "post", "options"]
     ),
     memory=options.MemoryOption.MB_512,
-    timeout_sec=300
+    timeout_sec=300,
+    min_instances=1
 )
 def generate_inflow_forecast_v0(request: https_fn.Request) -> https_fn.Response:
     """
