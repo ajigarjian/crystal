@@ -28,8 +28,31 @@ import { getDashboardSectionCards, SectionCardData, getDamLocations, DamLocation
 export interface DamInfo {
   id: number;
   name: string;
-  plantName?: string;
-  technology?: string;
+  nidId?: string;
+  federalId?: string;
+  ownerName?: string;
+  operatorAgency?: string;
+  river?: string;
+  city?: string;
+  county?: string;
+  state?: string;
+  structuralHeightFt?: number;
+  hydraulicHeightFt?: number;
+  nidHeightFt?: number;
+  damLengthFt?: number;
+  damVolumeCy?: number;
+  storageMaxAcft?: number;
+  storageNormalAcft?: number;
+  surfaceAreaAcres?: number;
+  drainageAreaSqmi?: number;
+  maxDischargeCfs?: number;
+  capacityMw?: number;
+  activeStorageAcft?: number;
+  gateCount?: number;
+  gateType?: string;
+  yearCompleted?: number;
+  yearModified?: string;
+  damCode?: string;
 }
 
 export interface PowerLineInfo {
@@ -451,9 +474,40 @@ export default function Page() {
 
   const handleMapMarkerClick = (marker: { id: string | number; name?: string; latitude: number; longitude: number }) => {
     // Find the dam by ID - handle both string and number types
-    const damInfo = damMapData.find(dam => dam.id.toString() === marker.id.toString());
-    if (damInfo) {
-      setSelectedFeature({ type: 'dam', data: { id: typeof damInfo.id === 'string' ? parseInt(damInfo.id) : damInfo.id, name: damInfo.name } });
+    const damLocation = damMapData.find(dam => dam.id.toString() === marker.id.toString());
+    if (damLocation) {
+      // Create DamInfo with all the rich metadata from DamLocation
+      const damInfo: DamInfo = {
+        id: typeof damLocation.id === 'string' ? parseInt(damLocation.id) : damLocation.id,
+        name: damLocation.name,
+        nidId: damLocation.nidId,
+        federalId: damLocation.federalId,
+        ownerName: damLocation.ownerName,
+        operatorAgency: damLocation.operatorAgency,
+        river: damLocation.river,
+        city: damLocation.city,
+        county: damLocation.county,
+        state: damLocation.state,
+        structuralHeightFt: damLocation.structuralHeightFt,
+        hydraulicHeightFt: damLocation.hydraulicHeightFt,
+        nidHeightFt: damLocation.nidHeightFt,
+        damLengthFt: damLocation.damLengthFt,
+        damVolumeCy: damLocation.damVolumeCy,
+        storageMaxAcft: damLocation.storageMaxAcft,
+        storageNormalAcft: damLocation.storageNormalAcft,
+        surfaceAreaAcres: damLocation.surfaceAreaAcres,
+        drainageAreaSqmi: damLocation.drainageAreaSqmi,
+        maxDischargeCfs: damLocation.maxDischargeCfs,
+        capacityMw: damLocation.capacityMw,
+        activeStorageAcft: damLocation.activeStorageAcft,
+        gateCount: damLocation.gateCount,
+        gateType: damLocation.gateType,
+        yearCompleted: damLocation.yearCompleted,
+        yearModified: damLocation.yearModified,
+        damCode: damLocation.damCode
+      };
+      
+      setSelectedFeature({ type: 'dam', data: damInfo });
       setSelectedFlowgate(null);
       setSelectedMetricId("6"); // Reset to Inflow when dam changes
     }
@@ -720,29 +774,139 @@ export default function Page() {
                             <CardHeader>
                               <CardTitle className="text-sm text-muted-foreground">Dam Information</CardTitle>
                             </CardHeader>
-                            <CardContent className="space-y-3">
+                            <CardContent className="space-y-4">
+                              {/* Basic Dam Information */}
                               <div className="grid grid-cols-2 gap-3 text-sm">
                                 <div>
                                   <span className="font-medium text-muted-foreground">Name:</span>
                                   <div className="font-medium">{currentDam.name}</div>
                                 </div>
                                 <div>
-                                  <span className="font-medium text-muted-foreground">ID:</span>
-                                  <div className="font-medium">{currentDam.id}</div>
+                                  <span className="font-medium text-muted-foreground">River:</span>
+                                  <div className="font-medium">{currentDam.river || 'N/A'}</div>
                                 </div>
-                                {currentDam.plantName && (
-                                  <div className="col-span-2">
-                                    <span className="font-medium text-muted-foreground">Plant:</span>
-                                    <div className="font-medium">{currentDam.plantName}</div>
+                                <div>
+                                  <span className="font-medium text-muted-foreground">Owner:</span>
+                                  <div className="font-medium">{currentDam.ownerName || 'N/A'}</div>
+                                </div>
+                                <div>
+                                  <span className="font-medium text-muted-foreground">Operator:</span>
+                                  <div className="font-medium">{currentDam.operatorAgency || 'N/A'}</div>
+                                </div>
+                                <div>
+                                  <span className="font-medium text-muted-foreground">Location:</span>
+                                  <div className="font-medium">
+                                    {currentDam.city && currentDam.state ? `${currentDam.city}, ${currentDam.state}` : 'N/A'}
                                   </div>
-                                )}
-                                {currentDam.technology && (
-                                  <div className="col-span-2">
-                                    <span className="font-medium text-muted-foreground">Technology:</span>
-                                    <div className="font-medium">{currentDam.technology}</div>
-                                  </div>
-                                )}
+                                </div>
+                                <div>
+                                  <span className="font-medium text-muted-foreground">Year Completed:</span>
+                                  <div className="font-medium">{currentDam.yearCompleted || 'N/A'}</div>
+                                </div>
                               </div>
+                              
+                              <Separator />
+                              
+                              {/* Technical Specifications */}
+                              <div>
+                                <div className="text-sm font-medium text-muted-foreground mb-2">Technical Specifications</div>
+                                <div className="grid grid-cols-2 gap-3 text-sm">
+                                  <div>
+                                    <span className="font-medium text-muted-foreground">Height:</span>
+                                    <div className="font-medium">
+                                      {currentDam.structuralHeightFt ? `${currentDam.structuralHeightFt.toLocaleString()} ft` : 'N/A'}
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <span className="font-medium text-muted-foreground">Length:</span>
+                                    <div className="font-medium">
+                                      {currentDam.damLengthFt ? `${currentDam.damLengthFt.toLocaleString()} ft` : 'N/A'}
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <span className="font-medium text-muted-foreground">Capacity:</span>
+                                    <div className="font-medium">
+                                      {currentDam.capacityMw ? `${currentDam.capacityMw.toLocaleString()} MW` : 'N/A'}
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <span className="font-medium text-muted-foreground">Gate Type:</span>
+                                    <div className="font-medium">{currentDam.gateType || 'N/A'}</div>
+                                  </div>
+                                  {currentDam.gateCount && (
+                                    <div>
+                                      <span className="font-medium text-muted-foreground">Gate Count:</span>
+                                      <div className="font-medium">{currentDam.gateCount}</div>
+                                    </div>
+                                  )}
+                                  {currentDam.drainageAreaSqmi && (
+                                    <div>
+                                      <span className="font-medium text-muted-foreground">Drainage Area:</span>
+                                      <div className="font-medium">{currentDam.drainageAreaSqmi.toLocaleString()} sq mi</div>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Storage Information */}
+                              {(currentDam.storageMaxAcft || currentDam.storageNormalAcft || currentDam.activeStorageAcft) && (
+                                <>
+                                  <Separator />
+                                  <div>
+                                    <div className="text-sm font-medium text-muted-foreground mb-2">Storage Capacity</div>
+                                    <div className="grid grid-cols-2 gap-3 text-sm">
+                                      {currentDam.storageMaxAcft && (
+                                        <div>
+                                          <span className="font-medium text-muted-foreground">Max Storage:</span>
+                                          <div className="font-medium">{currentDam.storageMaxAcft.toLocaleString()} ac-ft</div>
+                                        </div>
+                                      )}
+                                      {currentDam.storageNormalAcft && (
+                                        <div>
+                                          <span className="font-medium text-muted-foreground">Normal Storage:</span>
+                                          <div className="font-medium">{currentDam.storageNormalAcft.toLocaleString()} ac-ft</div>
+                                        </div>
+                                      )}
+                                      {currentDam.activeStorageAcft && (
+                                        <div className="col-span-2">
+                                          <span className="font-medium text-muted-foreground">Active Storage:</span>
+                                          <div className="font-medium">{currentDam.activeStorageAcft.toLocaleString()} ac-ft</div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </>
+                              )}
+
+                              {/* Additional Information */}
+                              {(currentDam.nidId || currentDam.federalId || currentDam.damCode) && (
+                                <>
+                                  <Separator />
+                                  <div>
+                                    <div className="text-sm font-medium text-muted-foreground mb-2">Identification</div>
+                                    <div className="grid grid-cols-2 gap-3 text-sm">
+                                      {currentDam.nidId && (
+                                        <div>
+                                          <span className="font-medium text-muted-foreground">NID ID:</span>
+                                          <div className="font-medium font-mono text-xs">{currentDam.nidId}</div>
+                                        </div>
+                                      )}
+                                      {currentDam.damCode && (
+                                        <div>
+                                          <span className="font-medium text-muted-foreground">Dam Code:</span>
+                                          <div className="font-medium font-mono text-xs">{currentDam.damCode}</div>
+                                        </div>
+                                      )}
+                                      {currentDam.federalId && (
+                                        <div className="col-span-2">
+                                          <span className="font-medium text-muted-foreground">Federal ID:</span>
+                                          <div className="font-medium font-mono text-xs">{currentDam.federalId}</div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </>
+                              )}
                             </CardContent>
                           </Card>
                         </TabsContent>

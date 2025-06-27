@@ -435,10 +435,38 @@ def get_dam_locations(request: https_fn.Request) -> https_fn.Response:
         dam_locations_list = []
         try:
             with conn.cursor() as cursor:
-                # Query to get dam_id, dam_name, latitude, and longitude from dim_dam
-                # Filters out rows where latitude or longitude is NULL
+                # Enhanced query to get all rich dam metadata from dim_dam
                 query_sql = """
-                    SELECT dam_id, dam_name, latitude, longitude 
+                    SELECT 
+                        dam_id, 
+                        dam_name, 
+                        latitude, 
+                        longitude,
+                        nid_id,
+                        federal_id,
+                        owner_name,
+                        operator_agency,
+                        river,
+                        city,
+                        county,
+                        state,
+                        structural_height_ft,
+                        hydraulic_height_ft,
+                        nid_height_ft,
+                        dam_length_ft,
+                        dam_volume_cy,
+                        storage_max_acft,
+                        storage_normal_acft,
+                        surface_area_acres,
+                        drainage_area_sqmi,
+                        max_discharge_cfs,
+                        capacity_mw,
+                        active_storage_acft,
+                        gate_count,
+                        gate_type,
+                        year_completed,
+                        year_modified,
+                        dam_code
                     FROM dim_dam 
                     WHERE latitude IS NOT NULL AND longitude IS NOT NULL;
                 """
@@ -446,7 +474,10 @@ def get_dam_locations(request: https_fn.Request) -> https_fn.Response:
                 rows = cursor.fetchall()
                 
                 for row_data in rows:
-                    dam_id, dam_name_val, lat_val, lon_val = row_data
+                    dam_id = row_data[0]
+                    dam_name_val = row_data[1]
+                    lat_val = row_data[2]
+                    lon_val = row_data[3]
                     
                     current_dam_lat = None
                     current_dam_lon = None
@@ -463,11 +494,45 @@ def get_dam_locations(request: https_fn.Request) -> https_fn.Response:
                     
                     # Only add if both latitude and longitude are valid numbers
                     if current_dam_lat is not None and current_dam_lon is not None:
+                        # Helper function to safely convert values
+                        def safe_convert(value, convert_func=None):
+                            if value is None:
+                                return None
+                            try:
+                                return convert_func(value) if convert_func else value
+                            except (ValueError, TypeError):
+                                return None
+                        
                         dam_locations_list.append({
                             "id": dam_id,
                             "name": dam_name_val,
                             "latitude": current_dam_lat,
-                            "longitude": current_dam_lon
+                            "longitude": current_dam_lon,
+                            "nidId": row_data[4],
+                            "federalId": row_data[5],
+                            "ownerName": row_data[6],
+                            "operatorAgency": row_data[7],
+                            "river": row_data[8],
+                            "city": row_data[9],
+                            "county": row_data[10],
+                            "state": row_data[11],
+                            "structuralHeightFt": safe_convert(row_data[12], float),
+                            "hydraulicHeightFt": safe_convert(row_data[13], float),
+                            "nidHeightFt": safe_convert(row_data[14], float),
+                            "damLengthFt": safe_convert(row_data[15], float),
+                            "damVolumeCy": safe_convert(row_data[16], float),
+                            "storageMaxAcft": safe_convert(row_data[17], float),
+                            "storageNormalAcft": safe_convert(row_data[18], float),
+                            "surfaceAreaAcres": safe_convert(row_data[19], float),
+                            "drainageAreaSqmi": safe_convert(row_data[20], float),
+                            "maxDischargeCfs": safe_convert(row_data[21], float),
+                            "capacityMw": safe_convert(row_data[22], float),
+                            "activeStorageAcft": safe_convert(row_data[23], float),
+                            "gateCount": safe_convert(row_data[24], int),
+                            "gateType": row_data[25],
+                            "yearCompleted": safe_convert(row_data[26], int),
+                            "yearModified": row_data[27],
+                            "damCode": row_data[28]
                         })
             
             return https_fn.Response(

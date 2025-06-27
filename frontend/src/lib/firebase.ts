@@ -747,6 +747,31 @@ export interface DamLocation {
   name: string;
   latitude: number;
   longitude: number;
+  nidId?: string;
+  federalId?: string;
+  ownerName?: string;
+  operatorAgency?: string;
+  river?: string;
+  city?: string;
+  county?: string;
+  state?: string;
+  structuralHeightFt?: number;
+  hydraulicHeightFt?: number;
+  nidHeightFt?: number;
+  damLengthFt?: number;
+  damVolumeCy?: number;
+  storageMaxAcft?: number;
+  storageNormalAcft?: number;
+  surfaceAreaAcres?: number;
+  drainageAreaSqmi?: number;
+  maxDischargeCfs?: number;
+  capacityMw?: number;
+  activeStorageAcft?: number;
+  gateCount?: number;
+  gateType?: string;
+  yearCompleted?: number;
+  yearModified?: string;
+  damCode?: string;
 }
 
 // Export a helper for calling the new dam locations function
