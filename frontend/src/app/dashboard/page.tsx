@@ -14,11 +14,12 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { TradingSummary } from "@/components/TradingSummary"
 import { ChartAreaInteractive } from '@/components/chart-area-interactive'
 import { ChartTTCFlowgate } from '@/components/chart-ttc-flowgate'
 import { ChartSnotelWTEQ } from '@/components/chart-snotel-wteq'
-import { Terminal, Mic, Square } from "lucide-react"
+import { Terminal, Mic, Square, TrendingUp, MapPin, Activity, Info, Zap } from "lucide-react"
 import { Separator } from "@/components/ui/separator"
 import { MetricsTable, transformSectionCardDataToMetrics } from "@/components/metrics-table"
 
@@ -681,81 +682,161 @@ export default function Page() {
                     )}
 
                     {selectedFeature?.type === 'dam' && currentDam && (
-                      <div className="flex flex-col gap-2">
-                        <div className="min-h-[300px] flex-shrink-0">
-                          <ChartAreaInteractive 
-                            selectedDamId={currentDam.id} 
-                            selectedMetricId={selectedMetricId}
-                          />
-                        </div>
+                      <Tabs defaultValue="data" className="w-full">
+                        <TabsList className="grid w-full grid-cols-2">
+                          <TabsTrigger value="data" className="flex items-center gap-2">
+                            <Activity className="h-4 w-4" />
+                            Data
+                          </TabsTrigger>
+                          <TabsTrigger value="about" className="flex items-center gap-2">
+                            <Info className="h-4 w-4" />
+                            About
+                          </TabsTrigger>
+                        </TabsList>
                         
-                        {/* Replace the cards with the metrics table */}
-                        <MetricsTable 
-                          data={transformSectionCardDataToMetrics(currentSectionCardData)}
-                          isLoading={isLoadingCards}
-                          emptyStateTitle="No operational data available"
-                          emptyStateDescription="Dam operational metrics are currently unavailable. This might be due to a temporary issue or no data being found."
-                          selectedMetricId={selectedMetricId}
-                          onMetricSelect={setSelectedMetricId}
-                        />
-                      </div>
+                        <TabsContent value="data" className="space-y-4 mt-4">
+                          <div className="flex flex-col gap-2">
+                            <div className="min-h-[300px] flex-shrink-0">
+                              <ChartAreaInteractive 
+                                selectedDamId={currentDam.id} 
+                                selectedMetricId={selectedMetricId}
+                              />
+                            </div>
+                            
+                            {/* Replace the cards with the metrics table */}
+                            <MetricsTable 
+                              data={transformSectionCardDataToMetrics(currentSectionCardData)}
+                              isLoading={isLoadingCards}
+                              emptyStateTitle="No operational data available"
+                              emptyStateDescription="Dam operational metrics are currently unavailable. This might be due to a temporary issue or no data being found."
+                              selectedMetricId={selectedMetricId}
+                              onMetricSelect={setSelectedMetricId}
+                            />
+                          </div>
+                        </TabsContent>
+                        
+                        <TabsContent value="about" className="space-y-4 mt-4">
+                          <Card>
+                            <CardHeader>
+                              <CardTitle className="text-sm text-muted-foreground">Dam Information</CardTitle>
+                            </CardHeader>
+                            <CardContent className="space-y-3">
+                              <div className="grid grid-cols-2 gap-3 text-sm">
+                                <div>
+                                  <span className="font-medium text-muted-foreground">Name:</span>
+                                  <div className="font-medium">{currentDam.name}</div>
+                                </div>
+                                <div>
+                                  <span className="font-medium text-muted-foreground">ID:</span>
+                                  <div className="font-medium">{currentDam.id}</div>
+                                </div>
+                                {currentDam.plantName && (
+                                  <div className="col-span-2">
+                                    <span className="font-medium text-muted-foreground">Plant:</span>
+                                    <div className="font-medium">{currentDam.plantName}</div>
+                                  </div>
+                                )}
+                                {currentDam.technology && (
+                                  <div className="col-span-2">
+                                    <span className="font-medium text-muted-foreground">Technology:</span>
+                                    <div className="font-medium">{currentDam.technology}</div>
+                                  </div>
+                                )}
+                              </div>
+                            </CardContent>
+                          </Card>
+                        </TabsContent>
+                      </Tabs>
                     )}
 
                     {selectedFeature?.type === 'powerline' && currentPowerLine && (
-                      <>
-                        {/* TTC Chart First - Primary Data */}
-                        {currentPowerLine.flowgate && (
-                          <ChartTTCFlowgate selectedFlowgate={currentPowerLine.flowgate} />
-                        )}
-
-                        {/* Power Line Details Second - Supporting Context */}
-                        <Card className="flex-shrink-0 relative">
-                          <CardHeader>
-                            <CardTitle className="text-sm text-muted-foreground">Power Line Details</CardTitle>
-                          </CardHeader>
-                          <CardContent className="space-y-4">
-                            {/* Basic Power Line Information */}
-                            <div className="grid grid-cols-2 gap-3 text-sm">
-                              <div>
-                                <span className="font-medium text-muted-foreground">Voltage:</span>
-                                <div className="font-medium">{formatVoltageToKV(currentPowerLine.voltage)}</div>
-                              </div>
-                              <div>
-                                <span className="font-medium text-muted-foreground">Operator:</span>
-                                <div className="font-medium">{currentPowerLine.operator || 'Unknown'}</div>
-                              </div>
-                              {currentPowerLine.ref && (
-                                <div className="col-span-2">
-                                  <span className="font-medium text-muted-foreground">Reference:</span>
-                                  <div className="font-medium">{currentPowerLine.ref}</div>
+                      <Tabs defaultValue="data" className="w-full">
+                        <TabsList className="grid w-full grid-cols-2">
+                          <TabsTrigger value="data" className="flex items-center gap-2">
+                            <Activity className="h-4 w-4" />
+                            Data
+                          </TabsTrigger>
+                          <TabsTrigger value="about" className="flex items-center gap-2">
+                            <Info className="h-4 w-4" />
+                            About
+                          </TabsTrigger>
+                        </TabsList>
+                        
+                        <TabsContent value="data" className="space-y-4 mt-4">
+                          {/* TTC Chart First - Primary Data */}
+                          {currentPowerLine.flowgate ? (
+                            <ChartTTCFlowgate selectedFlowgate={currentPowerLine.flowgate} />
+                          ) : (
+                            <Card>
+                              <CardContent className="pt-6">
+                                <div className="text-center text-muted-foreground">
+                                  <Activity className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                                  <p className="text-sm">No live data available for this power line</p>
+                                  <p className="text-xs mt-1">This line is not part of a monitored flowgate</p>
                                 </div>
-                              )}
-                              {/* Only show capacity factor if this line is part of a flowgate */}
-                              {currentPowerLine.flowgate && (
-                                <div className="col-span-2">
-                                  <span className="font-medium text-muted-foreground">Capacity Factor:</span>
-                                  <div className="flex items-center gap-2">
-                                    <div className="font-medium">{formatCapacityFactor(currentPowerLine.capacityFactor)}</div>
-                                    <Badge variant={getCapacityFactorBadgeVariant(currentPowerLine.capacityFactor)}>
-                                      {getCapacityFactorStatus(currentPowerLine.capacityFactor)}
-                                    </Badge>
-                                  </div>
-                                  <div className="text-xs text-muted-foreground mt-1">
-                                    All lines in this flowgate share this capacity factor
-                                  </div>
+                              </CardContent>
+                            </Card>
+                          )}
+                        </TabsContent>
+                        
+                        <TabsContent value="about" className="space-y-4 mt-4">
+                          {/* Power Line Details */}
+                          <Card className="flex-shrink-0 relative">
+                            <CardHeader>
+                              <CardTitle className="text-sm text-muted-foreground">Power Line Specifications</CardTitle>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                              {/* Basic Power Line Information */}
+                              <div className="grid grid-cols-2 gap-3 text-sm">
+                                <div>
+                                  <span className="font-medium text-muted-foreground">Voltage:</span>
+                                  <div className="font-medium">{formatVoltageToKV(currentPowerLine.voltage)}</div>
                                 </div>
-                              )}
-                            </div>
+                                <div>
+                                  <span className="font-medium text-muted-foreground">Operator:</span>
+                                  <div className="font-medium">{currentPowerLine.operator || 'Unknown'}</div>
+                                </div>
+                                {currentPowerLine.flowgate && (
+                                  <div>
+                                    <span className="font-medium text-muted-foreground">Flowgate:</span>
+                                    <div className="font-medium">
+                                      <Badge variant="outline" className="font-mono">
+                                        {currentPowerLine.flowgate}
+                                      </Badge>
+                                    </div>
+                                  </div>
+                                )}
+                                {currentPowerLine.ref && (
+                                  <div className="col-span-2">
+                                    <span className="font-medium text-muted-foreground">Reference:</span>
+                                    <div className="font-medium font-mono text-xs">{currentPowerLine.ref}</div>
+                                  </div>
+                                )}
+                                {/* Only show capacity factor if this line is part of a flowgate */}
+                                {currentPowerLine.flowgate && (
+                                  <div className="col-span-2">
+                                    <span className="font-medium text-muted-foreground">Capacity Factor:</span>
+                                    <div className="flex items-center gap-2">
+                                      <div className="font-medium">{formatCapacityFactor(currentPowerLine.capacityFactor)}</div>
+                                      <Badge variant={getCapacityFactorBadgeVariant(currentPowerLine.capacityFactor)}>
+                                        {getCapacityFactorStatus(currentPowerLine.capacityFactor)}
+                                      </Badge>
+                                    </div>
+                                    <div className="text-xs text-muted-foreground mt-1">
+                                      All lines in this flowgate share this capacity factor
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
 
-                            {/* Flowgate Information */}
-                            {currentPowerLine.flowgate && (
-                              <>
-                                <Separator />
-                                <div className="space-y-3">
-                                  {currentPowerLine.associatedLines && currentPowerLine.associatedLines.length > 0 ? (
+                              {/* Flowgate Information */}
+                              {currentPowerLine.flowgate && currentPowerLine.associatedLines && currentPowerLine.associatedLines.length > 0 && (
+                                <>
+                                  <Separator />
+                                  <div className="space-y-3">
                                     <div>
                                       <div className="text-sm font-medium text-muted-foreground mb-2">
-                                        Other Lines in this Flowgate ({currentPowerLine.associatedLines.length})
+                                        Related Lines ({currentPowerLine.associatedLines.length})
                                       </div>
                                       <div className="space-y-1 max-h-32 overflow-y-auto">
                                         {currentPowerLine.associatedLines
@@ -775,114 +856,141 @@ export default function Page() {
                                           })}
                                       </div>
                                     </div>
-                                  ) : (
-                                    <div className="text-xs text-muted-foreground italic">
-                                      No other lines found in this flowgate
-                                    </div>
-                                  )}
-                                </div>
-                              </>
-                            )}
-                            
-                            {/* Flowgate code in bottom right corner */}
-                            {currentPowerLine.flowgate && (
-                              <div className="absolute bottom-4 right-4">
-                                <Badge variant="outline" className="text-xs font-mono">
-                                  {currentPowerLine.flowgate}
-                                </Badge>
-                              </div>
-                            )}
-                          </CardContent>
-                        </Card>
-                      </>
+                                  </div>
+                                </>
+                              )}
+                            </CardContent>
+                          </Card>
+                        </TabsContent>
+                      </Tabs>
                     )}
 
                     {selectedFeature?.type === 'generation' && currentGeneration && (
-                      <>
-                        {/* Generation Details */}
-                        <Card className="flex-shrink-0">
-                          <CardHeader>
-                            <CardTitle className="text-sm text-muted-foreground">
-                              {currentGeneration.type === 'plant' ? 'Power Plant' : 'Generator'} Details
-                            </CardTitle>
-                          </CardHeader>
-                          <CardContent className="space-y-4">
-                            {/* Basic Generation Information */}
-                            <div className="grid grid-cols-2 gap-3 text-sm">
-                              <div>
-                                <span className="font-medium text-muted-foreground">Type:</span>
-                                <div className="font-medium capitalize">{currentGeneration.fuelType || 'Unknown'}</div>
+                      <Tabs defaultValue="about" className="w-full">
+                        <TabsList className="grid w-full grid-cols-2">
+                          <TabsTrigger value="data" className="flex items-center gap-2">
+                            <Activity className="h-4 w-4" />
+                            Data
+                          </TabsTrigger>
+                          <TabsTrigger value="about" className="flex items-center gap-2">
+                            <Info className="h-4 w-4" />
+                            About
+                          </TabsTrigger>
+                        </TabsList>
+                        
+                        <TabsContent value="data" className="space-y-4 mt-4">
+                          <Card>
+                            <CardContent className="pt-6">
+                              <div className="text-center text-muted-foreground">
+                                <Activity className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                                <p className="text-sm">No operational data available</p>
+                                <p className="text-xs mt-1">Live generation data is not currently available</p>
                               </div>
-                              {currentGeneration.capacity && (
+                            </CardContent>
+                          </Card>
+                        </TabsContent>
+                        
+                        <TabsContent value="about" className="space-y-4 mt-4">
+                          {/* Generation Details */}
+                          <Card className="flex-shrink-0">
+                            <CardHeader>
+                              <CardTitle className="text-sm text-muted-foreground">
+                                {currentGeneration.type === 'plant' ? 'Power Plant' : 'Generator'} Details
+                              </CardTitle>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                              {/* Basic Generation Information */}
+                              <div className="grid grid-cols-2 gap-3 text-sm">
                                 <div>
-                                  <span className="font-medium text-muted-foreground">Capacity:</span>
-                                  <div className="font-medium">{currentGeneration.capacity} MW</div>
+                                  <span className="font-medium text-muted-foreground">Type:</span>
+                                  <div className="font-medium capitalize">{currentGeneration.fuelType || 'Unknown'}</div>
                                 </div>
-                              )}
-                              {currentGeneration.operator && (
-                                <div>
-                                  <span className="font-medium text-muted-foreground">Operator:</span>
-                                  <div className="font-medium">{currentGeneration.operator}</div>
-                                </div>
-                              )}
-                              {currentGeneration.status && (
-                                <div>
-                                  <span className="font-medium text-muted-foreground">Status:</span>
-                                  <div className="font-medium capitalize">{currentGeneration.status}</div>
-                                </div>
-                              )}
-                              {currentGeneration.commissioningDate && (
-                                <div className="col-span-2">
-                                  <span className="font-medium text-muted-foreground">Commissioning Date:</span>
-                                  <div className="font-medium">{currentGeneration.commissioningDate}</div>
-                                </div>
-                              )}
-                              {currentGeneration.plantName && currentGeneration.type === 'generator' && (
-                                <div className="col-span-2">
-                                  <span className="font-medium text-muted-foreground">Plant:</span>
-                                  <div className="font-medium">{currentGeneration.plantName}</div>
-                                </div>
-                              )}
-                              {currentGeneration.technology && (
-                                <div className="col-span-2">
-                                  <span className="font-medium text-muted-foreground">Technology:</span>
-                                  <div className="font-medium">{currentGeneration.technology}</div>
-                                </div>
-                              )}
-                            </div>
-                          </CardContent>
-                        </Card>
-                      </>
+                                {currentGeneration.capacity && (
+                                  <div>
+                                    <span className="font-medium text-muted-foreground">Capacity:</span>
+                                    <div className="font-medium">{currentGeneration.capacity} MW</div>
+                                  </div>
+                                )}
+                                {currentGeneration.operator && (
+                                  <div>
+                                    <span className="font-medium text-muted-foreground">Operator:</span>
+                                    <div className="font-medium">{currentGeneration.operator}</div>
+                                  </div>
+                                )}
+                                {currentGeneration.status && (
+                                  <div>
+                                    <span className="font-medium text-muted-foreground">Status:</span>
+                                    <div className="font-medium capitalize">{currentGeneration.status}</div>
+                                  </div>
+                                )}
+                                {currentGeneration.commissioningDate && (
+                                  <div className="col-span-2">
+                                    <span className="font-medium text-muted-foreground">Commissioning Date:</span>
+                                    <div className="font-medium">{currentGeneration.commissioningDate}</div>
+                                  </div>
+                                )}
+                                {currentGeneration.plantName && currentGeneration.type === 'generator' && (
+                                  <div className="col-span-2">
+                                    <span className="font-medium text-muted-foreground">Plant:</span>
+                                    <div className="font-medium">{currentGeneration.plantName}</div>
+                                  </div>
+                                )}
+                                {currentGeneration.technology && (
+                                  <div className="col-span-2">
+                                    <span className="font-medium text-muted-foreground">Technology:</span>
+                                    <div className="font-medium">{currentGeneration.technology}</div>
+                                  </div>
+                                )}
+                              </div>
+                            </CardContent>
+                          </Card>
+                        </TabsContent>
+                      </Tabs>
                     )}
 
                     {selectedFeature?.type === 'snotel' && currentSnotelStation && (
-                      <>
-                        {/* SNOTEL Station WTEQ Chart */}
-                        <ChartSnotelWTEQ selectedStationId={currentSnotelStation.id} stationName={currentSnotelStation.name} />
+                      <Tabs defaultValue="data" className="w-full">
+                        <TabsList className="grid w-full grid-cols-2">
+                          <TabsTrigger value="data" className="flex items-center gap-2">
+                            <Activity className="h-4 w-4" />
+                            Data
+                          </TabsTrigger>
+                          <TabsTrigger value="about" className="flex items-center gap-2">
+                            <Info className="h-4 w-4" />
+                            About
+                          </TabsTrigger>
+                        </TabsList>
                         
-                        {/* SNOTEL Station Details */}
-                        <Card className="flex-shrink-0">
-                          <CardHeader>
-                            <CardTitle className="text-sm text-muted-foreground">SNOTEL Station Details</CardTitle>
-                          </CardHeader>
-                          <CardContent className="space-y-4">
-                            <div className="grid grid-cols-2 gap-3 text-sm">
-                              <div>
-                                <span className="font-medium text-muted-foreground">Triplet:</span>
-                                <div className="font-medium">{currentSnotelStation.triplet}</div>
+                        <TabsContent value="data" className="space-y-4 mt-4">
+                          {/* SNOTEL Station WTEQ Chart */}
+                          <ChartSnotelWTEQ selectedStationId={currentSnotelStation.id} stationName={currentSnotelStation.name} />
+                        </TabsContent>
+                        
+                        <TabsContent value="about" className="space-y-4 mt-4">
+                          {/* SNOTEL Station Details */}
+                          <Card className="flex-shrink-0">
+                            <CardHeader>
+                              <CardTitle className="text-sm text-muted-foreground">SNOTEL Station Details</CardTitle>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                              <div className="grid grid-cols-2 gap-3 text-sm">
+                                <div>
+                                  <span className="font-medium text-muted-foreground">Triplet:</span>
+                                  <div className="font-medium">{currentSnotelStation.triplet}</div>
+                                </div>
+                                <div>
+                                  <span className="font-medium text-muted-foreground">Elevation:</span>
+                                  <div className="font-medium">{currentSnotelStation.elevation ? `${currentSnotelStation.elevation.toLocaleString()} ft` : 'N/A'}</div>
+                                </div>
+                                <div className="col-span-2">
+                                  <span className="font-medium text-muted-foreground">Coordinates:</span>
+                                  <div className="font-medium">Lat: {currentSnotelStation.latitude.toFixed(4)}, Lon: {currentSnotelStation.longitude.toFixed(4)}</div>
+                                </div>
                               </div>
-                              <div>
-                                <span className="font-medium text-muted-foreground">Elevation:</span>
-                                <div className="font-medium">{currentSnotelStation.elevation ? `${currentSnotelStation.elevation.toLocaleString()} ft` : 'N/A'}</div>
-                              </div>
-                              <div className="col-span-2">
-                                <span className="font-medium text-muted-foreground">Coordinates:</span>
-                                <div className="font-medium">Lat: {currentSnotelStation.latitude.toFixed(4)}, Lon: {currentSnotelStation.longitude.toFixed(4)}</div>
-                              </div>
-                            </div>
-                          </CardContent>
-                        </Card>
-                      </>
+                            </CardContent>
+                          </Card>
+                        </TabsContent>
+                      </Tabs>
                     )}
                   </div>
                 </div>
