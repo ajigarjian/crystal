@@ -1850,7 +1850,6 @@ def get_dashboard_section_cards_data(request: https_fn.Request) -> https_fn.Resp
     ),
     memory=options.MemoryOption.MB_512,
     timeout_sec=300,
-    min_instances=1
 )
 def generate_inflow_forecast_v0(request: https_fn.Request) -> https_fn.Response:
     """
