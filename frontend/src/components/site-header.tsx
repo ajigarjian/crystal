@@ -1,13 +1,13 @@
 import { Separator } from "@/components/ui/separator"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { FeatureSearchCommand } from "@/components/FeatureSearchCommand"
-import { DamInfo, PowerLineInfo } from "@/app/dashboard/page";
+import { DamInfo, PowerLineInfo, SnotelStationInfo } from "@/app/dashboard/page";
 
 interface SearchableFeature {
   id: string | number;
   name: string;
-  type: 'dam' | 'powerline' | 'flowgate';
-  data: DamInfo | PowerLineInfo | { id: string; name: string; lineCount: number };
+  type: 'dam' | 'powerline' | 'flowgate' | 'snotel';
+  data: DamInfo | PowerLineInfo | { id: string; name: string; lineCount: number } | SnotelStationInfo;
 }
 
 interface SiteHeaderProps {
@@ -15,19 +15,23 @@ interface SiteHeaderProps {
   dams: DamInfo[];
   powerLines: SearchableFeature[];
   flowgates: SearchableFeature[];
+  snotelStations: SearchableFeature[];
   // Search handlers
   onDamSelect: (dam: DamInfo) => void;
   onPowerLineSelect: (powerLine: PowerLineInfo) => void;
   onFlowgateSelect: (flowgate: string) => void;
+  onSnotelStationSelect: (station: SnotelStationInfo) => void;
 }
 
 export function SiteHeader({ 
   dams,
   powerLines,
   flowgates,
+  snotelStations,
   onDamSelect,
   onPowerLineSelect,
-  onFlowgateSelect
+  onFlowgateSelect,
+  onSnotelStationSelect
 }: SiteHeaderProps) {
   return (
     <header className="flex h-(--header-height) shrink-0 items-center gap-2 border-b transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-(--header-height)">
@@ -41,16 +45,18 @@ export function SiteHeader({
           />
         </div>
         
-        {/* Center - Prominent Search */}
+        {/* Center - Prominent Search - Made wider to accommodate all filters */}
         <div className="flex-1 flex justify-center min-w-0">
-          <div className="w-full max-w-xs sm:max-w-md lg:max-w-2xl">
+          <div className="w-full max-w-sm sm:max-w-lg lg:max-w-3xl xl:max-w-4xl">
             <FeatureSearchCommand
               dams={dams}
               powerLines={powerLines}
               flowgates={flowgates}
+              snotelStations={snotelStations}
               onDamSelect={onDamSelect}
               onPowerLineSelect={onPowerLineSelect}
               onFlowgateSelect={onFlowgateSelect}
+              onSnotelStationSelect={onSnotelStationSelect}
             />
           </div>
         </div>

@@ -94,7 +94,7 @@ const AVAILABLE_DAMS: DamInfo[] = [
 interface SearchableFeature {
   id: string | number;
   name: string;
-  type: 'dam' | 'powerline' | 'flowgate';
+  type: 'dam' | 'powerline' | 'flowgate' | 'snotel';
   data: any;
 }
 
@@ -352,6 +352,23 @@ export default function Page() {
     }));
   }, [powerInfrastructureData]);
 
+  // Prepare search data for SNOTEL stations
+  const searchSnotelStations: SearchableFeature[] = React.useMemo(() => {
+    return snotelStations.map((station) => ({
+      id: station.id,
+      name: station.name,
+      type: 'snotel' as const,
+      data: {
+        id: station.id,
+        name: station.name,
+        triplet: station.triplet,
+        elevation: station.elevation,
+        latitude: station.latitude,
+        longitude: station.longitude,
+      }
+    }));
+  }, [snotelStations]);
+
   // Updated search handlers
   const handleSearchDamSelect = (dam: DamInfo) => {
     setSelectedFeature({ type: 'dam', data: dam });
@@ -471,6 +488,14 @@ export default function Page() {
     });
   };
 
+  const handleSearchSnotelStationSelect = (station: SnotelStationInfo) => {
+    setSelectedFlowgate(null); // Clear other selections
+    setSelectedFeature({
+      type: 'snotel',
+      data: station
+    });
+  };
+
   // Helper function to get display info for selected feature
   const getSelectedFeatureDisplay = () => {
     if (!selectedFeature) return null;
@@ -544,13 +569,15 @@ export default function Page() {
     >
       <AppSidebar variant="inset" />
       <SidebarInset>
-        <SiteHeader
+        <SiteHeader 
           dams={AVAILABLE_DAMS}
           powerLines={searchPowerLines}
           flowgates={searchFlowgates}
+          snotelStations={searchSnotelStations}
           onDamSelect={handleSearchDamSelect}
           onPowerLineSelect={handleSearchPowerLineSelect}
           onFlowgateSelect={handleSearchFlowgateSelect}
+          onSnotelStationSelect={handleSearchSnotelStationSelect}
         />
         <div className="flex flex-1 flex-col">
           <div className="flex flex-1 flex-col">
