@@ -1350,50 +1350,133 @@ export interface SnotelObservationDataPoint {
 }
 
 // Export a helper for calling the SNOTEL station observations function
-export const getSnotelStationObservations = async (stationId: number, days: number = 30): Promise<SnotelObservationDataPoint[]> => {
-  const region = functions.region || 'us-central1';
-  const projectId = firebaseConfig.projectId;
-  let baseUrl = '';
-
-  if (process.env.NODE_ENV === 'development') {
-    baseUrl = `http://localhost:5001/${projectId}/${region}`;
-  } else {
-    baseUrl = `https://${region}-${projectId}.cloudfunctions.net`;
+export const getSnotelStationObservations = async (stationId: number, days: number = 30, metricId?: number): Promise<SnotelObservationDataPoint[]> => {
+  const baseUrl = process.env.NODE_ENV === 'development' 
+    ? 'http://localhost:5001/crystal-2f87e/us-central1'
+    : `https://us-central1-${firebaseConfig.projectId}.cloudfunctions.net`;
+  
+  let url = `${baseUrl}/get_snotel_station_observations?station_id=${stationId}&days=${days}`;
+  if (metricId) {
+    url += `&metric_id=${metricId}`;
   }
-
-  // The name of the new Python Cloud Function
-  const url = `${baseUrl}/get_snotel_station_observations?station_id=${stationId}&days=${days}`;
-
-  console.log('Fetching SNOTEL data from URL:', url);
-
+  
   try {
-    // This is a GET request to fetch data
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-
-    console.log('SNOTEL API response status:', response.status);
-
+    const response = await fetch(url);
+    
     if (!response.ok) {
-      let errorData = { error: "Failed to fetch SNOTEL station observations" };
-      try {
-        errorData = await response.json();
-      } catch (e) {
-        console.error("Failed to parse error response from getSnotelStationObservations: ", e);
-      }
-      console.error('Error fetching SNOTEL station observations:', response.status, errorData);
-      throw new Error(errorData.error || `Failed to fetch SNOTEL station observations. Status: ${response.status}`);
+      const errorData = await response.text();
+      throw new Error(`SNOTEL API error: ${response.status} - ${errorData}`);
     }
-
+    
     const data = await response.json();
-    console.log('SNOTEL API response data:', data);
-    return data as SnotelObservationDataPoint[];
-  } catch (error: any) {
-    console.error('Error calling getSnotelStationObservations function:', error);
-    // Re-throw the error instead of returning empty array so the component can handle it properly
+    return data || [];
+  } catch (error) {
+    console.error('Error fetching SNOTEL station observations:', error);
     throw error;
   }
+};
+
+// Helper function to get SNOTEL station summary data for metrics table
+export const getSnotelStationSummary = async (stationId: number): Promise<SectionCardData[]> => {
+  console.log('getSnotelStationSummary: Starting fetch for station', stationId);
+  
+  // Fetch all metrics for the last 30 days to ensure we get recent data (same as default for observations)
+  const rawData = await getSnotelStationObservations(stationId, 30);
+  console.log('getSnotelStationSummary: Raw data received:', rawData.length, 'points');
+
+  // Define metric mapping
+  const metricMap: Record<number, { name: string; unit: string; code: string }> = {
+    25: { name: 'Snow Water Equivalent', unit: 'in', code: 'WTEQ' },
+    26: { name: 'Precipitation', unit: 'in', code: 'PREC' },
+    27: { name: 'Snow Depth', unit: 'in', code: 'SNWD' },
+    28: { name: 'Air Temperature', unit: '°F', code: 'TOBS' },
+    29: { name: 'Solar Radiation', unit: 'W/m²', code: 'SRAD' },
+    30: { name: 'Relative Humidity', unit: '%', code: 'RHUM' },
+    31: { name: 'Wind Speed', unit: 'mph', code: 'WSPR' }
+  };
+
+  // Group data by metric_id
+  const groupedData: Record<number, SnotelObservationDataPoint[]> = {};
+  rawData.forEach(point => {
+    if (!groupedData[point.metric_id]) {
+      groupedData[point.metric_id] = [];
+    }
+    groupedData[point.metric_id].push(point);
+  });
+
+  // Sort each group by timestamp
+  Object.keys(groupedData).forEach(metricId => {
+    groupedData[Number(metricId)].sort((a, b) => 
+      new Date(a.ts_utc).getTime() - new Date(b.ts_utc).getTime()
+    );
+  });
+
+  console.log('getSnotelStationSummary: Grouped data keys:', Object.keys(groupedData));
+
+  const summaryCards: SectionCardData[] = [];
+
+  // Process each metric
+  Object.entries(metricMap).forEach(([metricIdStr, metricInfo]) => {
+    const metricId = Number(metricIdStr);
+    const metricData = groupedData[metricId] || [];
+    console.log(`getSnotelStationSummary: Metric ${metricId} (${metricInfo.name}): ${metricData.length} data points`);
+
+    if (metricData.length > 0) {
+      // Get the latest data point
+      const latest = metricData[metricData.length - 1];
+      const previous = metricData.length > 1 ? metricData[metricData.length - 2] : null;
+
+      // Calculate trend
+      let trend: 'up' | 'down' | 'neutral' = 'neutral';
+      let trendDescription = 'No recent change';
+      
+      if (previous) {
+        const change = latest.value_num - previous.value_num;
+        if (change > 0) {
+          trend = 'up';
+          trendDescription = `Increased by ${Math.abs(change).toFixed(2)} ${metricInfo.unit}`;
+        } else if (change < 0) {
+          trend = 'down';
+          trendDescription = `Decreased by ${Math.abs(change).toFixed(2)} ${metricInfo.unit}`;
+        } else {
+          trendDescription = 'No change from previous reading';
+        }
+      }
+
+      // Format value with appropriate precision
+      let formattedValue: string;
+      if (metricInfo.unit === '°F') {
+        formattedValue = `${latest.value_num.toFixed(1)}${metricInfo.unit}`;
+      } else if (metricInfo.unit === '%' || metricInfo.unit === 'W/m²' || metricInfo.unit === 'mph') {
+        formattedValue = `${latest.value_num.toFixed(0)}${metricInfo.unit}`;
+      } else {
+        formattedValue = `${latest.value_num.toFixed(2)}${metricInfo.unit}`;
+      }
+
+      summaryCards.push({
+        id: metricIdStr,
+        title: metricInfo.name,
+        value: formattedValue,
+        timestamp: latest.ts_utc,
+        trend,
+        trendDescription,
+        footerNote: `Last updated: ${new Date(latest.ts_utc).toLocaleDateString()}`
+      });
+    } else {
+      console.log(`getSnotelStationSummary: No data available for metric ${metricId} (${metricInfo.name})`);
+      // No data available for this metric
+      summaryCards.push({
+        id: metricIdStr,
+        title: metricInfo.name,
+        value: 'N/A',
+        timestamp: new Date().toISOString(),
+        trend: 'neutral',
+        trendDescription: 'No data available',
+        footerNote: 'Data not available'
+      });
+    }
+  });
+
+  console.log('getSnotelStationSummary: Final summary cards:', summaryCards);
+  return summaryCards;
 }; 

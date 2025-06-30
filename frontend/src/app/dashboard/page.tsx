@@ -18,12 +18,11 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { TradingSummary } from "@/components/TradingSummary"
 import { ChartAreaInteractive } from '@/components/chart-area-interactive'
 import { ChartTTCFlowgate } from '@/components/chart-ttc-flowgate'
-import { ChartSnotelWTEQ } from '@/components/chart-snotel-wteq'
 import { Terminal, Mic, Square, TrendingUp, MapPin, Activity, Info, Zap } from "lucide-react"
 import { Separator } from "@/components/ui/separator"
 import { MetricsTable, transformSectionCardDataToMetrics } from "@/components/metrics-table"
 
-import { getDashboardSectionCards, SectionCardData, getDamLocations, DamLocation, getSnotelStations, SnotelStationData } from "@/lib/firebase"
+import { getDashboardSectionCards, SectionCardData, getDamLocations, DamLocation, getSnotelStations, SnotelStationData, getSnotelStationSummary } from "@/lib/firebase"
 
 export interface DamInfo {
   id: number;
@@ -220,6 +219,7 @@ export default function Page() {
   const [isTradingSummaryLoading, setIsTradingSummaryLoading] = React.useState(true);
 
   const [selectedMetricId, setSelectedMetricId] = React.useState<string>("6"); // Default to Inflow
+  const [selectedSnotelMetricId, setSelectedSnotelMetricId] = React.useState<string>("25"); // Default to WTEQ
 
   const getCurrentDam = (): DamInfo | null => {
     return selectedFeature?.type === 'dam' ? selectedFeature.data as DamInfo : null;
@@ -244,6 +244,10 @@ export default function Page() {
         if (selectedFeature?.type === 'dam') {
           const damData = selectedFeature.data as DamInfo;
           const data = await getDashboardSectionCards(damData.id);
+          setCurrentSectionCardData(data);
+        } else if (selectedFeature?.type === 'snotel') {
+          const snotelData = selectedFeature.data as SnotelStationInfo;
+          const data = await getSnotelStationSummary(snotelData.id);
           setCurrentSectionCardData(data);
         } else if (selectedFeature?.type === 'generation') {
           // For now, generation nodes don't have section cards
@@ -464,12 +468,9 @@ export default function Page() {
   };
 
   const handleSnotelStationClick = (stationData: SnotelStationInfo) => {
-    console.log('Dashboard handling SNOTEL station click:', stationData);
-    setSelectedFlowgate(null); // Clear other selections
-    setSelectedFeature({
-      type: 'snotel',
-      data: stationData
-    });
+    setSelectedFeature({ type: 'snotel', data: stationData });
+    setSelectedFlowgate(null);
+    setSelectedSnotelMetricId("25"); // Reset to WTEQ when station changes
   };
 
   const handleMapMarkerClick = (marker: { id: string | number; name?: string; latitude: number; longitude: number }) => {
@@ -544,11 +545,9 @@ export default function Page() {
   };
 
   const handleSearchSnotelStationSelect = (station: SnotelStationInfo) => {
-    setSelectedFlowgate(null); // Clear other selections
-    setSelectedFeature({
-      type: 'snotel',
-      data: station
-    });
+    setSelectedFeature({ type: 'snotel', data: station });
+    setSelectedFlowgate(null);
+    setSelectedSnotelMetricId("25"); // Reset to WTEQ when station changes
   };
 
   // Helper function to get display info for selected feature
@@ -754,6 +753,7 @@ export default function Page() {
                               <ChartAreaInteractive 
                                 selectedDamId={currentDam.id} 
                                 selectedMetricId={selectedMetricId}
+                                dataSource="dam"
                               />
                             </div>
                             
@@ -1126,8 +1126,27 @@ export default function Page() {
                         </TabsList>
                         
                         <TabsContent value="data" className="space-y-4 mt-4">
-                          {/* SNOTEL Station WTEQ Chart */}
-                          <ChartSnotelWTEQ selectedStationId={currentSnotelStation.id} stationName={currentSnotelStation.name} />
+                          <div className="flex flex-col gap-2">
+                            {/* SNOTEL Station Chart */}
+                            <div className="min-h-[300px] flex-shrink-0">
+                              <ChartAreaInteractive 
+                                selectedStationId={currentSnotelStation.id}
+                                selectedMetricId={selectedSnotelMetricId}
+                                dataSource="snotel"
+                                stationName={currentSnotelStation.name}
+                              />
+                            </div>
+                            
+                            {/* SNOTEL Metrics Table */}
+                            <MetricsTable 
+                              data={transformSectionCardDataToMetrics(currentSectionCardData)}
+                              isLoading={isLoadingCards}
+                              emptyStateTitle="No weather data available"
+                              emptyStateDescription="SNOTEL station metrics are currently unavailable. This might be due to a temporary issue or no data being found."
+                              selectedMetricId={selectedSnotelMetricId}
+                              onMetricSelect={(metricId) => setSelectedSnotelMetricId(metricId)}
+                            />
+                          </div>
                         </TabsContent>
                         
                         <TabsContent value="about" className="space-y-4 mt-4">

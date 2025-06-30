@@ -2508,8 +2508,9 @@ def get_snotel_stations(request: https_fn.Request) -> https_fn.Response:
 )
 def get_snotel_station_observations(request: https_fn.Request) -> https_fn.Response:
     """
-    HTTP Cloud Function to fetch SNOTEL station observation data for WTEQ (metric_id = 25).
-    Accepts 'station_id' and optional 'days' query parameters.
+    HTTP Cloud Function to fetch SNOTEL station observation data.
+    Accepts 'station_id', optional 'days', and optional 'metric_id' query parameters.
+    If no metric_id is provided, returns all available metrics for the station.
     """
     logger.info("Received request for SNOTEL station observations.")
 
@@ -2530,6 +2531,7 @@ def get_snotel_station_observations(request: https_fn.Request) -> https_fn.Respo
     # Parse query params
     station_id_param = request.args.get('station_id', '')
     days_param = request.args.get('days', '30')  # Default to 30 days
+    metric_id_param = request.args.get('metric_id', '')  # Optional metric filter
     
     if not station_id_param:
         logger.warning("Missing station_id parameter.")
@@ -2543,15 +2545,20 @@ def get_snotel_station_observations(request: https_fn.Request) -> https_fn.Respo
         station_id = int(station_id_param)
         days = int(days_param)
         days = max(1, min(days, 90))  # Limit between 1 and 90 days
+        
+        # Parse metric_id if provided
+        metric_id = None
+        if metric_id_param:
+            metric_id = int(metric_id_param)
     except ValueError:
-        logger.warning(f"Invalid station_id or days parameter: {station_id_param}, {days_param}")
+        logger.warning(f"Invalid parameters: station_id={station_id_param}, days={days_param}, metric_id={metric_id_param}")
         return https_fn.Response(
-            json.dumps({"error": "station_id and days must be valid integers"}),
+            json.dumps({"error": "station_id, days, and metric_id must be valid integers"}),
             status=400,
             headers={"Content-Type": "application/json"}
         )
     
-    logger.info(f"Processing SNOTEL observations request for station_id: {station_id}, days: {days}")
+    logger.info(f"Processing SNOTEL observations request for station_id: {station_id}, days: {days}, metric_id: {metric_id or 'all'}")
 
     try:
         pool = get_connection_pool()
@@ -2559,19 +2566,34 @@ def get_snotel_station_observations(request: https_fn.Request) -> https_fn.Respo
         
         try:
             with conn.cursor() as cursor:
-                # Query SNOTEL station observation data for WTEQ (metric_id = 25)
-                query_sql = """
-                    SELECT ts_utc, station_id, metric_id, value_num, quality, 
-                           source_id, inserted_at, height_depth_in
-                    FROM fact_station_observation
-                    WHERE station_id = %s 
-                      AND metric_id = 25
-                      AND ts_utc >= NOW() - INTERVAL '%s days'
-                      AND value_num IS NOT NULL
-                    ORDER BY ts_utc ASC;
-                """
+                # Build query based on whether metric_id is specified
+                if metric_id:
+                    # Query for specific metric
+                    query_sql = """
+                        SELECT ts_utc, station_id, metric_id, value_num, quality, 
+                               source_id, inserted_at, height_depth_in
+                        FROM fact_station_observation
+                        WHERE station_id = %s 
+                          AND metric_id = %s
+                          AND ts_utc >= NOW() - INTERVAL '%s days'
+                          AND value_num IS NOT NULL
+                        ORDER BY ts_utc ASC;
+                    """
+                    cursor.execute(query_sql, (station_id, metric_id, days))
+                else:
+                    # Query for all SNOTEL metrics (25-31)
+                    query_sql = """
+                        SELECT ts_utc, station_id, metric_id, value_num, quality, 
+                               source_id, inserted_at, height_depth_in
+                        FROM fact_station_observation
+                        WHERE station_id = %s 
+                          AND metric_id IN (25, 26, 27, 28, 29, 30, 31)
+                          AND ts_utc >= NOW() - INTERVAL '%s days'
+                          AND value_num IS NOT NULL
+                        ORDER BY metric_id, ts_utc ASC;
+                    """
+                    cursor.execute(query_sql, (station_id, days))
                 
-                cursor.execute(query_sql, (station_id, days))
                 rows = cursor.fetchall()
                 
                 result = []

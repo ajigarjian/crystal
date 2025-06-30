@@ -96,12 +96,22 @@ const TrendIcon = ({ trend, change24h, change24hPercent, unit }: {
 // Helper function to get metric descriptions
 const getMetricDescription = (metricName: string): string => {
   const descriptions: Record<string, string> = {
+    // Dam metrics
     "Headroom": "The difference between current reservoir level and full capacity, indicating available storage space.",
     "Reservoir Fill": "Current reservoir level as a percentage of total capacity, showing how full the reservoir is.",
     "Inflow": "The rate of water flowing into the reservoir, measured in cubic feet per second.",
     "Spill %": "Percentage of water being released through spillways rather than turbines for power generation.",
     "Spill": "The volume of water being released through spillways, measured in cubic feet per second.",
-    "Gates Open": "Number of spillway gates currently open for water release operations."
+    "Gates Open": "Number of spillway gates currently open for water release operations.",
+    
+    // SNOTEL weather metrics
+    "Snow Water Equivalent": "The amount of water contained in the snowpack, measured as the depth of water if the snow were melted.",
+    "Precipitation": "Cumulative precipitation measurement, adjusted for snow conditions.",
+    "Snow Depth": "The total depth of snow on the ground at the measurement site.",
+    "Air Temperature": "Current air temperature measured at the weather station.",
+    "Solar Radiation": "Incoming solar energy measured at the station, indicating sun exposure and weather conditions.",
+    "Relative Humidity": "The amount of moisture in the air relative to the maximum it can hold at current temperature.",
+    "Wind Speed": "Average wind speed measured at the station, indicating weather conditions and potential for snow redistribution."
   };
   
   return descriptions[metricName] || "Operational metric data";

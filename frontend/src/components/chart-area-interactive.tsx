@@ -30,7 +30,7 @@ import {
   ToggleGroup,
   ToggleGroupItem,
 } from "@/components/ui/toggle-group"
-import { InflowDataPoint, getMetricTimeseries, TimeRangeOption } from "@/lib/firebase" 
+import { InflowDataPoint, getMetricTimeseries, TimeRangeOption, getSnotelStationObservations, SnotelObservationDataPoint } from "@/lib/firebase" 
 
 // Define the new time range options type
 // type TimeRangeOption = "mtd" | "14d" | "7d"; // Already in firebase.ts, no need to redefine if imported
@@ -43,6 +43,17 @@ const METRICS_CONFIG = {
   "8": { name: "Spill", unit: "cfs", color: "hsl(var(--chart-3))" },
   "9": { name: "Spill %", unit: "%", color: "hsl(var(--chart-4))" },
   "10": { name: "Gates Open", unit: "gates", color: "hsl(var(--chart-5))" }
+} as const;
+
+// SNOTEL metric configuration
+const SNOTEL_METRICS_CONFIG = {
+  "25": { name: "Snow Water Equivalent", unit: "in", color: "#3b82f6" },
+  "26": { name: "Precipitation", unit: "in", color: "#06b6d4" },
+  "27": { name: "Snow Depth", unit: "in", color: "#8b5cf6" },
+  "28": { name: "Air Temperature", unit: "°F", color: "#ef4444" },
+  "29": { name: "Solar Radiation", unit: "W/m²", color: "#f59e0b" },
+  "30": { name: "Relative Humidity", unit: "%", color: "#10b981" },
+  "31": { name: "Wind Speed", unit: "mph", color: "#6b7280" }
 } as const;
 
 interface ProcessedChartData {
@@ -107,8 +118,11 @@ const formatUtcDateForDisplay = (isoString: string): string => {
 };
 
 interface ChartAreaInteractiveProps {
-  selectedDamId: number;
-  selectedMetricId: string; // Add selected metric ID
+  selectedDamId?: number;
+  selectedStationId?: number;
+  selectedMetricId: string;
+  dataSource: 'dam' | 'snotel';
+  stationName?: string; // For SNOTEL stations
 }
 
 // Add this helper function before the component
@@ -335,7 +349,7 @@ const calculateOptimalYAxisDomain = (data: ProcessedChartData[], metricId: strin
 export const getInflowTimeseries = (range: TimeRangeOption, damId: number): Promise<InflowDataPoint[]> => 
   getMetricTimeseries(range, damId, 6);
 
-export function ChartAreaInteractive({ selectedDamId, selectedMetricId }: ChartAreaInteractiveProps) {
+export function ChartAreaInteractive({ selectedDamId, selectedStationId, selectedMetricId, dataSource, stationName }: ChartAreaInteractiveProps) {
   const isMobile = useIsMobile()
   const [timeRange, setTimeRange] = React.useState<TimeRangeOption>("14d") 
   const [processedChartData, setProcessedChartData] = React.useState<ProcessedChartData[]>([])
@@ -349,9 +363,12 @@ export function ChartAreaInteractive({ selectedDamId, selectedMetricId }: ChartA
     date: string;
   } | null>(null);
 
-  // Get metric configuration
-  const metricConfig = METRICS_CONFIG[selectedMetricId as keyof typeof METRICS_CONFIG];
-  const isInflowMetric = selectedMetricId === "6";
+  // Get metric configuration based on data source
+  const metricConfig = dataSource === 'dam' 
+    ? METRICS_CONFIG[selectedMetricId as keyof typeof METRICS_CONFIG]
+    : SNOTEL_METRICS_CONFIG[selectedMetricId as keyof typeof SNOTEL_METRICS_CONFIG];
+  
+  const isInflowMetric = selectedMetricId === "6" && dataSource === 'dam';
 
   React.useEffect(() => {
     if (isMobile) {
@@ -365,115 +382,75 @@ export function ChartAreaInteractive({ selectedDamId, selectedMetricId }: ChartA
     const fetchData = async () => {
       setIsLoading(true)
       try {
-        const rawData: InflowDataPoint[] = await getMetricTimeseries(timeRange, selectedDamId, parseInt(selectedMetricId))
+        let processedData: ProcessedChartData[] = [];
         
-        // Add comprehensive logging
-        console.log('=== RAW METRIC DATA FROM BACKEND ===')
-        console.log(`Metric ID: ${selectedMetricId}, Metric Name: ${metricConfig?.name}`)
-        console.log('Total data points received:', rawData.length)
-        console.log('Raw data sample:', rawData.slice(0, 5))
-        
-        // Log data types breakdown
-        const dataTypeBreakdown = rawData.reduce((acc, point) => {
-          acc[point.data_type] = (acc[point.data_type] || 0) + 1
-          return acc
-        }, {} as Record<string, number>)
-        console.log('Data type breakdown:', dataTypeBreakdown)
-        
-        // Log forecast_error data specifically (only for inflow)
-        if (isInflowMetric) {
-          const forecastErrorData = rawData.filter(point => point.data_type === 'forecast_error')
-          console.log('Forecast error data points:', forecastErrorData.length)
-          if (forecastErrorData.length > 0) {
-            console.log('Sample forecast error data:', forecastErrorData.slice(0, 3))
-          }
+        if (dataSource === 'dam' && selectedDamId) {
+          const damData = await getMetricTimeseries(timeRange, selectedDamId, parseInt(selectedMetricId));
+          
+          processedData = damData.map(point => {
+            const timestamp = new Date(point.ts_utc).getTime()
+            
+            // Smart precision handling based on metric type
+            let metricValue: number;
+            if (metricConfig?.unit === '%') {
+              metricValue = Math.round(point.value_num * 10) / 10;
+            } else if (metricConfig?.unit === 'ft' || metricConfig?.unit === 'in') {
+              metricValue = Math.round(point.value_num * 10) / 10;
+            } else if (metricConfig?.unit === 'gates') {
+              metricValue = Math.round(point.value_num);
+            } else if (metricConfig?.unit === '°F') {
+              metricValue = Math.round(point.value_num * 10) / 10;
+            } else {
+              metricValue = Math.trunc(point.value_num);
+            }
+            
+            return {
+              date: point.ts_utc,
+              timestamp: timestamp,
+              observed: point.data_type === 'observed' ? metricValue : null,
+              forecast: point.data_type === 'forecast' ? metricValue : null,
+              value: point.data_type !== 'forecast_error' ? metricValue : Math.abs(metricValue),
+              type: point.data_type,
+              forecast_error: isInflowMetric && point.data_type === 'forecast_error' ? metricValue : null
+            }
+          });
+          
+        } else if (dataSource === 'snotel' && selectedStationId) {
+          // Convert time range to days for SNOTEL API
+          const days = timeRange === "7d" ? 7 : timeRange === "14d" ? 14 : 30;
+          const snotelData = await getSnotelStationObservations(selectedStationId, days, parseInt(selectedMetricId));
+          
+          // Transform SNOTEL data to ProcessedChartData format
+          processedData = snotelData.map(point => {
+            const timestamp = new Date(point.ts_utc).getTime()
+            
+            // Smart precision handling based on metric type
+            let metricValue: number;
+            if (metricConfig?.unit === '%') {
+              metricValue = Math.round(point.value_num * 10) / 10;
+            } else if (metricConfig?.unit === 'ft' || metricConfig?.unit === 'in') {
+              metricValue = Math.round(point.value_num * 10) / 10;
+            } else if (metricConfig?.unit === '°F') {
+              metricValue = Math.round(point.value_num * 10) / 10;
+            } else if (metricConfig?.unit === 'W/m²' || metricConfig?.unit === 'mph') {
+              metricValue = Math.round(point.value_num);
+            } else {
+              metricValue = Math.trunc(point.value_num);
+            }
+            
+            return {
+              date: point.ts_utc,
+              timestamp: timestamp,
+              observed: metricValue, // SNOTEL only has observed data
+              forecast: null,
+              value: metricValue,
+              type: 'observed' as const,
+              forecast_error: null
+            }
+          });
         }
         
-        const transformed = rawData.map(point => {
-          const timestamp = new Date(point.ts_utc).getTime()
-          
-          // Smart precision handling based on metric type - FIXED!
-          let metricValue: number;
-          if (metricConfig?.unit === '%') {
-            // For percentage metrics, preserve 1 decimal place
-            metricValue = Math.round(point.value_num * 10) / 10;
-          } else if (metricConfig?.unit === 'ft') {
-            // For feet measurements (Headroom), preserve 1 decimal place
-            metricValue = Math.round(point.value_num * 10) / 10;
-          } else if (metricConfig?.unit === 'gates') {
-            // For gates, use whole numbers
-            metricValue = Math.round(point.value_num);
-          } else {
-            // For flow rates (cfs), truncate to whole numbers for readability
-            metricValue = Math.trunc(point.value_num);
-          }
-          
-          const processedPoint = {
-            date: point.ts_utc,
-            timestamp: timestamp,
-            observed: point.data_type === 'observed' ? metricValue : null,
-            forecast: point.data_type === 'forecast' ? metricValue : null,
-            value: point.data_type !== 'forecast_error' ? metricValue : Math.abs(metricValue), // Show absolute value for tooltip
-            type: point.data_type,
-            // Use actual forecast error - only for inflow metric
-            forecast_error: isInflowMetric && point.data_type === 'forecast_error' ? metricValue : null
-          }
-          
-          // Log observed data processing
-          if (point.data_type === 'observed') {
-            console.log('Processing observed point:', {
-              original: point,
-              processed: processedPoint,
-              metricType: metricConfig?.unit,
-              precisionApplied: metricValue
-            })
-          }
-          
-          // Log forecast_error processing (only for inflow)
-          if (isInflowMetric && point.data_type === 'forecast_error') {
-            console.log('Processing forecast_error point:', {
-              original: point,
-              processed: processedPoint
-            })
-          }
-          
-          return processedPoint
-        })
-        
-        // Log final processed data
-        console.log('=== PROCESSED DATA ===')
-        console.log('Total processed points:', transformed.length)
-        
-        // Add debugging for observed data
-        const observedData = transformed.filter(point => point.observed !== null)
-        console.log('Observed data points:', observedData.length)
-        if (observedData.length > 0) {
-          console.log('Sample observed data:', observedData.slice(0, 3))
-          console.log('Observed data values:', observedData.map(d => ({ timestamp: d.timestamp, observed: d.observed })))
-        }
-        
-        if (isInflowMetric) {
-          const processedForecastErrors = transformed.filter(point => point.forecast_error !== null)
-          console.log('Processed forecast error points:', processedForecastErrors.length)
-          if (processedForecastErrors.length > 0) {
-            console.log('Sample processed forecast errors:', processedForecastErrors.slice(0, 3))
-          }
-        }
-        
-        // Add debugging for Y-axis domain
-        const allMetricValues = transformed
-          .filter(point => point.observed !== null || point.forecast !== null)
-          .map(point => point.observed || point.forecast)
-          .filter(val => val !== null);
-        
-        console.log('All metric values for Y-axis:', {
-          min: Math.min(...allMetricValues),
-          max: Math.max(...allMetricValues),
-          observedRange: observedData.map(d => d.observed),
-          forecastRange: transformed.filter(p => p.forecast !== null).map(d => d.forecast)
-        });
-        
-        setProcessedChartData(transformed)
+        setProcessedChartData(processedData)
       } catch (error) {
         console.error("Failed to fetch or process metric data:", error)
         setProcessedChartData([]) 
@@ -482,7 +459,7 @@ export function ChartAreaInteractive({ selectedDamId, selectedMetricId }: ChartA
       }
     }
     fetchData()
-  }, [timeRange, selectedDamId, selectedMetricId, metricConfig?.name, isInflowMetric])
+  }, [timeRange, selectedDamId, selectedStationId, selectedMetricId, metricConfig?.name, isInflowMetric, dataSource])
 
   return (
     <Card className="@container/card shadow-none">
