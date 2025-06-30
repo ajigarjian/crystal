@@ -1446,11 +1446,11 @@ export const getSnotelStationSummary = async (stationId: number): Promise<Sectio
       // Format value with appropriate precision
       let formattedValue: string;
       if (metricInfo.unit === '°F') {
-        formattedValue = `${latest.value_num.toFixed(1)}${metricInfo.unit}`;
+        formattedValue = `${latest.value_num.toFixed(1)} ${metricInfo.unit}`;
       } else if (metricInfo.unit === '%' || metricInfo.unit === 'W/m²' || metricInfo.unit === 'mph') {
-        formattedValue = `${latest.value_num.toFixed(0)}${metricInfo.unit}`;
+        formattedValue = `${latest.value_num.toFixed(0)} ${metricInfo.unit}`;
       } else {
-        formattedValue = `${latest.value_num.toFixed(2)}${metricInfo.unit}`;
+        formattedValue = `${latest.value_num.toFixed(2)} ${metricInfo.unit}`;
       }
 
       summaryCards.push({
