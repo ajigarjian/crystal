@@ -3,6 +3,7 @@
 import * as React from "react"
 import { Line, Bar, ComposedChart, CartesianGrid, XAxis, YAxis, Label, Legend } from "recharts"
 // import { toZonedTime, format as formatDate } from "date-fns-tz" // Temporarily removed for UTC display
+import { IconTable, IconChartLine } from "@tabler/icons-react"
 
 import { useIsMobile } from "@/hooks/use-mobile"
 import {
@@ -30,7 +31,17 @@ import {
   ToggleGroup,
   ToggleGroupItem,
 } from "@/components/ui/toggle-group"
-import { InflowDataPoint, getMetricTimeseries, TimeRangeOption, getSnotelStationObservations, SnotelObservationDataPoint } from "@/lib/firebase" 
+import { Button } from "@/components/ui/button"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import { cn } from "@/lib/utils"
+import { InflowDataPoint, getMetricTimeseries, TimeRangeOption, getSnotelStationObservations, SnotelObservationDataPoint } from "@/lib/firebase"
 
 // Define the new time range options type
 // type TimeRangeOption = "mtd" | "14d" | "7d"; // Already in firebase.ts, no need to redefine if imported
@@ -355,6 +366,9 @@ export function ChartAreaInteractive({ selectedDamId, selectedStationId, selecte
   const [processedChartData, setProcessedChartData] = React.useState<ProcessedChartData[]>([])
   const [isLoading, setIsLoading] = React.useState(true)
   
+  // Add view toggle state
+  const [isChartView, setIsChartView] = React.useState(true)
+  
   // Move the hoveredErrorBar state INSIDE the component
   const [hoveredErrorBar, setHoveredErrorBar] = React.useState<{
     x: number;
@@ -461,6 +475,41 @@ export function ChartAreaInteractive({ selectedDamId, selectedStationId, selecte
     fetchData()
   }, [timeRange, selectedDamId, selectedStationId, selectedMetricId, metricConfig?.name, isInflowMetric, dataSource])
 
+  // Helper function to prepare table data
+  const getTableData = () => {
+    if (processedChartData.length === 0) return []
+    
+    const tableData = processedChartData.map(point => {
+      const dateObj = new Date(point.date)
+      const displayDate = dateObj.toLocaleDateString('en-US', { 
+        year: 'numeric', 
+        month: 'short', 
+        day: 'numeric',
+        timeZone: 'UTC'
+      })
+      const displayTime = dateObj.toLocaleTimeString('en-US', { 
+        hour: '2-digit', 
+        minute: '2-digit',
+        timeZone: 'UTC',
+        hour12: false
+      })
+      
+      return {
+        date: point.date,
+        displayDate,
+        displayTime,
+        observed: point.observed,
+        forecast: point.forecast,
+        type: point.type,
+        value: point.value
+      }
+    }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()) // Most recent first
+    
+    return tableData
+  }
+
+  const tableData = getTableData()
+
   return (
     <Card className="@container/card shadow-none">
       <CardHeader>
@@ -503,7 +552,27 @@ export function ChartAreaInteractive({ selectedDamId, selectedStationId, selecte
              timeRange === "14d" ? "Last 14 days (UTC)" : "Last 7 days (UTC)"}
           </span>
         </CardDescription>
-        <CardAction>
+        <CardAction className="flex gap-2 flex-wrap items-center">
+          {/* View Toggle Buttons */}
+          <div className="flex rounded-md border flex-shrink-0">
+            <Button
+              variant={isChartView ? "default" : "ghost"}
+              size="sm"
+              onClick={() => setIsChartView(true)}
+              className="rounded-r-none border-r h-8"
+            >
+              <IconChartLine className="h-4 w-4" />
+            </Button>
+            <Button
+              variant={!isChartView ? "default" : "ghost"}
+              size="sm"
+              onClick={() => setIsChartView(false)}
+              className="rounded-l-none h-8"
+            >
+              <IconTable className="h-4 w-4" />
+            </Button>
+          </div>
+          
           <ToggleGroup
             type="single"
             value={timeRange}
@@ -551,200 +620,284 @@ export function ChartAreaInteractive({ selectedDamId, selectedStationId, selecte
         </CardAction>
       </CardHeader>
       <CardContent className="px-2 pt-4 sm:px-6 sm:pt-6">
-        <ChartContainer
-          config={chartConfig}
-          className="aspect-auto h-[250px] w-full"
-        >
-          {isLoading ? (
-            <div className="flex h-full w-full items-center justify-center">
-              <p>Loading chart data...</p>
-            </div>
-          ) : processedChartData.length === 0 && !isLoading ? (
-             <div className="flex h-full w-full items-center justify-center">
-              <p>No {metricConfig?.name.toLowerCase() || 'metric'} data available for the selected period.</p>
-            </div>
-          ) : (
-            <ComposedChart data={processedChartData} margin={{ left: 30, right: 10, top: 5, bottom: 0 }}>
-              <CartesianGrid vertical={false} />
-              <XAxis
-                dataKey="timestamp"
-                type="number"
-                scale="time"
-                domain={['dataMin', 'dataMax']}
-                tickLine={false}
-                axisLine={false}
-                tickMargin={8}
-                ticks={processedChartData.length > 0 ? generateEveryOtherDayTicks(
-                  Math.min(...processedChartData.map(d => d.timestamp)),
-                  Math.max(...processedChartData.map(d => d.timestamp))
-                ) : []}
-                tickFormatter={(timestamp) => {
-                  const date = new Date(timestamp);
-                  return date.getUTCDate().toString();
-                }}
-              />
-              {/* Left Y-axis for metric values with smart scaling */}
-              <YAxis 
-                yAxisId="left"
-                tickLine={false}
-                axisLine={false}
-                tickMargin={8}
-                tickFormatter={(value) => {
-                  if (typeof value === 'number') {
-                    // Smart formatting for Y-axis labels based on metric type
-                    const unit = metricConfig?.unit || '';
-                    if (unit === '%' || unit === 'ft') {
-                      // Show 1 decimal place for percentages and feet if not whole numbers
-                      return value % 1 === 0 ? value.toString() : value.toFixed(1);
-                    } else {
-                      return value.toLocaleString(); 
-                    }
-                  }
-                  return String(value);
-                }}
-                domain={(() => {
-                  const [min, max] = calculateOptimalYAxisDomain(processedChartData, selectedMetricId);
-                  return [min, max];
-                })()}
-              >
-                <Label 
-                  value={`${metricConfig?.name || 'Value'} (${metricConfig?.unit || ''})`}
-                  angle={-90} 
-                  position="insideLeft" 
-                  style={{ textAnchor: 'middle' }} 
-                  dy={0}
-                  offset={-20}
-                />
-              </YAxis>
-              {/* Right Y-axis for forecast error bars (only for inflow) */}
-              {isInflowMetric && (
-                <YAxis 
-                  yAxisId="right"
-                  orientation="right"
-                  hide={true}
-                  domain={[
-                    (dataMin: number) => Math.min(dataMin * 1.1, 0), // Allow negative values
-                    (dataMax: number) => Math.max(dataMax * 1.1, 0)  // Allow positive values
-                  ]}
-                />
-              )}
-              <ChartTooltip
-                cursor={true}
-                animationDuration={0}
-                content={(props) => {
-                  const { active, payload, label } = props;
-                  
-                  // If we're hovering over an error bar, don't show the line tooltip
-                  if (hoveredErrorBar) {
-                    return null;
-                  }
-                  
-                  // Only show tooltip if we have an active payload with actual data
-                  if (!active || !payload || payload.length === 0) {
-                    return null;
-                  }
-                  
-                  // Filter out null/undefined values and forecast_error data for the main tooltip
-                  const validPayload = payload.filter(entry => {
-                    const dataType = entry.payload?.type;
-                    return dataType !== 'forecast_error' && 
-                           entry.value !== null && 
-                           entry.value !== undefined &&
-                           entry.dataKey !== 'forecast_error';
-                  });
-                  
-                  // If no valid data to show, don't render tooltip
-                  if (validPayload.length === 0) {
-                    return null;
-                  }
-                  
-                  return (
-                    <ChartTooltipContent
-                      active={active}
-                      payload={validPayload}
-                      label={label}
-                      labelFormatter={(value, payload) => {
-                        if (payload && payload.length > 0 && payload[0].payload.date) {
-                          const dateStringFromPayload = payload[0].payload.date;
-                          const dateObj = new Date(dateStringFromPayload);
-                          const dataType = payload[0].payload.type;
-                          
-                          if (String(dateObj) === "Invalid Date") {
-                            return "Invalid Date UTC";
-                          }
-                          const formattedDate = dateObj.toLocaleDateString('en-US', { 
-                            year: 'numeric', month: 'short', day: 'numeric', 
-                            hour: '2-digit', minute: '2-digit', timeZone: 'UTC' 
-                          }) + " UTC";
-                          // Capitalize the data type in the title
-                          const capitalizedType = dataType.charAt(0).toUpperCase() + dataType.slice(1);
-                          return `${formattedDate} (${capitalizedType})`;
-                        }
-                        return `${metricConfig?.name || 'Metric'} (UTC)`;
-                      }}
-                      formatter={(value, name, props) => {
-                        // Smart formatting based on metric type - FIXED!
-                        const unit = metricConfig?.unit || '';
-                        let formattedValue: string;
-                        
-                        if (unit === '%' || unit === 'ft') {
-                          // Show 1 decimal place for percentages and feet
-                          formattedValue = Number(props.payload.value).toFixed(1);
-                        } else {
-                          // Show whole numbers for other metrics
-                          formattedValue = props.payload.value.toLocaleString();
-                        }
-                        
-                        return [`${formattedValue} ${unit}`];
-                      }}
-                      indicator="dot"
-                    />
-                  );
-                }}
-              />
-              {/* Forecast error bars (only for inflow) */}
-              {isInflowMetric && (
-                <Bar
-                  yAxisId="right"
-                  dataKey="forecast_error"
-                  shape={(props: any) => {
-                    // Calculate max error once for all bars
-                    const maxErrorInData = Math.max(...processedChartData
-                      .filter(d => d.forecast_error !== null)
-                      .map(d => Math.abs(d.forecast_error!))
-                    );
-                    return <CustomErrorBar {...props} setHoveredErrorBar={setHoveredErrorBar} maxErrorInData={maxErrorInData} />;
+        {isChartView ? (
+          // Chart View
+          <ChartContainer
+            config={chartConfig}
+            className="aspect-auto h-[250px] w-full"
+          >
+            {isLoading ? (
+              <div className="flex h-full w-full items-center justify-center">
+                <p>Loading chart data...</p>
+              </div>
+            ) : processedChartData.length === 0 && !isLoading ? (
+               <div className="flex h-full w-full items-center justify-center">
+                <p>No {metricConfig?.name.toLowerCase() || 'metric'} data available for the selected period.</p>
+              </div>
+            ) : (
+              <ComposedChart data={processedChartData} margin={{ left: 30, right: 10, top: 5, bottom: 0 }}>
+                <CartesianGrid vertical={false} />
+                <XAxis
+                  dataKey="timestamp"
+                  type="number"
+                  scale="time"
+                  domain={['dataMin', 'dataMax']}
+                  tickLine={false}
+                  axisLine={false}
+                  tickMargin={8}
+                  ticks={processedChartData.length > 0 ? generateEveryOtherDayTicks(
+                    Math.min(...processedChartData.map(d => d.timestamp)),
+                    Math.max(...processedChartData.map(d => d.timestamp))
+                  ) : []}
+                  tickFormatter={(timestamp) => {
+                    const date = new Date(timestamp);
+                    return date.getUTCDate().toString();
                   }}
-                  stroke="none"
-                  fill="transparent"
                 />
-              )}
-              {/* Observed metric line - UPDATED to conditionally show dots */}
-              <Line
-                yAxisId="left"
-                dataKey="observed"
-                type="linear" 
-                stroke="hsl(120, 70%, 40%)"
-                strokeWidth={2}
-                dot={false}
-                activeDot={isInflowMetric ? { r: 8 } : false}
-                connectNulls={true}
-              />
-              {/* Forecast metric line - UPDATED to conditionally show dots */}
-              <Line
-                yAxisId="left"
-                dataKey="forecast"
-                type="linear" 
-                stroke="hsl(340, 50%, 40%)"
-                strokeWidth={2}
-                strokeDasharray={isInflowMetric ? "5 5" : "none"}
-                dot={false}
-                activeDot={isInflowMetric ? { r: 6, fill: "hsl(340, 50%, 40%)" } : false}
-                connectNulls={false}
-              />
-            </ComposedChart>
-          )}
-        </ChartContainer>
+                {/* Left Y-axis for metric values with smart scaling */}
+                <YAxis 
+                  yAxisId="left"
+                  tickLine={false}
+                  axisLine={false}
+                  tickMargin={8}
+                  tickFormatter={(value) => {
+                    if (typeof value === 'number') {
+                      // Smart formatting for Y-axis labels based on metric type
+                      const unit = metricConfig?.unit || '';
+                      if (unit === '%' || unit === 'ft') {
+                        // Show 1 decimal place for percentages and feet if not whole numbers
+                        return value % 1 === 0 ? value.toString() : value.toFixed(1);
+                      } else {
+                        return value.toLocaleString(); 
+                      }
+                    }
+                    return String(value);
+                  }}
+                  domain={(() => {
+                    const [min, max] = calculateOptimalYAxisDomain(processedChartData, selectedMetricId);
+                    return [min, max];
+                  })()}
+                >
+                  <Label 
+                    value={`${metricConfig?.name || 'Value'} (${metricConfig?.unit || ''})`}
+                    angle={-90} 
+                    position="insideLeft" 
+                    style={{ textAnchor: 'middle' }} 
+                    dy={0}
+                    offset={-20}
+                  />
+                </YAxis>
+                {/* Right Y-axis for forecast error bars (only for inflow) */}
+                {isInflowMetric && (
+                  <YAxis 
+                    yAxisId="right"
+                    orientation="right"
+                    hide={true}
+                    domain={[
+                      (dataMin: number) => Math.min(dataMin * 1.1, 0), // Allow negative values
+                      (dataMax: number) => Math.max(dataMax * 1.1, 0)  // Allow positive values
+                    ]}
+                  />
+                )}
+                <ChartTooltip
+                  cursor={true}
+                  animationDuration={0}
+                  content={(props) => {
+                    const { active, payload, label } = props;
+                    
+                    // If we're hovering over an error bar, don't show the line tooltip
+                    if (hoveredErrorBar) {
+                      return null;
+                    }
+                    
+                    // Only show tooltip if we have an active payload with actual data
+                    if (!active || !payload || payload.length === 0) {
+                      return null;
+                    }
+                    
+                    // Filter out null/undefined values and forecast_error data for the main tooltip
+                    const validPayload = payload.filter(entry => {
+                      const dataType = entry.payload?.type;
+                      return dataType !== 'forecast_error' && 
+                             entry.value !== null && 
+                             entry.value !== undefined &&
+                             entry.dataKey !== 'forecast_error';
+                    });
+                    
+                    // If no valid data to show, don't render tooltip
+                    if (validPayload.length === 0) {
+                      return null;
+                    }
+                    
+                    return (
+                      <ChartTooltipContent
+                        active={active}
+                        payload={validPayload}
+                        label={label}
+                        labelFormatter={(value, payload) => {
+                          if (payload && payload.length > 0 && payload[0].payload.date) {
+                            const dateStringFromPayload = payload[0].payload.date;
+                            const dateObj = new Date(dateStringFromPayload);
+                            const dataType = payload[0].payload.type;
+                            
+                            if (String(dateObj) === "Invalid Date") {
+                              return "Invalid Date UTC";
+                            }
+                            const formattedDate = dateObj.toLocaleDateString('en-US', { 
+                              year: 'numeric', month: 'short', day: 'numeric', 
+                              hour: '2-digit', minute: '2-digit', timeZone: 'UTC' 
+                            }) + " UTC";
+                            // Capitalize the data type in the title
+                            const capitalizedType = dataType.charAt(0).toUpperCase() + dataType.slice(1);
+                            return `${formattedDate} (${capitalizedType})`;
+                          }
+                          return `${metricConfig?.name || 'Metric'} (UTC)`;
+                        }}
+                        formatter={(value, name, props) => {
+                          // Smart formatting based on metric type - FIXED!
+                          const unit = metricConfig?.unit || '';
+                          let formattedValue: string;
+                          
+                          if (unit === '%' || unit === 'ft') {
+                            // Show 1 decimal place for percentages and feet
+                            formattedValue = Number(props.payload.value).toFixed(1);
+                          } else {
+                            // Show whole numbers for other metrics
+                            formattedValue = props.payload.value.toLocaleString();
+                          }
+                          
+                          return [`${formattedValue} ${unit}`];
+                        }}
+                        indicator="dot"
+                      />
+                    );
+                  }}
+                />
+                {/* Forecast error bars (only for inflow) */}
+                {isInflowMetric && (
+                  <Bar
+                    yAxisId="right"
+                    dataKey="forecast_error"
+                    shape={(props: any) => {
+                      // Calculate max error once for all bars
+                      const maxErrorInData = Math.max(...processedChartData
+                        .filter(d => d.forecast_error !== null)
+                        .map(d => Math.abs(d.forecast_error!))
+                      );
+                      return <CustomErrorBar {...props} setHoveredErrorBar={setHoveredErrorBar} maxErrorInData={maxErrorInData} />;
+                    }}
+                    stroke="none"
+                    fill="transparent"
+                  />
+                )}
+                {/* Observed metric line - UPDATED to conditionally show dots */}
+                <Line
+                  yAxisId="left"
+                  dataKey="observed"
+                  type="linear" 
+                  stroke="hsl(120, 70%, 40%)"
+                  strokeWidth={2}
+                  dot={false}
+                  activeDot={isInflowMetric ? { r: 8 } : false}
+                  connectNulls={true}
+                />
+                {/* Forecast metric line - UPDATED to conditionally show dots */}
+                <Line
+                  yAxisId="left"
+                  dataKey="forecast"
+                  type="linear" 
+                  stroke="hsl(340, 50%, 40%)"
+                  strokeWidth={2}
+                  strokeDasharray={isInflowMetric ? "5 5" : "none"}
+                  dot={false}
+                  activeDot={isInflowMetric ? { r: 6, fill: "hsl(340, 50%, 40%)" } : false}
+                  connectNulls={false}
+                />
+              </ComposedChart>
+            )}
+          </ChartContainer>
+        ) : (
+          // Table View
+          <div className="h-[250px] w-full">
+            {isLoading ? (
+              <div className="flex h-full w-full items-center justify-center">
+                <p>Loading chart data...</p>
+              </div>
+            ) : tableData.length === 0 ? (
+              <div className="flex h-full w-full items-center justify-center">
+                <p>No {metricConfig?.name.toLowerCase() || 'metric'} data available for the selected period.</p>
+              </div>
+            ) : (
+              <div className="h-full overflow-hidden rounded-md border">
+                <div 
+                  className="h-full overflow-auto [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb:hover]:bg-muted-foreground/50"
+                  style={{
+                    scrollbarWidth: 'thin',
+                    scrollbarColor: 'hsl(var(--border)) transparent',
+                  }}
+                >
+                  <table className="w-full caption-bottom text-sm">
+                    <thead className="sticky top-0 bg-background z-10 shadow-sm border-b">
+                      <tr className="border-b">
+                        <th className="h-10 px-2 text-left align-middle font-medium whitespace-nowrap w-[140px] font-semibold bg-background">
+                          Date & Time
+                        </th>
+                        <th className="h-10 px-2 text-center align-middle font-medium whitespace-nowrap min-w-[80px] font-semibold bg-background">
+                          Type
+                        </th>
+                        <th className="h-10 px-2 text-right align-middle font-medium whitespace-nowrap min-w-[100px] font-semibold bg-background">
+                          Value ({metricConfig?.unit || ''})
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tableData.map((row, index) => (
+                        <tr key={index} className="border-b transition-colors hover:bg-muted/50">
+                          <td className="p-2 align-middle whitespace-nowrap font-medium">
+                            <div className="flex flex-col">
+                              <span className="text-sm">{row.displayDate}</span>
+                              <span className="text-xs text-muted-foreground">{row.displayTime} UTC</span>
+                            </div>
+                          </td>
+                          <td className={cn(
+                            "p-2 align-middle whitespace-nowrap text-center text-xs",
+                            row.type === 'forecast' && "bg-blue-50 dark:bg-blue-950/20"
+                          )}>
+                            <div className="flex flex-col items-center">
+                              <span className="capitalize font-medium">
+                                {row.type === 'observed' ? 'Observed' : 'Forecast'}
+                              </span>
+                              {row.type === 'forecast' && (
+                                <span className="text-[10px] text-blue-600 dark:text-blue-400">
+                                  F
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className={cn(
+                            "p-2 align-middle whitespace-nowrap text-right",
+                            row.type === 'forecast' && "bg-blue-50 dark:bg-blue-950/20"
+                          )}>
+                            <span className="font-mono font-medium">
+                              {(() => {
+                                const unit = metricConfig?.unit || '';
+                                if (unit === '%' || unit === 'ft') {
+                                  return Number(row.value).toFixed(1);
+                                } else {
+                                  return row.value.toLocaleString();
+                                }
+                              })()}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
         {hoveredErrorBar && <ErrorBarTooltip data={hoveredErrorBar} />}
       </CardContent>
     </Card>
