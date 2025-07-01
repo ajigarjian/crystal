@@ -319,7 +319,7 @@ export function ChartBPAGenerationMix() {
   }
 
   return (
-    <Card className="@container/card shadow-none">
+    <Card className="@container/card shadow-none h-full flex flex-col">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           BPA Generation Mix
@@ -399,12 +399,12 @@ export function ChartBPAGenerationMix() {
           </Select>
         </CardAction>
       </CardHeader>
-      <CardContent className="px-2 pt-2 sm:px-6 sm:pt-2">
+      <CardContent className="px-2 pt-2 sm:px-6 sm:pt-2 flex-1 flex flex-col">
         {isChartView ? (
           // Chart View
           <ChartContainer
             config={chartConfig}
-            className="aspect-auto h-[280px] w-full"
+            className="aspect-auto h-full w-full"
           >
             <ComposedChart
               data={chartData}
@@ -560,7 +560,7 @@ export function ChartBPAGenerationMix() {
           </ChartContainer>
         ) : (
           // Table View
-          <div className="h-[250px] w-full">
+          <div className="h-full w-full">
             <div className="h-full overflow-hidden rounded-md border">
               <div 
                 className="h-full overflow-auto [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb:hover]:bg-muted-foreground/50"

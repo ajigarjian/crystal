@@ -665,7 +665,7 @@ export default function Page() {
                       </div>
                     )}
                   </div>
-                  <div className="lg:col-span-2 flex flex-col gap-4 lg:gap-6 min-h-0 flex-1 overflow-y-auto">
+                  <div className="lg:col-span-2 flex flex-col gap-4 lg:gap-6 min-h-0 flex-1 overflow-hidden">
                     {/* Selected Feature Header with Clear Button */}
                     {selectedDisplay && (
                       <div className="pb-2 border-b flex items-center justify-between">
@@ -717,12 +717,14 @@ export default function Page() {
 
                     {/* Trading Summary - shown when no feature is selected */}
                     {!selectedFeature && (
-                      <>
-                        <div className="max-h-[calc(31vh)] overflow-y-auto">
+                      <div className="flex flex-col h-full gap-4 lg:gap-6">
+                        <div className="h-[30vh] overflow-y-auto flex-shrink-0">
                           <TradingSummary />
                         </div>
-                        <ChartBPAGenerationMix />
-                      </>
+                        <div className="flex-1 min-h-0">
+                          <ChartBPAGenerationMix />
+                        </div>
+                      </div>
                     )}
 
                     {/* Flowgate only selection - shown when flowgate is selected without a specific feature */}
