@@ -81,9 +81,11 @@ METRICS_CONFIG = {
     "Headroom": {"metric_id": 3, "unit": "ft", "default_trend_desc": "Stable"},
     "Reservoir Fill": {"metric_id": 5, "unit": "%", "default_trend_desc": "Steady"},
     "Inflow": {"metric_id": 6, "unit": "cfs", "default_trend_desc": "Constant"},
+    "Outflow": {"metric_id": 7, "unit": "cfs", "default_trend_desc": "Constant"},
     "Spill %": {"metric_id": 9, "unit": "%", "default_trend_desc": "No change"}, # Changed from Spill to Spill % to match ID
     "Spill": {"metric_id": 8, "unit": "cfs", "default_trend_desc": "None"}, # Changed from Spill % to Spill
-    "Gates Open": {"metric_id": 10, "unit": "gates", "default_trend_desc": "Unchanged"}
+    "Gates Open": {"metric_id": 10, "unit": "gates", "default_trend_desc": "Unchanged"},
+    "Generation Flow": {"metric_id": 13, "unit": "cfs", "default_trend_desc": "Constant"}
 }
 
 @https_fn.on_request(

@@ -100,9 +100,11 @@ const getMetricDescription = (metricName: string): string => {
     "Headroom": "The difference between current reservoir level and full capacity, indicating available storage space.",
     "Reservoir Fill": "Current reservoir level as a percentage of total capacity, showing how full the reservoir is.",
     "Inflow": "The rate of water flowing into the reservoir, measured in cubic feet per second.",
+    "Outflow": "The rate of water flowing out through turbines for power generation, measured in cubic feet per second.",
     "Spill %": "Percentage of water being released through spillways rather than turbines for power generation.",
     "Spill": "The volume of water being released through spillways, measured in cubic feet per second.",
     "Gates Open": "Number of spillway gates currently open for water release operations.",
+    "Generation Flow": "The turbine discharge specifically used for power generation, measured in cubic feet per second.",
     
     // SNOTEL weather metrics
     "Snow Water Equivalent": "The amount of water contained in the snowpack, measured as the depth of water if the snow were melted.",
@@ -367,9 +369,11 @@ export const transformSectionCardDataToMetrics = (cards: any[]): MetricRowData[]
       unit: card.title === "Headroom" ? "ft" : 
             card.title === "Reservoir Fill" ? "%" :
             card.title === "Inflow" ? "cfs" :
+            card.title === "Outflow" ? "cfs" :
             card.title === "Spill %" ? "%" :
             card.title === "Spill" ? "cfs" :
-            card.title === "Gates Open" ? "gates" : undefined
+            card.title === "Gates Open" ? "gates" :
+            card.title === "Generation Flow" ? "cfs" : undefined
     };
   });
 }; 
