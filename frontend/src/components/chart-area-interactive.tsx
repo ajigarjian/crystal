@@ -51,9 +51,11 @@ const METRICS_CONFIG = {
   "3": { name: "Headroom", unit: "ft", color: "hsl(var(--chart-1))" },
   "5": { name: "Reservoir Fill", unit: "%", color: "hsl(var(--chart-2))" },
   "6": { name: "Inflow", unit: "cfs", color: "hsl(var(--chart-1))" },
+  "7": { name: "Outflow", unit: "cfs", color: "hsl(var(--chart-6))" },
   "8": { name: "Spill", unit: "cfs", color: "hsl(var(--chart-3))" },
   "9": { name: "Spill %", unit: "%", color: "hsl(var(--chart-4))" },
-  "10": { name: "Gates Open", unit: "gates", color: "hsl(var(--chart-5))" }
+  "10": { name: "Gates Open", unit: "gates", color: "hsl(var(--chart-5))" },
+  "13": { name: "Generation Flow", unit: "cfs", color: "hsl(var(--chart-7))" }
 } as const;
 
 // SNOTEL metric configuration
