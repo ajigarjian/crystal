@@ -2660,3 +2660,224 @@ def get_snotel_station_observations(request: https_fn.Request) -> https_fn.Respo
             status=500,
             headers={"Content-Type": "application/json"}
         )
+
+@https_fn.on_request(
+    cors=options.CorsOptions(
+        cors_origins=[
+            "https://crystal-2f87e.web.app",
+            "https://askcrystal.info",
+            "https://www.askcrystal.info",
+            "http://localhost:3000",
+            "http://localhost:5173",
+        ],
+        cors_methods=["get", "post", "options"]
+    ),
+    memory=options.MemoryOption.MB_512
+)
+def get_bpa_generation_mix(request: https_fn.Request) -> https_fn.Response:
+    """Get the latest BPA generation mix data for dashboard display."""
+    try:
+        # Get the latest timestamp for each metric
+        query = """
+        WITH latest_data AS (
+            SELECT 
+                metric_id,
+                value_mw,
+                timestamp_utc,
+                ROW_NUMBER() OVER (PARTITION BY metric_id ORDER BY timestamp_utc DESC) as rn
+            FROM fact_bpa_generation 
+            WHERE source_id = 6 
+              AND metric_id IN (40, 41, 42, 43, 44, 46)
+              AND timestamp_utc >= NOW() - INTERVAL '2 hours'
+        )
+        SELECT 
+            metric_id,
+            value_mw,
+            timestamp_utc
+        FROM latest_data 
+        WHERE rn = 1
+        ORDER BY metric_id
+        """
+        
+        rows = execute_query(query)
+        
+        # Map metric IDs to readable names
+        metric_names = {
+            40: "Load",
+            41: "VER", 
+            42: "Hydro",
+            43: "Fossil/Biomass",
+            44: "Nuclear",
+            46: "Total Generation"
+        }
+        
+        # Process the data
+        generation_data = []
+        load_value = 0
+        total_generation = 0
+        latest_timestamp = None
+        
+        for row in rows:
+            metric_id = row['metric_id']        # Changed from row[0]
+            value_mw = float(row['value_mw'])   # Changed from row[1]
+            timestamp = row['timestamp_utc']    # Changed from row[2]
+            
+            if latest_timestamp is None:
+                latest_timestamp = timestamp
+                
+            if metric_id == 40:  # Load
+                load_value = value_mw
+            elif metric_id == 46:  # Total Generation
+                total_generation = value_mw
+            elif metric_id in [41, 42, 43, 44]:  # Generation sources
+                generation_data.append({
+                    "type": metric_names[metric_id],
+                    "value": value_mw,
+                    "metric_id": metric_id
+                })
+        
+        # Calculate net interchange (Generation - Load)
+        net_interchange = total_generation - load_value if total_generation and load_value else 0
+        
+        response_data = {
+            "timestamp": latest_timestamp.isoformat() if latest_timestamp else None,
+            "load": load_value,
+            "total_generation": total_generation,
+            "net_interchange": net_interchange,
+            "generation_mix": generation_data,
+            "summary": {
+                "total_mw": total_generation,
+                "load_mw": load_value,
+                "net_export_mw": net_interchange if net_interchange > 0 else 0,
+                "net_import_mw": abs(net_interchange) if net_interchange < 0 else 0
+            }
+        }
+        
+        return https_fn.Response(
+            json.dumps(response_data),
+            status=200,
+            headers={"Content-Type": "application/json"}
+        )
+        
+    except Exception as e:
+        logger.exception("Error fetching BPA generation mix")
+        return https_fn.Response(
+            json.dumps({"error": str(e)}),
+            status=500,
+            headers={"Content-Type": "application/json"}
+        )
+
+# Add a new function for BPA time series
+@https_fn.on_request(
+    cors=options.CorsOptions(
+        cors_origins=[
+            "https://crystal-2f87e.web.app",
+            "https://askcrystal.info", 
+            "https://www.askcrystal.info",
+            "http://localhost:3000",
+            "http://localhost:5173",
+        ],
+        cors_methods=["get", "post", "options"]
+    ),
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=30
+)
+def get_bpa_generation_timeseries(request: https_fn.Request) -> https_fn.Response:
+    """Get BPA generation mix time series data."""
+    try:
+        # Get query parameters
+        range_param = request.args.get('range', '1d')  # Default to 1 day
+        
+        # Calculate time range
+        now_utc = datetime.now(timezone.utc)
+        
+        if range_param == '1d':
+            start_utc = now_utc - timedelta(days=1)
+        elif range_param == '7d':
+            start_utc = now_utc - timedelta(days=7)
+        elif range_param == '14d':
+            start_utc = now_utc - timedelta(days=14)
+        elif range_param == 'mtd':
+            start_utc = now_utc.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        else:
+            start_utc = now_utc - timedelta(days=1)
+        
+        # Query for time series data
+        query = """
+        SELECT 
+            timestamp_utc,
+            metric_id,
+            value_mw
+        FROM fact_bpa_generation 
+        WHERE source_id = 6 
+          AND metric_id IN (40, 41, 42, 43, 44, 46)
+          AND timestamp_utc >= %s 
+          AND timestamp_utc <= %s
+        ORDER BY timestamp_utc ASC, metric_id ASC
+        """
+        
+        rows = execute_query(query, (start_utc, now_utc))
+        
+        # Map metric IDs to readable names
+        metric_names = {
+            40: "Load",
+            41: "VER", 
+            42: "Hydro",
+            43: "Fossil/Biomass",
+            44: "Nuclear",
+            46: "Total Generation"
+        }
+        
+        # Group data by timestamp
+        data_by_timestamp = {}
+        
+        for row in rows:
+            timestamp = row['timestamp_utc']
+            metric_id = row['metric_id']
+            value_mw = float(row['value_mw'])
+            
+            timestamp_str = timestamp.isoformat()
+            
+            if timestamp_str not in data_by_timestamp:
+                data_by_timestamp[timestamp_str] = {
+                    'timestamp': timestamp_str,
+                    'Load': 0,
+                    'VER': 0,
+                    'Hydro': 0,
+                    'Fossil/Biomass': 0,
+                    'Nuclear': 0,
+                    'Total Generation': 0
+                }
+            
+            if metric_id in metric_names:
+                data_by_timestamp[timestamp_str][metric_names[metric_id]] = value_mw
+        
+        # Convert to array and calculate net interchange
+        result = []
+        for timestamp_str, data in sorted(data_by_timestamp.items()):
+            net_interchange = data['Total Generation'] - data['Load']
+            
+            result.append({
+                'timestamp': timestamp_str,
+                'Load': data['Load'],
+                'VER': data['VER'],
+                'Hydro': data['Hydro'],
+                'Fossil/Biomass': data['Fossil/Biomass'],
+                'Nuclear': data['Nuclear'],
+                'Total_Generation': data['Total Generation'],
+                'Net_Interchange': net_interchange
+            })
+        
+        return https_fn.Response(
+            json.dumps(result),
+            status=200,
+            headers={"Content-Type": "application/json"}
+        )
+        
+    except Exception as e:
+        logger.exception("Error fetching BPA generation time series")
+        return https_fn.Response(
+            json.dumps({"error": str(e)}),
+            status=500,
+            headers={"Content-Type": "application/json"}
+        )

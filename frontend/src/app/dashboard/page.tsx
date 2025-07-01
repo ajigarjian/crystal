@@ -21,6 +21,7 @@ import { ChartTTCFlowgate } from '@/components/chart-ttc-flowgate'
 import { Terminal, Mic, Square, TrendingUp, MapPin, Activity, Info, Zap } from "lucide-react"
 import { Separator } from "@/components/ui/separator"
 import { MetricsTable, transformSectionCardDataToMetrics } from "@/components/metrics-table"
+import { ChartBPAGenerationMix } from "@/components/chart-bpa-generation-mix"
 
 import { getDashboardSectionCards, SectionCardData, getDamLocations, DamLocation, getSnotelStations, SnotelStationData, getSnotelStationSummary } from "@/lib/firebase"
 
@@ -716,7 +717,12 @@ export default function Page() {
 
                     {/* Trading Summary - shown when no feature is selected */}
                     {!selectedFeature && (
-                      <TradingSummary />
+                      <>
+                        <div className="max-h-[calc(31vh)] overflow-y-auto">
+                          <TradingSummary />
+                        </div>
+                        <ChartBPAGenerationMix />
+                      </>
                     )}
 
                     {/* Flowgate only selection - shown when flowgate is selected without a specific feature */}

@@ -97,17 +97,19 @@ export function TradingSummary({ className = "", isLoading = false }: TradingSum
   return (
     <div className={`space-y-6 ${className}`}>
       {/* Header */}
-      <div className="space-y-2">
-        <h2 className="text-xl font-semibold tracking-tight">
-          {currentTime?.dateTitle || 'Loading...'} Summary
-        </h2>
-        <p className="text-sm text-muted-foreground">
+      <div className="flex items-start justify-between">
+        <div className="space-y-2">
+          <h2 className="text-xl font-semibold tracking-tight">
+            {currentTime?.dateTitle || 'Loading...'} Summary
+          </h2>
+        </div>
+        <p className="text-sm text-muted-foreground mt-1">
           Last updated {currentTime?.timeUTC || '--:--:--'} UTC
         </p>
       </div>
 
       {/* Trading Summary Content */}
-      <div className="space-y-4 text-sm leading-relaxed">
+      <div className="space-y-4 text-xs leading-relaxed">
         <p>
           Tightness at Malin persists this morning following unplanned curtailments on the 
           Ruby Pipeline (~150 MMCF/d offline) and lower hydro across the Northwest. Gas basis 

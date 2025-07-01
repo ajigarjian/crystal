@@ -1479,4 +1479,112 @@ export const getSnotelStationSummary = async (stationId: number): Promise<Sectio
 
   console.log('getSnotelStationSummary: Final summary cards:', summaryCards);
   return summaryCards;
+};
+
+// BPA Generation Mix interface and function
+export interface BPAGenerationMixData {
+  timestamp: string;
+  load: number;
+  total_generation: number;
+  net_interchange: number;
+  generation_mix: Array<{
+    type: string;
+    value: number;
+    metric_id: number;
+  }>;
+  summary: {
+    total_mw: number;
+    load_mw: number;
+    net_export_mw: number;
+    net_import_mw: number;
+  };
+}
+
+export const getBPAGenerationMix = async (): Promise<BPAGenerationMixData> => {
+  // Get the region and project ID from the functions instance
+  const region = functions.region || 'us-central1';
+  const projectId = firebaseConfig.projectId;
+  
+  // Construct the URL for the HTTP function
+  let baseUrl = '';
+  if (process.env.NODE_ENV === 'development') {
+    // Use emulator URL in development
+    baseUrl = `http://localhost:5001/${projectId}/${region}`;
+  } else {
+    // Use production URL in production
+    baseUrl = `https://${region}-${projectId}.cloudfunctions.net`;
+  }
+  
+  const url = `${baseUrl}/get_bpa_generation_mix`;
+  
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      },
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Error fetching BPA generation mix:', errorText);
+      throw new Error(`Failed to fetch BPA generation mix: ${response.status} ${response.statusText}`);
+    }
+    
+    const result = await response.json();
+    return result;
+  } catch (error: any) {
+    console.error('Error calling get_bpa_generation_mix:', error);
+    throw new Error(error.message || 'Failed to fetch BPA generation mix');
+  }
+};
+
+// Add new interface for time series data
+export interface BPAGenerationTimeseriesPoint {
+  timestamp: string;
+  Load: number;
+  VER: number;
+  Hydro: number;
+  'Fossil/Biomass': number;
+  Nuclear: number;
+  Total_Generation: number;
+  Net_Interchange: number;
+}
+
+// Add new function for time series data
+export const getBPAGenerationTimeseries = async (range: TimeRangeOption): Promise<BPAGenerationTimeseriesPoint[]> => {
+  const region = functions.region || 'us-central1';
+  const projectId = firebaseConfig.projectId;
+  
+  let baseUrl = '';
+  if (process.env.NODE_ENV === 'development') {
+    baseUrl = `http://localhost:5001/${projectId}/${region}`;
+  } else {
+    baseUrl = `https://${region}-${projectId}.cloudfunctions.net`;
+  }
+  
+  const url = `${baseUrl}/get_bpa_generation_timeseries?range=${range}`;
+  
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      },
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Error fetching BPA generation timeseries:', errorText);
+      throw new Error(`Failed to fetch BPA generation timeseries: ${response.status} ${response.statusText}`);
+    }
+    
+    const result = await response.json();
+    return result;
+  } catch (error: any) {
+    console.error('Error calling get_bpa_generation_timeseries:', error);
+    throw new Error(error.message || 'Failed to fetch BPA generation timeseries');
+  }
 }; 
