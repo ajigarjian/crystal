@@ -1,13 +1,13 @@
 import { Separator } from "@/components/ui/separator"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { FeatureSearchCommand } from "@/components/FeatureSearchCommand"
-import { DamInfo, PowerLineInfo, SnotelStationInfo } from "@/app/dashboard/page";
+import { DamInfo, PowerLineInfo, SnotelStationInfo, PlantInfo, GeneratorInfo } from "@/app/dashboard/page";
 
 interface SearchableFeature {
   id: string | number;
   name: string;
-  type: 'dam' | 'powerline' | 'flowgate' | 'snotel';
-  data: DamInfo | PowerLineInfo | { id: string; name: string; lineCount: number } | SnotelStationInfo;
+  type: 'dam' | 'powerline' | 'flowgate' | 'snotel' | 'plant' | 'generator';
+  data: DamInfo | PowerLineInfo | { id: string; name: string; lineCount: number } | SnotelStationInfo | PlantInfo | GeneratorInfo;
 }
 
 interface SiteHeaderProps {
@@ -16,11 +16,15 @@ interface SiteHeaderProps {
   powerLines: SearchableFeature[];
   flowgates: SearchableFeature[];
   snotelStations: SearchableFeature[];
+  powerPlants: SearchableFeature[];
+  powerGenerators: SearchableFeature[];
   // Search handlers
   onDamSelect: (dam: DamInfo) => void;
   onPowerLineSelect: (powerLine: PowerLineInfo) => void;
   onFlowgateSelect: (flowgate: string) => void;
   onSnotelStationSelect: (station: SnotelStationInfo) => void;
+  onPlantSelect: (plant: PlantInfo) => void;
+  onGeneratorSelect: (generator: GeneratorInfo) => void;
 }
 
 export function SiteHeader({ 
@@ -28,10 +32,14 @@ export function SiteHeader({
   powerLines,
   flowgates,
   snotelStations,
+  powerPlants,
+  powerGenerators,
   onDamSelect,
   onPowerLineSelect,
   onFlowgateSelect,
-  onSnotelStationSelect
+  onSnotelStationSelect,
+  onPlantSelect,
+  onGeneratorSelect
 }: SiteHeaderProps) {
   return (
     <header className="flex h-(--header-height) shrink-0 items-center gap-2 border-b transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-(--header-height)">
@@ -53,10 +61,14 @@ export function SiteHeader({
               powerLines={powerLines}
               flowgates={flowgates}
               snotelStations={snotelStations}
+              powerPlants={powerPlants}
+              powerGenerators={powerGenerators}
               onDamSelect={onDamSelect}
               onPowerLineSelect={onPowerLineSelect}
               onFlowgateSelect={onFlowgateSelect}
               onSnotelStationSelect={onSnotelStationSelect}
+              onPlantSelect={onPlantSelect}
+              onGeneratorSelect={onGeneratorSelect}
             />
           </div>
         </div>

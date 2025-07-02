@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/command"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { DamInfo, PowerLineInfo, SnotelStationInfo } from "@/app/dashboard/page"
+import { DamInfo, PowerLineInfo, SnotelStationInfo, PlantInfo, GeneratorInfo } from "@/app/dashboard/page"
 import {
   Dialog,
   DialogContent,
@@ -24,8 +24,8 @@ import {
 interface SearchableFeature {
   id: string | number;
   name: string;
-  type: 'dam' | 'powerline' | 'flowgate' | 'snotel';
-  data: DamInfo | PowerLineInfo | FlowgateInfo | SnotelStationInfo;
+  type: 'dam' | 'powerline' | 'flowgate' | 'snotel' | 'plant' | 'generator';
+  data: DamInfo | PowerLineInfo | FlowgateInfo | SnotelStationInfo | PlantInfo | GeneratorInfo;
 }
 
 interface FlowgateInfo {
@@ -34,17 +34,21 @@ interface FlowgateInfo {
   lineCount: number;
 }
 
-type FeatureTypeFilter = 'all' | 'dam' | 'powerline' | 'flowgate' | 'snotel';
+type FeatureTypeFilter = 'all' | 'dam' | 'powerline' | 'flowgate' | 'snotel' | 'plant' | 'generator';
 
 interface FeatureSearchCommandProps {
   dams: DamInfo[];
   powerLines: SearchableFeature[];
   flowgates: SearchableFeature[];
   snotelStations: SearchableFeature[];
+  powerPlants: SearchableFeature[];
+  powerGenerators: SearchableFeature[];
   onDamSelect: (dam: DamInfo) => void;
   onPowerLineSelect: (powerLine: PowerLineInfo) => void;
   onFlowgateSelect: (flowgate: string) => void;
   onSnotelStationSelect: (station: SnotelStationInfo) => void;
+  onPlantSelect: (plant: PlantInfo) => void;
+  onGeneratorSelect: (generator: GeneratorInfo) => void;
 }
 
 export function FeatureSearchCommand({
@@ -52,10 +56,14 @@ export function FeatureSearchCommand({
   powerLines,
   flowgates,
   snotelStations,
+  powerPlants,
+  powerGenerators,
   onDamSelect,
   onPowerLineSelect,
   onFlowgateSelect,
   onSnotelStationSelect,
+  onPlantSelect,
+  onGeneratorSelect,
 }: FeatureSearchCommandProps) {
   const [open, setOpen] = React.useState(false)
   const [search, setSearch] = React.useState("")
@@ -70,8 +78,8 @@ export function FeatureSearchCommand({
       data: dam
     }));
 
-    return [...damFeatures, ...powerLines, ...flowgates, ...snotelStations];
-  }, [dams, powerLines, flowgates, snotelStations]);
+    return [...damFeatures, ...powerLines, ...flowgates, ...snotelStations, ...powerPlants, ...powerGenerators];
+  }, [dams, powerLines, flowgates, snotelStations, powerPlants, powerGenerators]);
 
   // Filter features based on search term and active filter
   const filteredFeatures = React.useMemo(() => {
@@ -99,6 +107,8 @@ export function FeatureSearchCommand({
       powerline: filteredFeatures.filter(f => f.type === 'powerline'),
       flowgate: filteredFeatures.filter(f => f.type === 'flowgate'),
       snotel: filteredFeatures.filter(f => f.type === 'snotel'),
+      plant: filteredFeatures.filter(f => f.type === 'plant'),
+      generator: filteredFeatures.filter(f => f.type === 'generator'),
     };
     return groups;
   }, [filteredFeatures]);
@@ -117,6 +127,12 @@ export function FeatureSearchCommand({
         break;
       case 'snotel':
         onSnotelStationSelect(feature.data as SnotelStationInfo);
+        break;
+      case 'plant':
+        onPlantSelect(feature.data as PlantInfo);
+        break;
+      case 'generator':
+        onGeneratorSelect(feature.data as GeneratorInfo);
         break;
     }
     setOpen(false);
@@ -150,6 +166,8 @@ export function FeatureSearchCommand({
       case 'powerline': return '⚡';
       case 'flowgate': return '🔗';
       case 'snotel': return '❄️';
+      case 'plant': return '🏭';
+      case 'generator': return '⚙️';
       default: return '📍';
     }
   };
@@ -161,6 +179,8 @@ export function FeatureSearchCommand({
       powerline: powerLines.length,
       flowgate: flowgates.length,
       snotel: snotelStations.length,
+      plant: powerPlants.length,
+      generator: powerGenerators.length,
     };
   };
 
@@ -172,6 +192,8 @@ export function FeatureSearchCommand({
     { key: 'powerline', label: 'Lines', icon: '⚡' },
     { key: 'flowgate', label: 'Flowgates', icon: '🔗' },
     { key: 'snotel', label: 'Stations', icon: '❄️' },
+    { key: 'plant', label: 'Plants', icon: '🏭' },
+    { key: 'generator', label: 'Generators', icon: '⚙️' },
   ];
 
   return (
@@ -183,17 +205,17 @@ export function FeatureSearchCommand({
         className="relative h-9 w-full justify-start rounded-md bg-muted/50 text-sm font-normal text-muted-foreground shadow-none hover:bg-muted transition-colors"
       >
         <SearchIcon className="mr-2 h-4 w-4" />
-        <span className="text-left">Search for dams, power lines, flowgates, and SNOTEL stations...</span>
+        <span className="text-left">Search infrastructure...</span>
         <kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 hidden h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium opacity-100 sm:flex">
           <span className="text-xs">⌘</span>K
         </kbd>
       </Button>
       
       <Dialog open={open} onOpenChange={handleOpenChange}>
-        <DialogContent className="overflow-hidden p-0 sm:max-w-2xl lg:max-w-3xl">
+        <DialogContent className="overflow-hidden p-0 sm:max-w-2xl lg:max-w-3xl xl:max-w-4xl">
           <DialogHeader className="sr-only">
             <DialogTitle>Search Features</DialogTitle>
-            <DialogDescription>Search for dams, power lines, flowgates, and SNOTEL stations</DialogDescription>
+            <DialogDescription>Search for power infrastructure and monitoring stations</DialogDescription>
           </DialogHeader>
           <Command className="[&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group]]:px-2 [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-3 [&_[cmdk-item]_svg]:h-5 [&_[cmdk-item]_svg]:w-5">
             {/* Filter buttons - Improved layout for better spacing */}
@@ -261,6 +283,44 @@ export function FeatureSearchCommand({
                       <span className="mr-2">{getFeatureIcon('powerline')}</span>
                       <span className="truncate">{feature.name}</span>
                       <span className="ml-auto text-xs text-muted-foreground">Line</span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              )}
+
+              {groupedFeatures.plant.length > 0 && (activeFilter === 'all' || activeFilter === 'plant') && (
+                <CommandGroup heading="Power Plants">
+                  {groupedFeatures.plant.map((feature) => (
+                    <CommandItem
+                      key={`plant-${feature.id}`}
+                      value={feature.name}
+                      onSelect={() => handleSelect(feature)}
+                      className="cursor-pointer"
+                    >
+                      <span className="mr-2">{getFeatureIcon('plant')}</span>
+                      <span className="truncate">{feature.name}</span>
+                      <span className="ml-auto text-xs text-muted-foreground">
+                        {(feature.data as PlantInfo).fuelType || 'Plant'}
+                      </span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              )}
+
+              {groupedFeatures.generator.length > 0 && (activeFilter === 'all' || activeFilter === 'generator') && (
+                <CommandGroup heading="Generators">
+                  {groupedFeatures.generator.map((feature) => (
+                    <CommandItem
+                      key={`generator-${feature.id}`}
+                      value={feature.name}
+                      onSelect={() => handleSelect(feature)}
+                      className="cursor-pointer"
+                    >
+                      <span className="mr-2">{getFeatureIcon('generator')}</span>
+                      <span className="truncate">{feature.name}</span>
+                      <span className="ml-auto text-xs text-muted-foreground">
+                        {(feature.data as GeneratorInfo).capacity || 'Generator'}
+                      </span>
                     </CommandItem>
                   ))}
                 </CommandGroup>
