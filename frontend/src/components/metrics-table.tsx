@@ -31,6 +31,7 @@ interface MetricsTableProps {
   className?: string;
   selectedMetricId?: string; // Add selected metric ID
   onMetricSelect?: (metricId: string) => void; // Add callback for metric selection
+  skeletonRowCount?: number; // Add skeleton row count prop
 }
 
 // Enhanced helper function to format 24-hour change
@@ -138,7 +139,7 @@ const formatTimestamp = (timestamp: string): string => {
 };
 
 // Loading skeleton component - matches actual table structure and text height exactly
-const MetricsTableSkeleton = () => (
+const MetricsTableSkeleton = ({ rowCount = 8 }: { rowCount?: number }) => (
   <Table>
     <TableHeader>
       <TableRow>
@@ -149,7 +150,7 @@ const MetricsTableSkeleton = () => (
       </TableRow>
     </TableHeader>
     <TableBody>
-      {Array.from({ length: 6 }).map((_, index) => (
+      {Array.from({ length: rowCount }).map((_, index) => (
         <TableRow key={index}>
           <TableCell>
             <div className="flex items-center gap-2">
@@ -186,13 +187,14 @@ export function MetricsTable({
   emptyStateDescription = "Operational metrics are currently unavailable.",
   className = "",
   selectedMetricId,
-  onMetricSelect
+  onMetricSelect,
+  skeletonRowCount = 8 // Default to 8 rows for dam data
 }: MetricsTableProps) {
   
   if (isLoading) {
     return (
       <div className={className}>
-        <MetricsTableSkeleton />
+        <MetricsTableSkeleton rowCount={skeletonRowCount} />
       </div>
     );
   }
