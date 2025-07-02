@@ -320,7 +320,7 @@ def get_power_infrastructure(request: https_fn.Request) -> https_fn.Response:
                             'geometry', {geom_sql},
                             'properties', jsonb_build_object(
                                 'gid', pi.gid,
-                                'name', COALESCE(pi.name, 'Unnamed'),
+                                'name', COALESCE(pi.openinfra_name, 'Unnamed'),
                                 'operator', pi.operator,
                                 'power_type', pi.power,
                                 'voltage', pi.voltage,
@@ -332,7 +332,7 @@ def get_power_infrastructure(request: https_fn.Request) -> https_fn.Response:
                             )
                         ) AS feature
                         FROM power_infra pi
-                        LEFT JOIN power_flow_gates pfg ON pi.name = pfg.openinframaplinename
+                        LEFT JOIN power_flow_gates pfg ON pi.openinfra_name = pfg.openinfra_name
                         LEFT JOIN (
                             SELECT DISTINCT ON (df.flowgate_code)
                                 df.flowgate_code,
