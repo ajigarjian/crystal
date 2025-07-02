@@ -23,7 +23,7 @@ import { Separator } from "@/components/ui/separator"
 import { MetricsTable, transformSectionCardDataToMetrics } from "@/components/metrics-table"
 import { ChartBPAGenerationMix } from "@/components/chart-bpa-generation-mix"
 
-import { getDashboardSectionCards, SectionCardData, getDamLocations, DamLocation, getSnotelStations, SnotelStationData, getSnotelStationSummary } from "@/lib/firebase"
+import { getDashboardSectionCards, SectionCardData, getDamLocations, DamLocation, getSnotelStations, SnotelStationData, getSnotelStationSummary, getPowerGenerators, getPowerPlants, GeneratorData, PowerPlantsData } from "@/lib/firebase"
 
 export interface DamInfo {
   id: number;
@@ -79,6 +79,31 @@ export interface GenerationInfo {
   technology?: string;
 }
 
+// Add specific interfaces for plants and generators
+export interface PlantInfo {
+  id: number;
+  name: string;
+  operator?: string;
+  fuelType?: string;
+  capacity?: string;
+  status?: string;
+  commissioningDate?: string;
+  altName?: string;
+  technology?: string;
+}
+
+export interface GeneratorInfo {
+  id: number;
+  name: string;
+  operator?: string;
+  fuelType?: string;
+  capacity?: string;
+  status?: string;
+  commissioningDate?: string;
+  plantName?: string;
+  technology?: string;
+}
+
 export interface SnotelStationInfo {
   id: number;
   name: string;
@@ -118,7 +143,7 @@ const AVAILABLE_DAMS: DamInfo[] = [
 interface SearchableFeature {
   id: string | number;
   name: string;
-  type: 'dam' | 'powerline' | 'flowgate' | 'snotel';
+  type: 'dam' | 'powerline' | 'flowgate' | 'snotel' | 'plant' | 'generator';
   data: any;
 }
 
@@ -214,6 +239,10 @@ export default function Page() {
 
   // Add state to track power infrastructure data for search
   const [powerInfrastructureData, setPowerInfrastructureData] = React.useState<any>(null);
+  
+  // Add state for power plants and generators
+  const [powerPlantsData, setPowerPlantsData] = React.useState<PowerPlantsData | null>(null);
+  const [powerGeneratorsData, setPowerGeneratorsData] = React.useState<GeneratorData | null>(null);
 
   const [selectedFlowgate, setSelectedFlowgate] = React.useState<string | null>(null);
 
@@ -308,6 +337,35 @@ export default function Page() {
     loadPowerInfrastructureForSearch();
   }, []);
 
+  // Add useEffect to load power plants for search
+  React.useEffect(() => {
+    async function loadPowerPlantsForSearch() {
+      try {
+        const data = await getPowerPlants(22); // Load all plants
+        setPowerPlantsData(data);
+      } catch (error) {
+        console.error("Failed to load power plants for search:", error);
+        setPowerPlantsData(null);
+      }
+    }
+    
+    loadPowerPlantsForSearch();
+  }, []);
+
+  React.useEffect(() => {
+    async function loadPowerGeneratorsForSearch() {
+      try {
+        const data = await getPowerGenerators(22); // Load all generators
+        setPowerGeneratorsData(data);
+      } catch (error) {
+        console.error("Failed to load power generators for search:", error);
+        setPowerGeneratorsData(null);
+      }
+    }
+    
+    loadPowerGeneratorsForSearch();
+  }, []);
+
   // Prepare search data
   const searchPowerLines: SearchableFeature[] = React.useMemo(() => {
     if (!powerInfrastructureData?.features) return [];
@@ -397,6 +455,50 @@ export default function Page() {
       }
     }));
   }, [snotelStations]);
+
+  // Prepare search data for power plants
+  const searchPowerPlants: SearchableFeature[] = React.useMemo(() => {
+    if (!powerPlantsData?.features || !Array.isArray(powerPlantsData.features)) return [];
+    
+    return powerPlantsData.features.map((feature) => ({
+      id: feature.properties.id,
+      name: feature.properties.name || 'Unnamed Plant',
+      type: 'plant' as const,
+      data: {
+        id: feature.properties.id,
+        name: feature.properties.name || 'Unnamed Plant',
+        operator: feature.properties.operator,
+        fuelType: feature.properties.fuel_type || (feature.properties as any).plant_source || (feature.properties as any).type,
+        capacity: feature.properties.capacity_mw,
+        status: feature.properties.status,
+        commissioningDate: feature.properties.commissioning_date,
+        altName: (feature.properties as any).alt_name,
+        technology: feature.properties.technology,
+      } as PlantInfo
+    }));
+  }, [powerPlantsData]);
+
+  // Prepare search data for power generators
+  const searchPowerGenerators: SearchableFeature[] = React.useMemo(() => {
+    if (!powerGeneratorsData?.features || !Array.isArray(powerGeneratorsData.features)) return [];
+    
+    return powerGeneratorsData.features.map((feature) => ({
+      id: feature.properties.id,
+      name: feature.properties.name || feature.properties.plant_name || 'Unnamed Generator',
+      type: 'generator' as const,
+      data: {
+        id: feature.properties.id,
+        name: feature.properties.name || 'Unnamed Generator',
+        operator: feature.properties.operator,
+        fuelType: feature.properties.fuel_type,
+        capacity: feature.properties.capacity_mw,
+        status: feature.properties.status,
+        commissioningDate: feature.properties.commissioning_date,
+        plantName: feature.properties.plant_name,
+        technology: feature.properties.technology,
+      } as GeneratorInfo
+    }));
+  }, [powerGeneratorsData]);
 
   // Updated search handlers
   const handleSearchDamSelect = (dam: DamInfo) => {
@@ -551,6 +653,17 @@ export default function Page() {
     setSelectedSnotelMetricId("25"); // Reset to WTEQ when station changes
   };
 
+  // Add handlers for plant and generator selection
+  const handleSearchPlantSelect = (plant: PlantInfo) => {
+    setSelectedFeature({ type: 'generation', data: { ...plant, type: 'plant' } as GenerationInfo });
+    setSelectedFlowgate(null);
+  };
+
+  const handleSearchGeneratorSelect = (generator: GeneratorInfo) => {
+    setSelectedFeature({ type: 'generation', data: { ...generator, type: 'generator' } as GenerationInfo });
+    setSelectedFlowgate(null);
+  };
+
   // Helper function to get display info for selected feature
   const getSelectedFeatureDisplay = () => {
     if (!selectedFeature) return null;
@@ -629,10 +742,14 @@ export default function Page() {
           powerLines={searchPowerLines}
           flowgates={searchFlowgates}
           snotelStations={searchSnotelStations}
+          powerPlants={searchPowerPlants}
+          powerGenerators={searchPowerGenerators}
           onDamSelect={handleSearchDamSelect}
           onPowerLineSelect={handleSearchPowerLineSelect}
           onFlowgateSelect={handleSearchFlowgateSelect}
           onSnotelStationSelect={handleSearchSnotelStationSelect}
+          onPlantSelect={handleSearchPlantSelect}
+          onGeneratorSelect={handleSearchGeneratorSelect}
         />
         <div className="flex flex-1 flex-col">
           <div className="flex flex-1 flex-col">
