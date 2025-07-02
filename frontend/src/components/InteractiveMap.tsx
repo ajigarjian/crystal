@@ -1143,8 +1143,8 @@ export function InteractiveMap({
                   // Red for capacity factor < 0.5
                   "#ef4444" // Red
                 ],
-                // All other non-flowgate lines are neutral gray
-                "#708090"
+                // All other non-flowgate lines are green
+                "#22c55e"
               ],
               "line-opacity": [
                 "case",
