@@ -621,13 +621,15 @@ export const streamAnalyzeDatasets = async (
 
 // Define the expected structure of a single card's data from the backend
 export interface SectionCardData {
-  id: string; // metric_id will be used as id
+  id: string;
   title: string;
-  value: string; // e.g., "123.45 ft" or "N/A %"
-  timestamp: string; // ISO string format from the backend
-  trend: 'up' | 'down' | 'neutral'; // Current placeholder, will be 'neutral'
-  trendDescription: string; // Default description from backend config
+  value: string;
+  timestamp: string;
+  trend: 'up' | 'down' | 'neutral';
+  trendDescription: string;
   footerNote: string;
+  change24h?: number;        // Raw 24-hour change value
+  change24hPercent?: number; // 24-hour percentage change
 }
 
 // Export a helper for calling the new dashboard card data function
@@ -685,11 +687,15 @@ export interface InflowDataPoint {
 }
 
 // Define the new time range options type here as well to be used by the function
-export type TimeRangeOption = "mtd" | "14d" | "7d";
+export type TimeRangeOption = "1d" | "mtd" | "14d" | "7d";
 
-// Export a helper for calling the new inflow timeseries data function
-// Updated to accept new TimeRangeOption types and damId
-export const getInflowTimeseries = async (range: TimeRangeOption, damId: number): Promise<InflowDataPoint[]> => {
+// Export a helper for calling the metric timeseries data function
+// Updated to accept metric_id parameter for any metric
+export const getMetricTimeseries = async (
+  range: TimeRangeOption, 
+  damId: number, 
+  metricId: number = 6  // Default to inflow
+): Promise<InflowDataPoint[]> => {
   const region = functions.region || 'us-central1';
   const projectId = firebaseConfig.projectId;
   let baseUrl = '';
@@ -700,9 +706,8 @@ export const getInflowTimeseries = async (range: TimeRangeOption, damId: number)
     baseUrl = `https://${region}-${projectId}.cloudfunctions.net`;
   }
 
-  // The name of the new Python Cloud Function
-  // Append dam_id to the query parameters
-  const url = `${baseUrl}/get_inflow_timeseries?range=${range}&dam_id=${damId}`;
+  // The name of the Python Cloud Function with metric_id parameter
+  const url = `${baseUrl}/get_inflow_timeseries?range=${range}&dam_id=${damId}&metric_id=${metricId}`;
 
   try {
     // This is a GET request to fetch data
@@ -714,23 +719,27 @@ export const getInflowTimeseries = async (range: TimeRangeOption, damId: number)
     });
 
     if (!response.ok) {
-      let errorData = { error: "Failed to fetch inflow timeseries data" };
+      let errorData = { error: "Failed to fetch metric timeseries data" };
       try {
         errorData = await response.json();
       } catch (e) {
-        console.error("Failed to parse error response from getInflowTimeseries: ", e);
+        console.error("Failed to parse error response from getMetricTimeseries: ", e);
       }
-      console.error('Error fetching inflow timeseries data:', response.status, errorData);
-      throw new Error(errorData.error || `Failed to fetch inflow timeseries data. Status: ${response.status}`);
+      console.error('Error fetching metric timeseries data:', response.status, errorData);
+      throw new Error(errorData.error || `Failed to fetch metric timeseries data. Status: ${response.status}`);
     }
 
     const data = await response.json();
     return data as InflowDataPoint[];
   } catch (error: any) {
-    console.error('Error calling getInflowTimeseries function:', error);
+    console.error('Error calling getMetricTimeseries function:', error);
     return []; 
   }
 };
+
+// Keep backward compatibility - alias for inflow specifically
+export const getInflowTimeseries = (range: TimeRangeOption, damId: number): Promise<InflowDataPoint[]> => 
+  getMetricTimeseries(range, damId, 6);
 
 // Define the expected structure for a single dam location
 export interface DamLocation {
@@ -738,6 +747,31 @@ export interface DamLocation {
   name: string;
   latitude: number;
   longitude: number;
+  nidId?: string;
+  federalId?: string;
+  ownerName?: string;
+  operatorAgency?: string;
+  river?: string;
+  city?: string;
+  county?: string;
+  state?: string;
+  structuralHeightFt?: number;
+  hydraulicHeightFt?: number;
+  nidHeightFt?: number;
+  damLengthFt?: number;
+  damVolumeCy?: number;
+  storageMaxAcft?: number;
+  storageNormalAcft?: number;
+  surfaceAreaAcres?: number;
+  drainageAreaSqmi?: number;
+  maxDischargeCfs?: number;
+  capacityMw?: number;
+  activeStorageAcft?: number;
+  gateCount?: number;
+  gateType?: string;
+  yearCompleted?: number;
+  yearModified?: string;
+  damCode?: string;
 }
 
 // Export a helper for calling the new dam locations function
@@ -1316,50 +1350,241 @@ export interface SnotelObservationDataPoint {
 }
 
 // Export a helper for calling the SNOTEL station observations function
-export const getSnotelStationObservations = async (stationId: number, days: number = 30): Promise<SnotelObservationDataPoint[]> => {
+export const getSnotelStationObservations = async (stationId: number, days: number = 30, metricId?: number): Promise<SnotelObservationDataPoint[]> => {
+  const baseUrl = process.env.NODE_ENV === 'development' 
+    ? 'http://localhost:5001/crystal-2f87e/us-central1'
+    : `https://us-central1-${firebaseConfig.projectId}.cloudfunctions.net`;
+  
+  let url = `${baseUrl}/get_snotel_station_observations?station_id=${stationId}&days=${days}`;
+  if (metricId) {
+    url += `&metric_id=${metricId}`;
+  }
+  
+  try {
+    const response = await fetch(url);
+    
+    if (!response.ok) {
+      const errorData = await response.text();
+      throw new Error(`SNOTEL API error: ${response.status} - ${errorData}`);
+    }
+    
+    const data = await response.json();
+    return data || [];
+  } catch (error) {
+    console.error('Error fetching SNOTEL station observations:', error);
+    throw error;
+  }
+};
+
+// Helper function to get SNOTEL station summary data for metrics table
+export const getSnotelStationSummary = async (stationId: number): Promise<SectionCardData[]> => {
+  console.log('getSnotelStationSummary: Starting fetch for station', stationId);
+  
+  // Fetch all metrics for the last 30 days to ensure we get recent data (same as default for observations)
+  const rawData = await getSnotelStationObservations(stationId, 30);
+  console.log('getSnotelStationSummary: Raw data received:', rawData.length, 'points');
+
+  // Define metric mapping
+  const metricMap: Record<number, { name: string; unit: string; code: string }> = {
+    25: { name: 'Snow Water Equivalent', unit: 'in', code: 'WTEQ' },
+    26: { name: 'Precipitation', unit: 'in', code: 'PREC' },
+    27: { name: 'Snow Depth', unit: 'in', code: 'SNWD' },
+    28: { name: 'Air Temperature', unit: '°F', code: 'TOBS' },
+    29: { name: 'Solar Radiation', unit: 'W/m²', code: 'SRAD' },
+    30: { name: 'Relative Humidity', unit: '%', code: 'RHUM' },
+    31: { name: 'Wind Speed', unit: 'mph', code: 'WSPR' }
+  };
+
+  // Group data by metric_id
+  const groupedData: Record<number, SnotelObservationDataPoint[]> = {};
+  rawData.forEach(point => {
+    if (!groupedData[point.metric_id]) {
+      groupedData[point.metric_id] = [];
+    }
+    groupedData[point.metric_id].push(point);
+  });
+
+  // Sort each group by timestamp
+  Object.keys(groupedData).forEach(metricId => {
+    groupedData[Number(metricId)].sort((a, b) => 
+      new Date(a.ts_utc).getTime() - new Date(b.ts_utc).getTime()
+    );
+  });
+
+  console.log('getSnotelStationSummary: Grouped data keys:', Object.keys(groupedData));
+
+  const summaryCards: SectionCardData[] = [];
+
+  // Process each metric
+  Object.entries(metricMap).forEach(([metricIdStr, metricInfo]) => {
+    const metricId = Number(metricIdStr);
+    const metricData = groupedData[metricId] || [];
+    console.log(`getSnotelStationSummary: Metric ${metricId} (${metricInfo.name}): ${metricData.length} data points`);
+
+    if (metricData.length > 0) {
+      // Get the latest data point
+      const latest = metricData[metricData.length - 1];
+      const previous = metricData.length > 1 ? metricData[metricData.length - 2] : null;
+
+      // Calculate trend
+      let trend: 'up' | 'down' | 'neutral' = 'neutral';
+      let trendDescription = 'No recent change';
+      
+      if (previous) {
+        const change = latest.value_num - previous.value_num;
+        if (change > 0) {
+          trend = 'up';
+          trendDescription = `Increased by ${Math.abs(change).toFixed(2)} ${metricInfo.unit}`;
+        } else if (change < 0) {
+          trend = 'down';
+          trendDescription = `Decreased by ${Math.abs(change).toFixed(2)} ${metricInfo.unit}`;
+        } else {
+          trendDescription = 'No change from previous reading';
+        }
+      }
+
+      // Format value with appropriate precision
+      let formattedValue: string;
+      if (metricInfo.unit === '°F') {
+        formattedValue = `${latest.value_num.toFixed(1)} ${metricInfo.unit}`;
+      } else if (metricInfo.unit === '%' || metricInfo.unit === 'W/m²' || metricInfo.unit === 'mph') {
+        formattedValue = `${latest.value_num.toFixed(0)} ${metricInfo.unit}`;
+      } else {
+        formattedValue = `${latest.value_num.toFixed(2)} ${metricInfo.unit}`;
+      }
+
+      summaryCards.push({
+        id: metricIdStr,
+        title: metricInfo.name,
+        value: formattedValue,
+        timestamp: latest.ts_utc,
+        trend,
+        trendDescription,
+        footerNote: `Last updated: ${new Date(latest.ts_utc).toLocaleDateString()}`
+      });
+    } else {
+      console.log(`getSnotelStationSummary: No data available for metric ${metricId} (${metricInfo.name})`);
+      // No data available for this metric
+      summaryCards.push({
+        id: metricIdStr,
+        title: metricInfo.name,
+        value: 'N/A',
+        timestamp: new Date().toISOString(),
+        trend: 'neutral',
+        trendDescription: 'No data available',
+        footerNote: 'Data not available'
+      });
+    }
+  });
+
+  console.log('getSnotelStationSummary: Final summary cards:', summaryCards);
+  return summaryCards;
+};
+
+// BPA Generation Mix interface and function
+export interface BPAGenerationMixData {
+  timestamp: string;
+  load: number;
+  total_generation: number;
+  net_interchange: number;
+  generation_mix: Array<{
+    type: string;
+    value: number;
+    metric_id: number;
+  }>;
+  summary: {
+    total_mw: number;
+    load_mw: number;
+    net_export_mw: number;
+    net_import_mw: number;
+  };
+}
+
+export const getBPAGenerationMix = async (): Promise<BPAGenerationMixData> => {
+  // Get the region and project ID from the functions instance
   const region = functions.region || 'us-central1';
   const projectId = firebaseConfig.projectId;
+  
+  // Construct the URL for the HTTP function
   let baseUrl = '';
+  if (process.env.NODE_ENV === 'development') {
+    // Use emulator URL in development
+    baseUrl = `http://localhost:5001/${projectId}/${region}`;
+  } else {
+    // Use production URL in production
+    baseUrl = `https://${region}-${projectId}.cloudfunctions.net`;
+  }
+  
+  const url = `${baseUrl}/get_bpa_generation_mix`;
+  
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      },
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Error fetching BPA generation mix:', errorText);
+      throw new Error(`Failed to fetch BPA generation mix: ${response.status} ${response.statusText}`);
+    }
+    
+    const result = await response.json();
+    return result;
+  } catch (error: any) {
+    console.error('Error calling get_bpa_generation_mix:', error);
+    throw new Error(error.message || 'Failed to fetch BPA generation mix');
+  }
+};
 
+// Add new interface for time series data
+export interface BPAGenerationTimeseriesPoint {
+  timestamp: string;
+  Load: number;
+  VER: number;
+  Hydro: number;
+  'Fossil/Biomass': number;
+  Nuclear: number;
+  Total_Generation: number;
+  Net_Interchange: number;
+}
+
+// Add new function for time series data
+export const getBPAGenerationTimeseries = async (range: TimeRangeOption): Promise<BPAGenerationTimeseriesPoint[]> => {
+  const region = functions.region || 'us-central1';
+  const projectId = firebaseConfig.projectId;
+  
+  let baseUrl = '';
   if (process.env.NODE_ENV === 'development') {
     baseUrl = `http://localhost:5001/${projectId}/${region}`;
   } else {
     baseUrl = `https://${region}-${projectId}.cloudfunctions.net`;
   }
-
-  // The name of the new Python Cloud Function
-  const url = `${baseUrl}/get_snotel_station_observations?station_id=${stationId}&days=${days}`;
-
-  console.log('Fetching SNOTEL data from URL:', url);
-
+  
+  const url = `${baseUrl}/get_bpa_generation_timeseries?range=${range}`;
+  
   try {
-    // This is a GET request to fetch data
     const response = await fetch(url, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
       },
     });
-
-    console.log('SNOTEL API response status:', response.status);
-
+    
     if (!response.ok) {
-      let errorData = { error: "Failed to fetch SNOTEL station observations" };
-      try {
-        errorData = await response.json();
-      } catch (e) {
-        console.error("Failed to parse error response from getSnotelStationObservations: ", e);
-      }
-      console.error('Error fetching SNOTEL station observations:', response.status, errorData);
-      throw new Error(errorData.error || `Failed to fetch SNOTEL station observations. Status: ${response.status}`);
+      const errorText = await response.text();
+      console.error('Error fetching BPA generation timeseries:', errorText);
+      throw new Error(`Failed to fetch BPA generation timeseries: ${response.status} ${response.statusText}`);
     }
-
-    const data = await response.json();
-    console.log('SNOTEL API response data:', data);
-    return data as SnotelObservationDataPoint[];
+    
+    const result = await response.json();
+    return result;
   } catch (error: any) {
-    console.error('Error calling getSnotelStationObservations function:', error);
-    // Re-throw the error instead of returning empty array so the component can handle it properly
-    throw error;
+    console.error('Error calling get_bpa_generation_timeseries:', error);
+    throw new Error(error.message || 'Failed to fetch BPA generation timeseries');
   }
 }; 

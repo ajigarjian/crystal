@@ -3,6 +3,7 @@
 import * as React from "react"
 import { Line, Bar, ComposedChart, CartesianGrid, XAxis, YAxis, Label, Legend } from "recharts"
 // import { toZonedTime, format as formatDate } from "date-fns-tz" // Temporarily removed for UTC display
+import { IconTable, IconChartLine } from "@tabler/icons-react"
 
 import { useIsMobile } from "@/hooks/use-mobile"
 import {
@@ -30,14 +31,47 @@ import {
   ToggleGroup,
   ToggleGroupItem,
 } from "@/components/ui/toggle-group"
-import { InflowDataPoint, getInflowTimeseries, TimeRangeOption } from "@/lib/firebase" 
+import { Button } from "@/components/ui/button"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import { cn } from "@/lib/utils"
+import { InflowDataPoint, getMetricTimeseries, TimeRangeOption, getSnotelStationObservations, SnotelObservationDataPoint } from "@/lib/firebase"
 
 // Define the new time range options type
 // type TimeRangeOption = "mtd" | "14d" | "7d"; // Already in firebase.ts, no need to redefine if imported
 
+// Metric configuration to match backend METRICS_CONFIG
+const METRICS_CONFIG = {
+  "3": { name: "Headroom", unit: "ft", color: "hsl(var(--chart-1))" },
+  "5": { name: "Reservoir Fill", unit: "%", color: "hsl(var(--chart-2))" },
+  "6": { name: "Inflow", unit: "cfs", color: "hsl(var(--chart-1))" },
+  "7": { name: "Outflow", unit: "cfs", color: "hsl(var(--chart-6))" },
+  "8": { name: "Spill", unit: "cfs", color: "hsl(var(--chart-3))" },
+  "9": { name: "Spill %", unit: "%", color: "hsl(var(--chart-4))" },
+  "10": { name: "Gates Open", unit: "gates", color: "hsl(var(--chart-5))" },
+  "13": { name: "Generation Flow", unit: "cfs", color: "hsl(var(--chart-7))" }
+} as const;
+
+// SNOTEL metric configuration
+const SNOTEL_METRICS_CONFIG = {
+  "25": { name: "Snow Water Equivalent", unit: "in", color: "#3b82f6" },
+  "26": { name: "Precipitation", unit: "in", color: "#06b6d4" },
+  "27": { name: "Snow Depth", unit: "in", color: "#8b5cf6" },
+  "28": { name: "Air Temperature", unit: "°F", color: "#ef4444" },
+  "29": { name: "Solar Radiation", unit: "W/m²", color: "#f59e0b" },
+  "30": { name: "Relative Humidity", unit: "%", color: "#10b981" },
+  "31": { name: "Wind Speed", unit: "mph", color: "#6b7280" }
+} as const;
+
 interface ProcessedChartData {
   date: string;
-  inflow: number;
+  value: number; // Generic value instead of inflow
   type: 'observed' | 'forecast' | 'forecast_error';
   timestamp: number;
   observed: number | null;
@@ -50,20 +84,20 @@ interface ProcessedChartData {
 // const PACIFIC_TIMEZONE = "America/Los_Angeles"
 
 const chartConfig = {
-  inflow: {
-    label: "Inflow (cfs) - UTC",
+  value: {
+    label: "Value",
     color: "hsl(var(--chart-1))", 
   },
   observed: {
-    label: "Observed Inflow", 
+    label: "Observed", 
     color: "hsl(120, 50%, 30%)", // Darker green
   },
   forecast: {
-    label: "Forecast Inflow",
+    label: "Forecast",
     color: "hsl(340, 50%, 40%)", // Darker red
   },
   forecast_error: {
-    label: "Forecast Error (cfs)",
+    label: "Forecast Error",
     color: "hsl(0, 70%, 50%)", // Red for errors
   },
 } satisfies ChartConfig
@@ -97,7 +131,11 @@ const formatUtcDateForDisplay = (isoString: string): string => {
 };
 
 interface ChartAreaInteractiveProps {
-  selectedDamId: number;
+  selectedDamId?: number;
+  selectedStationId?: number;
+  selectedMetricId: string;
+  dataSource: 'dam' | 'snotel';
+  stationName?: string; // For SNOTEL stations
 }
 
 // Add this helper function before the component
@@ -211,11 +249,127 @@ const ErrorBarTooltip = ({ data }: { data: { x: number; y: number; value: number
   );
 };
 
-export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProps) {
+// Smart Y-axis scaling function - UPDATED with better percentage handling
+const calculateOptimalYAxisDomain = (data: ProcessedChartData[], metricId: string): [number, number] => {
+  // Get all valid metric values (observed and forecast, excluding forecast_error)
+  const allValues = data
+    .filter(point => point.observed !== null || point.forecast !== null)
+    .map(point => point.observed || point.forecast)
+    .filter(val => val !== null) as number[];
+
+  if (allValues.length === 0) {
+    return [0, 100]; // Default range if no data
+  }
+
+  const min = Math.min(...allValues);
+  const max = Math.max(...allValues);
+  const range = max - min;
+
+  // If range is very small (flat line), create some padding
+  if (range < 0.01) {
+    const center = (min + max) / 2;
+    const padding = Math.max(center * 0.1, 1); // 10% of center value or minimum 1
+    return [center - padding, center + padding];
+  }
+
+  // Calculate appropriate step size and padding based on metric type and range
+  let stepSize: number;
+  let padding: number;
+
+  if (metricId === "6") { // Inflow - larger values, use existing logic for compatibility
+    stepSize = 5000;
+    padding = 0.05; // 5% padding
+  } else if (metricId === "5" || metricId === "9") { // Percentage metrics (Reservoir Fill, Spill %)
+    // More granular percentage scaling based on actual data range
+    if (range < 1) {
+      stepSize = 0.1; // Very fine granularity for tiny ranges
+    } else if (range < 5) {
+      stepSize = 0.5; // Fine granularity for small ranges
+    } else if (range < 15) {
+      stepSize = 1; // 1% steps for moderate ranges
+    } else if (range < 40) {
+      stepSize = 2; // 2% steps for larger ranges
+    } else if (range < 70) {
+      stepSize = 5; // 5% steps for large ranges
+    } else {
+      stepSize = 10; // 10% steps for very large ranges
+    }
+    padding = 0.15; // 15% padding for better visibility of percentage trends
+  } else if (metricId === "10") { // Gates Open - integer values
+    stepSize = Math.max(1, Math.ceil(range / 8)); // Aim for ~8 ticks
+    padding = 0.15; // 15% padding for better visibility
+  } else { // Headroom, Spill - moderate values
+    if (range < 10) {
+      stepSize = 1;
+    } else if (range < 100) {
+      stepSize = 5;
+    } else if (range < 1000) {
+      stepSize = 50;
+    } else {
+      stepSize = 100;
+    }
+    padding = 0.1; // 10% padding
+  }
+
+  // Apply padding
+  const paddedMin = min - (range * padding);
+  const paddedMax = max + (range * padding);
+
+  // Round to nice numbers based on step size
+  const domainMin = Math.floor(paddedMin / stepSize) * stepSize;
+  const domainMax = Math.ceil(paddedMax / stepSize) * stepSize;
+
+  // Different minimum range logic for different metrics
+  let finalMin: number;
+  let finalMax: number;
+
+  if (metricId === "5" || metricId === "9") { // Percentage metrics
+    // For percentages, be more flexible with the minimum range
+    finalMin = Math.max(0, domainMin); // Don't go below 0%
+    
+    // Smart upper bound for percentages based on actual data
+    if (max <= 15) {
+      // For small percentages (≤15%), cap at reasonable upper bound
+      finalMax = Math.min(25, Math.max(domainMax, finalMin + stepSize * 4));
+    } else if (max <= 50) {
+      // For moderate percentages, allow some room but don't go to 100%
+      finalMax = Math.min(Math.max(max * 1.3, 60), Math.max(domainMax, finalMin + stepSize * 3));
+    } else {
+      // For large percentages, can go up to 100%
+      finalMax = Math.min(100, Math.max(domainMax, finalMin + stepSize * 3));
+    }
+  } else if (metricId === "10") { // Gates Open
+    finalMin = Math.max(0, domainMin);
+    finalMax = Math.max(finalMin + Math.max(2, stepSize * 2), domainMax); // Minimum 2 gates range
+  } else { // Other metrics (Headroom, Spill, Inflow)
+    finalMin = Math.max(0, domainMin);
+    finalMax = Math.max(finalMin + stepSize * 2, domainMax); // Ensure minimum range
+  }
+
+  console.log(`Y-axis domain calculation for ${metricId}:`, {
+    metricName: metricId === "5" ? "Reservoir Fill" : metricId === "9" ? "Spill %" : "Other",
+    dataRange: { min, max, range },
+    stepSize,
+    padding,
+    beforeMinRange: [domainMin, domainMax],
+    finalDomain: [finalMin, finalMax]
+  });
+
+  return [finalMin, finalMax];
+};
+
+// Keep backward compatibility - alias for inflow specifically
+export const getInflowTimeseries = (range: TimeRangeOption, damId: number): Promise<InflowDataPoint[]> => 
+  getMetricTimeseries(range, damId, 6);
+
+export function ChartAreaInteractive({ selectedDamId, selectedStationId, selectedMetricId, dataSource, stationName }: ChartAreaInteractiveProps) {
   const isMobile = useIsMobile()
   const [timeRange, setTimeRange] = React.useState<TimeRangeOption>("14d") 
   const [processedChartData, setProcessedChartData] = React.useState<ProcessedChartData[]>([])
   const [isLoading, setIsLoading] = React.useState(true)
+  
+  // Add view toggle state
+  const [isChartView, setIsChartView] = React.useState(true)
   
   // Move the hoveredErrorBar state INSIDE the component
   const [hoveredErrorBar, setHoveredErrorBar] = React.useState<{
@@ -224,6 +378,13 @@ export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProp
     value: number;
     date: string;
   } | null>(null);
+
+  // Get metric configuration based on data source
+  const metricConfig = dataSource === 'dam' 
+    ? METRICS_CONFIG[selectedMetricId as keyof typeof METRICS_CONFIG]
+    : SNOTEL_METRICS_CONFIG[selectedMetricId as keyof typeof SNOTEL_METRICS_CONFIG];
+  
+  const isInflowMetric = selectedMetricId === "6" && dataSource === 'dam';
 
   React.useEffect(() => {
     if (isMobile) {
@@ -237,107 +398,124 @@ export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProp
     const fetchData = async () => {
       setIsLoading(true)
       try {
-        const rawData: InflowDataPoint[] = await getInflowTimeseries(timeRange, selectedDamId)
+        let processedData: ProcessedChartData[] = [];
         
-        // Add comprehensive logging
-        console.log('=== RAW DATA FROM BACKEND ===')
-        console.log('Total data points received:', rawData.length)
-        console.log('Raw data sample:', rawData.slice(0, 5))
-        
-        // Log data types breakdown
-        const dataTypeBreakdown = rawData.reduce((acc, point) => {
-          acc[point.data_type] = (acc[point.data_type] || 0) + 1
-          return acc
-        }, {} as Record<string, number>)
-        console.log('Data type breakdown:', dataTypeBreakdown)
-        
-        // Log forecast_error data specifically
-        const forecastErrorData = rawData.filter(point => point.data_type === 'forecast_error')
-        console.log('Forecast error data points:', forecastErrorData.length)
-        if (forecastErrorData.length > 0) {
-          console.log('Sample forecast error data:', forecastErrorData.slice(0, 3))
+        if (dataSource === 'dam' && selectedDamId) {
+          const damData = await getMetricTimeseries(timeRange, selectedDamId, parseInt(selectedMetricId));
+          
+          processedData = damData.map(point => {
+            const timestamp = new Date(point.ts_utc).getTime()
+            
+            // Smart precision handling based on metric type
+            let metricValue: number;
+            if (metricConfig?.unit === '%') {
+              metricValue = Math.round(point.value_num * 10) / 10;
+            } else if (metricConfig?.unit === 'ft' || metricConfig?.unit === 'in') {
+              metricValue = Math.round(point.value_num * 10) / 10;
+            } else if (metricConfig?.unit === 'gates') {
+              metricValue = Math.round(point.value_num);
+            } else if (metricConfig?.unit === '°F') {
+              metricValue = Math.round(point.value_num * 10) / 10;
+            } else {
+              metricValue = Math.trunc(point.value_num);
+            }
+            
+            return {
+              date: point.ts_utc,
+              timestamp: timestamp,
+              observed: point.data_type === 'observed' ? metricValue : null,
+              forecast: point.data_type === 'forecast' ? metricValue : null,
+              value: point.data_type !== 'forecast_error' ? metricValue : Math.abs(metricValue),
+              type: point.data_type,
+              forecast_error: isInflowMetric && point.data_type === 'forecast_error' ? metricValue : null
+            }
+          });
+          
+        } else if (dataSource === 'snotel' && selectedStationId) {
+          // Convert time range to days for SNOTEL API
+          const days = timeRange === "7d" ? 7 : timeRange === "14d" ? 14 : 30;
+          const snotelData = await getSnotelStationObservations(selectedStationId, days, parseInt(selectedMetricId));
+          
+          // Transform SNOTEL data to ProcessedChartData format
+          processedData = snotelData.map(point => {
+            const timestamp = new Date(point.ts_utc).getTime()
+            
+            // Smart precision handling based on metric type
+            let metricValue: number;
+            if (metricConfig?.unit === '%') {
+              metricValue = Math.round(point.value_num * 10) / 10;
+            } else if (metricConfig?.unit === 'ft' || metricConfig?.unit === 'in') {
+              metricValue = Math.round(point.value_num * 10) / 10;
+            } else if (metricConfig?.unit === '°F') {
+              metricValue = Math.round(point.value_num * 10) / 10;
+            } else if (metricConfig?.unit === 'W/m²' || metricConfig?.unit === 'mph') {
+              metricValue = Math.round(point.value_num);
+            } else {
+              metricValue = Math.trunc(point.value_num);
+            }
+            
+            return {
+              date: point.ts_utc,
+              timestamp: timestamp,
+              observed: metricValue, // SNOTEL only has observed data
+              forecast: null,
+              value: metricValue,
+              type: 'observed' as const,
+              forecast_error: null
+            }
+          });
         }
         
-        const transformed = rawData.map(point => {
-          const timestamp = new Date(point.ts_utc).getTime()
-          const inflowValue = Math.trunc(point.value_num);
-          
-          const processedPoint = {
-            date: point.ts_utc,
-            timestamp: timestamp,
-            observed: point.data_type === 'observed' ? inflowValue : null,
-            forecast: point.data_type === 'forecast' ? inflowValue : null,
-            inflow: point.data_type !== 'forecast_error' ? inflowValue : Math.abs(inflowValue), // Show absolute value for tooltip
-            type: point.data_type,
-            // Use actual forecast error - this is the key fix
-            forecast_error: point.data_type === 'forecast_error' ? inflowValue : null
-          }
-          
-          // Log observed data processing
-          if (point.data_type === 'observed') {
-            console.log('Processing observed point:', {
-              original: point,
-              processed: processedPoint
-            })
-          }
-          
-          // Log forecast_error processing
-          if (point.data_type === 'forecast_error') {
-            console.log('Processing forecast_error point:', {
-              original: point,
-              processed: processedPoint
-            })
-          }
-          
-          return processedPoint
-        })
-        
-        // Log final processed data
-        console.log('=== PROCESSED DATA ===')
-        console.log('Total processed points:', transformed.length)
-        
-        // Add debugging for observed data
-        const observedData = transformed.filter(point => point.observed !== null)
-        console.log('Observed data points:', observedData.length)
-        if (observedData.length > 0) {
-          console.log('Sample observed data:', observedData.slice(0, 3))
-          console.log('Observed data values:', observedData.map(d => ({ timestamp: d.timestamp, observed: d.observed })))
-        }
-        
-        const processedForecastErrors = transformed.filter(point => point.forecast_error !== null)
-        console.log('Processed forecast error points:', processedForecastErrors.length)
-        if (processedForecastErrors.length > 0) {
-          console.log('Sample processed forecast errors:', processedForecastErrors.slice(0, 3))
-        }
-        
-        // Add debugging for Y-axis domain
-        const allInflowValues = transformed
-          .filter(point => point.observed !== null || point.forecast !== null)
-          .map(point => point.observed || point.forecast)
-          .filter(val => val !== null);
-        
-        console.log('All inflow values for Y-axis:', {
-          min: Math.min(...allInflowValues),
-          max: Math.max(...allInflowValues),
-          observedRange: observedData.map(d => d.observed),
-          forecastRange: transformed.filter(p => p.forecast !== null).map(d => d.forecast)
-        });
-        
-        setProcessedChartData(transformed)
+        setProcessedChartData(processedData)
       } catch (error) {
-        console.error("Failed to fetch or process inflow data:", error)
+        console.error("Failed to fetch or process metric data:", error)
         setProcessedChartData([]) 
       } finally {
         setIsLoading(false)
       }
     }
     fetchData()
-  }, [timeRange, selectedDamId])
+  }, [timeRange, selectedDamId, selectedStationId, selectedMetricId, metricConfig?.name, isInflowMetric, dataSource])
+
+  // Helper function to prepare table data
+  const getTableData = () => {
+    if (processedChartData.length === 0) return []
+    
+    const tableData = processedChartData.map(point => {
+      const dateObj = new Date(point.date)
+      const displayDate = dateObj.toLocaleDateString('en-US', { 
+        year: 'numeric', 
+        month: 'short', 
+        day: 'numeric',
+        timeZone: 'UTC'
+      })
+      const displayTime = dateObj.toLocaleTimeString('en-US', { 
+        hour: '2-digit', 
+        minute: '2-digit',
+        timeZone: 'UTC',
+        hour12: false
+      })
+      
+      return {
+        date: point.date,
+        displayDate,
+        displayTime,
+        observed: point.observed,
+        forecast: point.forecast,
+        type: point.type,
+        value: point.value
+      }
+    }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()) // Most recent first
+    
+    return tableData
+  }
+
+  const tableData = getTableData()
 
   return (
     <Card className="@container/card shadow-none">
       <CardHeader>
-        <CardTitle>Inflows</CardTitle> {/* Title updated to cfs */}
+        <CardTitle>{metricConfig?.name || "Metric"}</CardTitle>
         <CardDescription>
           <span className="hidden @[540px]/card:block">
             {processedChartData.length > 0 ? (
@@ -348,25 +526,58 @@ export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProp
                   .slice(-1)[0]; // Get the last observed point
                 
                 if (latestObserved) {
-                  return `${latestObserved.inflow.toLocaleString()} cfs ${new Date(latestObserved.date).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })} ${new Date(latestObserved.date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' })} UTC`;
+                  // Smart formatting for the description based on metric type
+                  const unit = metricConfig?.unit || '';
+                  let formattedValue: string;
+                  
+                  if (unit === '%' || unit === 'ft') {
+                    // Show 1 decimal place for percentages and feet
+                    formattedValue = Number(latestObserved.value).toFixed(1);
+                  } else {
+                    // Show whole numbers for other metrics
+                    formattedValue = latestObserved.value.toLocaleString();
+                  }
+                  
+                  return `${formattedValue} ${unit} ${new Date(latestObserved.date).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })} ${new Date(latestObserved.date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' })} UTC`;
                 } else {
                   return "No observed data available for the selected period.";
                 }
               })()
             ) : (
-              "Daily inflow (cubic feet per second) for the selected period."
+              `Daily ${metricConfig?.name.toLowerCase() || 'metric'} for the selected period.`
             )}
           </span>
           <span className="@[540px]/card:hidden">
             {/* More dynamic description for mobile */}
-            {timeRange === "mtd" ? "Month to Date (UTC)" : timeRange === "14d" ? "Last 14 days (UTC)" : "Last 7 days (UTC)"}
+            {timeRange === "1d" ? "Last 24 hours (UTC)" : 
+             timeRange === "mtd" ? "Month to Date (UTC)" : 
+             timeRange === "14d" ? "Last 14 days (UTC)" : "Last 7 days (UTC)"}
           </span>
         </CardDescription>
-        <CardAction>
+        <CardAction className="flex gap-2 flex-wrap items-center">
+          {/* View Toggle Buttons */}
+          <div className="flex rounded-md border flex-shrink-0">
+            <Button
+              variant={isChartView ? "default" : "ghost"}
+              size="sm"
+              onClick={() => setIsChartView(true)}
+              className="rounded-r-none border-r h-8"
+            >
+              <IconChartLine className="h-4 w-4" />
+            </Button>
+            <Button
+              variant={!isChartView ? "default" : "ghost"}
+              size="sm"
+              onClick={() => setIsChartView(false)}
+              className="rounded-l-none h-8"
+            >
+              <IconTable className="h-4 w-4" />
+            </Button>
+          </div>
+          
           <ToggleGroup
             type="single"
             value={timeRange}
-            // Updated onValueChange type
             onValueChange={(value: TimeRangeOption) => {
               if (value) setTimeRange(value)
             }}
@@ -374,13 +585,13 @@ export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProp
             className="hidden *:data-[slot=toggle-group-item]:!px-4 @[767px]/card:flex"
           >
             {/* Updated ToggleGroupItems */}
-            <ToggleGroupItem value="mtd">Month to Date</ToggleGroupItem>
-            <ToggleGroupItem value="14d">Last 14 days</ToggleGroupItem>
+            <ToggleGroupItem value="1d">Last 24 hours</ToggleGroupItem>
             <ToggleGroupItem value="7d">Last 7 days</ToggleGroupItem>
+            <ToggleGroupItem value="14d">Last 14 days</ToggleGroupItem>
+            <ToggleGroupItem value="mtd">Month to Date</ToggleGroupItem>
           </ToggleGroup>
           <Select
             value={timeRange}
-            // Updated onValueChange type
             onValueChange={(value: TimeRangeOption) => {
                if (value) setTimeRange(value)
             }}
@@ -394,193 +605,301 @@ export function ChartAreaInteractive({ selectedDamId }: ChartAreaInteractiveProp
             </SelectTrigger>
             <SelectContent className="rounded-xl">
               {/* Updated SelectItems */}
-              <SelectItem value="mtd" className="rounded-lg">
-                Month to Date
+              <SelectItem value="1d" className="rounded-lg">
+                Last 24 hours
+              </SelectItem>
+              <SelectItem value="7d" className="rounded-lg">
+                Last 7 days
               </SelectItem>
               <SelectItem value="14d" className="rounded-lg">
                 Last 14 days
               </SelectItem>
-              <SelectItem value="7d" className="rounded-lg">
-                Last 7 days
+              <SelectItem value="mtd" className="rounded-lg">
+                Month to Date
               </SelectItem>
             </SelectContent>
           </Select>
         </CardAction>
       </CardHeader>
       <CardContent className="px-2 pt-4 sm:px-6 sm:pt-6">
-        <ChartContainer
-          config={chartConfig}
-          className="aspect-auto h-[250px] w-full"
-        >
-          {isLoading ? (
-            <div className="flex h-full w-full items-center justify-center">
-              <p>Loading chart data...</p>
-            </div>
-          ) : processedChartData.length === 0 && !isLoading ? (
-             <div className="flex h-full w-full items-center justify-center">
-              <p>No inflow data available for the selected period.</p>
-            </div>
-          ) : (
-            <ComposedChart data={processedChartData} margin={{ left: 30, right: 10, top: 5, bottom: 0 }}>
-              <CartesianGrid vertical={false} />
-              <XAxis
-                dataKey="timestamp"
-                type="number"
-                scale="time"
-                domain={['dataMin', 'dataMax']}
-                tickLine={false}
-                axisLine={false}
-                tickMargin={8}
-                ticks={processedChartData.length > 0 ? generateEveryOtherDayTicks(
-                  Math.min(...processedChartData.map(d => d.timestamp)),
-                  Math.max(...processedChartData.map(d => d.timestamp))
-                ) : []}
-                tickFormatter={(timestamp) => {
-                  const date = new Date(timestamp);
-                  return date.getUTCDate().toString();
-                }}
-              />
-              {/* Left Y-axis for inflow lines */}
-              <YAxis 
-                yAxisId="left"
-                tickLine={false}
-                axisLine={false}
-                tickMargin={8}
-                tickFormatter={(value) => {
-                  if (typeof value === 'number') {
-                    return value.toLocaleString(); 
-                  }
-                  return String(value);
-                }}
-                domain={[
-                  (dataMin: number) => (Math.floor((dataMin * 0.95) / 5000) * 5000),
-                  (dataMax: number) => (Math.ceil((dataMax * 1.05) / 5000) * 5000)
-                ]}
-              >
-                <Label 
-                  value="Inflow (cfs)" 
-                  angle={-90} 
-                  position="insideLeft" 
-                  style={{ textAnchor: 'middle' }} 
-                  dy={0}
-                  offset={-20}
+        {isChartView ? (
+          // Chart View
+          <ChartContainer
+            config={chartConfig}
+            className="aspect-auto h-[250px] w-full"
+          >
+            {isLoading ? (
+              <div className="flex h-full w-full items-center justify-center">
+                <p>Loading chart data...</p>
+              </div>
+            ) : processedChartData.length === 0 && !isLoading ? (
+               <div className="flex h-full w-full items-center justify-center">
+                <p>No {metricConfig?.name.toLowerCase() || 'metric'} data available for the selected period.</p>
+              </div>
+            ) : (
+              <ComposedChart data={processedChartData} margin={{ left: 30, right: 10, top: 5, bottom: 0 }}>
+                <CartesianGrid vertical={false} />
+                <XAxis
+                  dataKey="timestamp"
+                  type="number"
+                  scale="time"
+                  domain={['dataMin', 'dataMax']}
+                  tickLine={false}
+                  axisLine={false}
+                  tickMargin={8}
+                  ticks={processedChartData.length > 0 ? generateEveryOtherDayTicks(
+                    Math.min(...processedChartData.map(d => d.timestamp)),
+                    Math.max(...processedChartData.map(d => d.timestamp))
+                  ) : []}
+                  tickFormatter={(timestamp) => {
+                    const date = new Date(timestamp);
+                    return date.getUTCDate().toString();
+                  }}
                 />
-              </YAxis>
-              {/* Right Y-axis for forecast error bars */}
-              <YAxis 
-                yAxisId="right"
-                orientation="right"
-                hide={true}
-                domain={[
-                  (dataMin: number) => Math.min(dataMin * 1.1, 0), // Allow negative values
-                  (dataMax: number) => Math.max(dataMax * 1.1, 0)  // Allow positive values
-                ]}
-              />
-              <ChartTooltip
-                cursor={true}
-                animationDuration={0}
-                content={(props) => {
-                  const { active, payload, label } = props;
-                  
-                  // If we're hovering over an error bar, don't show the line tooltip
-                  if (hoveredErrorBar) {
-                    return null;
-                  }
-                  
-                  // Only show tooltip if we have an active payload with actual data
-                  if (!active || !payload || payload.length === 0) {
-                    return null;
-                  }
-                  
-                  // Filter out null/undefined values and forecast_error data for the main tooltip
-                  const validPayload = payload.filter(entry => {
-                    const dataType = entry.payload?.type;
-                    return dataType !== 'forecast_error' && 
-                           entry.value !== null && 
-                           entry.value !== undefined &&
-                           entry.dataKey !== 'forecast_error';
-                  });
-                  
-                  // If no valid data to show, don't render tooltip
-                  if (validPayload.length === 0) {
-                    return null;
-                  }
-                  
-                  return (
-                    <ChartTooltipContent
-                      active={active}
-                      payload={validPayload}
-                      label={label}
-                      labelFormatter={(value, payload) => {
-                        if (payload && payload.length > 0 && payload[0].payload.date) {
-                          const dateStringFromPayload = payload[0].payload.date;
-                          const dateObj = new Date(dateStringFromPayload);
-                          const dataType = payload[0].payload.type;
-                          
-                          if (String(dateObj) === "Invalid Date") {
-                            return "Invalid Date UTC";
+                {/* Left Y-axis for metric values with smart scaling */}
+                <YAxis 
+                  yAxisId="left"
+                  tickLine={false}
+                  axisLine={false}
+                  tickMargin={8}
+                  tickFormatter={(value) => {
+                    if (typeof value === 'number') {
+                      // Smart formatting for Y-axis labels based on metric type
+                      const unit = metricConfig?.unit || '';
+                      if (unit === '%' || unit === 'ft') {
+                        // Show 1 decimal place for percentages and feet if not whole numbers
+                        return value % 1 === 0 ? value.toString() : value.toFixed(1);
+                      } else {
+                        return value.toLocaleString(); 
+                      }
+                    }
+                    return String(value);
+                  }}
+                  domain={(() => {
+                    const [min, max] = calculateOptimalYAxisDomain(processedChartData, selectedMetricId);
+                    return [min, max];
+                  })()}
+                >
+                  <Label 
+                    value={`${metricConfig?.name || 'Value'} (${metricConfig?.unit || ''})`}
+                    angle={-90} 
+                    position="insideLeft" 
+                    style={{ textAnchor: 'middle' }} 
+                    dy={0}
+                    offset={-20}
+                  />
+                </YAxis>
+                {/* Right Y-axis for forecast error bars (only for inflow) */}
+                {isInflowMetric && (
+                  <YAxis 
+                    yAxisId="right"
+                    orientation="right"
+                    hide={true}
+                    domain={[
+                      (dataMin: number) => Math.min(dataMin * 1.1, 0), // Allow negative values
+                      (dataMax: number) => Math.max(dataMax * 1.1, 0)  // Allow positive values
+                    ]}
+                  />
+                )}
+                <ChartTooltip
+                  cursor={true}
+                  animationDuration={0}
+                  content={(props) => {
+                    const { active, payload, label } = props;
+                    
+                    // If we're hovering over an error bar, don't show the line tooltip
+                    if (hoveredErrorBar) {
+                      return null;
+                    }
+                    
+                    // Only show tooltip if we have an active payload with actual data
+                    if (!active || !payload || payload.length === 0) {
+                      return null;
+                    }
+                    
+                    // Filter out null/undefined values and forecast_error data for the main tooltip
+                    const validPayload = payload.filter(entry => {
+                      const dataType = entry.payload?.type;
+                      return dataType !== 'forecast_error' && 
+                             entry.value !== null && 
+                             entry.value !== undefined &&
+                             entry.dataKey !== 'forecast_error';
+                    });
+                    
+                    // If no valid data to show, don't render tooltip
+                    if (validPayload.length === 0) {
+                      return null;
+                    }
+                    
+                    return (
+                      <ChartTooltipContent
+                        active={active}
+                        payload={validPayload}
+                        label={label}
+                        labelFormatter={(value, payload) => {
+                          if (payload && payload.length > 0 && payload[0].payload.date) {
+                            const dateStringFromPayload = payload[0].payload.date;
+                            const dateObj = new Date(dateStringFromPayload);
+                            const dataType = payload[0].payload.type;
+                            
+                            if (String(dateObj) === "Invalid Date") {
+                              return "Invalid Date UTC";
+                            }
+                            const formattedDate = dateObj.toLocaleDateString('en-US', { 
+                              year: 'numeric', month: 'short', day: 'numeric', 
+                              hour: '2-digit', minute: '2-digit', timeZone: 'UTC' 
+                            }) + " UTC";
+                            // Capitalize the data type in the title
+                            const capitalizedType = dataType.charAt(0).toUpperCase() + dataType.slice(1);
+                            return `${formattedDate} (${capitalizedType})`;
                           }
-                          const formattedDate = dateObj.toLocaleDateString('en-US', { 
-                            year: 'numeric', month: 'short', day: 'numeric', 
-                            hour: '2-digit', minute: '2-digit', timeZone: 'UTC' 
-                          }) + " UTC";
-                          // Capitalize the data type in the title
-                          const capitalizedType = dataType.charAt(0).toUpperCase() + dataType.slice(1);
-                          return `${formattedDate} (${capitalizedType})`;
-                        }
-                        return "Inflow (UTC)";
-                      }}
-                      formatter={(value, name, props) => {
-                        // Remove the type label from the body - just show the value
-                        return [
-                          `${props.payload.inflow.toLocaleString()} cfs`
-                        ];
-                      }}
-                      indicator="dot"
-                    />
-                  );
-                }}
-              />
-              {/* Forecast error bars */}
-              <Bar
-                yAxisId="right"
-                dataKey="forecast_error"
-                shape={(props: any) => {
-                  // Calculate max error once for all bars
-                  const maxErrorInData = Math.max(...processedChartData
-                    .filter(d => d.forecast_error !== null)
-                    .map(d => Math.abs(d.forecast_error!))
-                  );
-                  return <CustomErrorBar {...props} setHoveredErrorBar={setHoveredErrorBar} maxErrorInData={maxErrorInData} />;
-                }}
-                stroke="none"
-                fill="transparent"
-              />
-              {/* Observed inflow line */}
-              <Line
-                yAxisId="left"
-                dataKey="observed"
-                type="linear" 
-                stroke="hsl(120, 70%, 40%)"
-                strokeWidth={2}
-                activeDot={{ r: 8 }}
-                connectNulls={true}
-              />
-              {/* Forecast inflow line */}
-              <Line
-                yAxisId="left"
-                dataKey="forecast"
-                type="linear" 
-                stroke="hsl(340, 50%, 40%)"
-                strokeWidth={2}
-                strokeDasharray="5 5"
-                dot={false}
-                activeDot={{ r: 6, fill: "hsl(340, 50%, 40%)" }}
-                connectNulls={false}
-              />
-            </ComposedChart>
-          )}
-        </ChartContainer>
+                          return `${metricConfig?.name || 'Metric'} (UTC)`;
+                        }}
+                        formatter={(value, name, props) => {
+                          // Smart formatting based on metric type - FIXED!
+                          const unit = metricConfig?.unit || '';
+                          let formattedValue: string;
+                          
+                          if (unit === '%' || unit === 'ft') {
+                            // Show 1 decimal place for percentages and feet
+                            formattedValue = Number(props.payload.value).toFixed(1);
+                          } else {
+                            // Show whole numbers for other metrics
+                            formattedValue = props.payload.value.toLocaleString();
+                          }
+                          
+                          return [`${formattedValue} ${unit}`];
+                        }}
+                        indicator="dot"
+                      />
+                    );
+                  }}
+                />
+                {/* Forecast error bars (only for inflow) */}
+                {isInflowMetric && (
+                  <Bar
+                    yAxisId="right"
+                    dataKey="forecast_error"
+                    shape={(props: any) => {
+                      // Calculate max error once for all bars
+                      const maxErrorInData = Math.max(...processedChartData
+                        .filter(d => d.forecast_error !== null)
+                        .map(d => Math.abs(d.forecast_error!))
+                      );
+                      return <CustomErrorBar {...props} setHoveredErrorBar={setHoveredErrorBar} maxErrorInData={maxErrorInData} />;
+                    }}
+                    stroke="none"
+                    fill="transparent"
+                  />
+                )}
+                {/* Observed metric line - UPDATED to conditionally show dots */}
+                <Line
+                  yAxisId="left"
+                  dataKey="observed"
+                  type="linear" 
+                  stroke="hsl(120, 70%, 40%)"
+                  strokeWidth={2}
+                  dot={false}
+                  activeDot={isInflowMetric ? { r: 8 } : false}
+                  connectNulls={true}
+                />
+                {/* Forecast metric line - UPDATED to conditionally show dots */}
+                <Line
+                  yAxisId="left"
+                  dataKey="forecast"
+                  type="linear" 
+                  stroke="hsl(340, 50%, 40%)"
+                  strokeWidth={2}
+                  strokeDasharray={isInflowMetric ? "5 5" : "none"}
+                  dot={false}
+                  activeDot={isInflowMetric ? { r: 6, fill: "hsl(340, 50%, 40%)" } : false}
+                  connectNulls={false}
+                />
+              </ComposedChart>
+            )}
+          </ChartContainer>
+        ) : (
+          // Table View
+          <div className="h-[250px] w-full">
+            {isLoading ? (
+              <div className="flex h-full w-full items-center justify-center">
+                <p>Loading chart data...</p>
+              </div>
+            ) : tableData.length === 0 ? (
+              <div className="flex h-full w-full items-center justify-center">
+                <p>No {metricConfig?.name.toLowerCase() || 'metric'} data available for the selected period.</p>
+              </div>
+            ) : (
+              <div className="h-full overflow-hidden rounded-md border">
+                <div 
+                  className="h-full overflow-auto [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb:hover]:bg-muted-foreground/50"
+                  style={{
+                    scrollbarWidth: 'thin',
+                    scrollbarColor: 'hsl(var(--border)) transparent',
+                  }}
+                >
+                  <table className="w-full caption-bottom text-sm">
+                    <thead className="sticky top-0 bg-background z-10 shadow-sm border-b">
+                      <tr className="border-b">
+                        <th className="h-10 px-2 text-left align-middle font-medium whitespace-nowrap w-[140px] font-semibold bg-background">
+                          Date & Time
+                        </th>
+                        <th className="h-10 px-2 text-center align-middle font-medium whitespace-nowrap min-w-[80px] font-semibold bg-background">
+                          Type
+                        </th>
+                        <th className="h-10 px-2 text-right align-middle font-medium whitespace-nowrap min-w-[100px] font-semibold bg-background">
+                          Value ({metricConfig?.unit || ''})
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tableData.map((row, index) => (
+                        <tr key={index} className="border-b transition-colors hover:bg-muted/50">
+                          <td className="p-2 align-middle whitespace-nowrap font-medium">
+                            <div className="flex flex-col">
+                              <span className="text-sm">{row.displayDate}</span>
+                              <span className="text-xs text-muted-foreground">{row.displayTime} UTC</span>
+                            </div>
+                          </td>
+                          <td className={cn(
+                            "p-2 align-middle whitespace-nowrap text-center text-xs",
+                            row.type === 'forecast' && "bg-blue-50 dark:bg-blue-950/20"
+                          )}>
+                            <div className="flex flex-col items-center">
+                              <span className="capitalize font-medium">
+                                {row.type === 'observed' ? 'Observed' : 'Forecast'}
+                              </span>
+                              {row.type === 'forecast' && (
+                                <span className="text-[10px] text-blue-600 dark:text-blue-400">
+                                  F
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className={cn(
+                            "p-2 align-middle whitespace-nowrap text-right",
+                            row.type === 'forecast' && "bg-blue-50 dark:bg-blue-950/20"
+                          )}>
+                            <span className="font-mono font-medium">
+                              {(() => {
+                                const unit = metricConfig?.unit || '';
+                                if (unit === '%' || unit === 'ft') {
+                                  return Number(row.value).toFixed(1);
+                                } else {
+                                  return row.value.toLocaleString();
+                                }
+                              })()}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
         {hoveredErrorBar && <ErrorBarTooltip data={hoveredErrorBar} />}
       </CardContent>
     </Card>

@@ -1768,7 +1768,7 @@ export function InteractiveMap({
             }
           }}
         >
-          <div className="bg-white rounded-t-2xl w-full max-w-[calc(100vw-2rem)] mx-4 mb-4 max-h-[80vh] overflow-hidden shadow-2xl">
+          <div className="bg-white rounded-t-2xl w-full max-w-[calc(100vw-2rem)] mx-4 mb-4 max-h-[80vh] overflow-hidden">
             {/* Modal Header */}
             <div className="flex items-center justify-between p-4 border-b bg-gray-50">
               <h3 className="font-semibold text-gray-900 text-lg">Map Layers</h3>
@@ -1793,7 +1793,7 @@ export function InteractiveMap({
       
       {/* Columbia River System Label Overlay with Full Screen Button */}
       <div 
-        className="absolute top-4 left-4 bg-white/95 rounded-lg px-3 py-2 shadow-lg border"
+        className="absolute top-4 left-4 bg-white/95 rounded-lg px-3 py-2 border"
         style={{ zIndex: 40 }}
       >
         <div className="flex items-center justify-between gap-3">
@@ -1822,7 +1822,7 @@ export function InteractiveMap({
       
       {/* Modern Legend */}
       <div 
-        className="absolute bottom-2 right-2 bg-white/95 backdrop-blur-sm rounded-md shadow-xl border border-2 border-gray-200"
+        className="absolute bottom-2 right-2 bg-white/95 backdrop-blur-sm rounded-md border border-gray-200"
         style={{ zIndex: 40, minWidth: '240px', maxWidth: '280px' }}
       >
         <div className={isLegendVisible ? "p-4" : "p-3"}>
@@ -1855,7 +1855,7 @@ export function InteractiveMap({
   return (
     <div 
       style={{ height, width: '100%' }} 
-      className="rounded-xl border bg-card text-card-foreground shadow-sm overflow-hidden"
+      className="rounded-xl border bg-card text-card-foreground overflow-hidden"
     >
       {isFullScreen ? (
         <div 
@@ -1872,5 +1872,3 @@ export function InteractiveMap({
     </div>
   );
 }
-
-// Remember to set your NEXT_PUBLIC_MAPBOX_TOKEN environment variable! 
