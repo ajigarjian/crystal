@@ -689,10 +689,10 @@ export function InteractiveMap({
                 
                 <div className="grid grid-cols-2 gap-2">
                   {[
-                    { key: '500kV', label: '500kV', height: '3px', color: 'bg-gray-600' },
-                    { key: '230kV', label: '230kV', height: '2px', color: 'bg-gray-600' },
-                    { key: '115kV', label: '115kV', height: '1.5px', color: 'bg-gray-600' },
-                    { key: 'other', label: 'Other', height: '1px', color: 'bg-gray-600' }
+                    { key: '500kV', label: '500kV', height: '3px', color: '#22c55e' },
+                    { key: '230kV', label: '230kV', height: '2px', color: '#22c55e' },
+                    { key: '115kV', label: '115kV', height: '1.5px', color: '#22c55e' },
+                    { key: 'other', label: 'Other', height: '1px', color: '#22c55e' }
                   ].map(voltage => (
                     <label key={voltage.key} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1 rounded transition-colors">
                       <input
