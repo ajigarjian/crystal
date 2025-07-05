@@ -301,6 +301,15 @@ export default function Home() {
                   Privacy <ArrowRight className="h-4 w-4" />
                 </Button>
               </Link>
+              <Link href="/agent">
+                <Button
+                  variant="link"
+                  className="text-white flex items-center gap-1 hover:text-white/80 transition-colors"
+                  style={{ fontFamily: 'var(--font-geist-sans)' }}
+                >
+                  Agent Mode <ArrowRight className="h-5 w-5" />
+                </Button>
+              </Link>
               <Link href="/log">
                 <Button
                   variant="link"
@@ -342,6 +351,9 @@ export default function Home() {
                   <DropdownMenuContent align="start" className="bg-neutral-800 border-neutral-700 text-white">
                     <DropdownMenuItem asChild className="focus:bg-neutral-700 focus:text-white px-4 py-3">
                       <Link href="/about" className="flex items-center gap-2 text-base">About <ArrowRight className="h-5 w-5" /></Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild className="focus:bg-neutral-700 focus:text-white px-4 py-3">
+                      <Link href="/agent" className="flex items-center gap-2 text-base">Agent Mode <ArrowRight className="h-5 w-5" /></Link>
                     </DropdownMenuItem>
                     <DropdownMenuItem asChild className="focus:bg-neutral-700 focus:text-white px-4 py-3">
                       <Link href="/log" className="flex items-center gap-2 text-base">Change Log <ArrowRight className="h-5 w-5" /></Link>

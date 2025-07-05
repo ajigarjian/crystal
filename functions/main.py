@@ -2881,3 +2881,109 @@ def get_bpa_generation_timeseries(request: https_fn.Request) -> https_fn.Respons
             status=500,
             headers={"Content-Type": "application/json"}
         )
+
+@https_fn.on_request(
+    cors=options.CorsOptions(
+        cors_origins=[
+            "https://crystal-2f87e.web.app",
+            "https://askcrystal.info",
+            "https://www.askcrystal.info",
+            "http://localhost:3000",
+            "http://localhost:5173",
+        ],
+        cors_methods=["get", "post", "options"]
+    ),
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=60
+)
+def energy_agent(request: https_fn.Request) -> https_fn.Response:
+    """
+    Energy Agent endpoint using PydanticAI for Mid-C market analysis and infrastructure insights
+    """
+    try:
+        # Handle preflight requests
+        if request.method == "OPTIONS":
+            return https_fn.Response(
+                "",
+                status=200,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+                }
+            )
+        
+        # Extract IP address for rate limiting
+        ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
+        
+        # Check usage limit
+        exceeded, error_message = check_usage_limit(ip_address, 'energy_agent')
+        if exceeded:
+            return https_fn.Response(
+                json.dumps({"error": error_message}),
+                status=429,
+                headers={"Content-Type": "application/json"}
+            )
+        
+        # Parse request data
+        if request.method == "GET":
+            message = request.args.get('message', '')
+            session_id = request.args.get('session_id', '')
+            user_id = request.args.get('user_id', '')
+        else:  # POST
+            request_data = request.get_json() or {}
+            message = request_data.get('message', '')
+            session_id = request_data.get('session_id', '')
+            user_id = request_data.get('user_id', '')
+        
+        # Validate required parameters
+        if not message:
+            return https_fn.Response(
+                json.dumps({"error": "Message parameter is required"}),
+                status=400,
+                headers={"Content-Type": "application/json"}
+            )
+        
+        # Import and run the energy agent
+        from energy_agent import run_energy_agent
+        import asyncio
+        
+        # Run the async agent function
+        try:
+            if hasattr(asyncio, 'run'):
+                result = asyncio.run(run_energy_agent(message, session_id, user_id))
+            else:
+                # Fallback for older Python versions
+                loop = asyncio.get_event_loop()
+                result = loop.run_until_complete(run_energy_agent(message, session_id, user_id))
+        except Exception as agent_error:
+            logger.error(f"Energy agent error: {agent_error}")
+            logger.error(traceback.format_exc())
+            return https_fn.Response(
+                json.dumps({
+                    "error": "Agent processing error",
+                    "success": False,
+                    "response": "I apologize, but I encountered an error while processing your request. Please try again later."
+                }),
+                status=500,
+                headers={"Content-Type": "application/json"}
+            )
+        
+        return https_fn.Response(
+            json.dumps(result, default=str),
+            status=200,
+            headers={"Content-Type": "application/json"}
+        )
+        
+    except Exception as e:
+        logger.error(f"Energy agent endpoint error: {e}")
+        logger.error(traceback.format_exc())
+        return https_fn.Response(
+            json.dumps({
+                "error": "Internal server error",
+                "success": False,
+                "response": "I apologize, but I encountered an error. Please try again later."
+            }),
+            status=500,
+            headers={"Content-Type": "application/json"}
+        )
