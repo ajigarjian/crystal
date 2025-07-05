@@ -6,8 +6,6 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import { MapSkeleton } from "@/components/MapSkeleton";
 import { getPowerInfrastructure, PowerInfrastructureData, getPowerGenerators, GeneratorData, getPowerPlants, PowerPlantsData } from "@/lib/firebase";
 import { Switch } from "@/components/ui/switch";
-import { Table, TableHeader, TableRow, TableHead, TableCell, TableBody } from "@/components/ui/table";
-import { Skeleton } from "@/components/ui/skeleton";
 
 interface PointGeometry {
   type: 'Point';
@@ -45,6 +43,15 @@ interface GenerationClickData {
   technology?: string;
 }
 
+interface SnotelStationInfo {
+  id: number;
+  name: string;
+  triplet: string;
+  latitude: number;
+  longitude: number;
+  elevation: number | null;
+}
+
 interface InteractiveMapProps {
   initialLatitude?: number;
   initialLongitude?: number;
@@ -58,20 +65,11 @@ interface InteractiveMapProps {
   onEmptyMapClick?: () => void;
   selectedMarkerId?: string | number;
   selectedPowerLineId?: number | null;
+
   selectedFlowgate?: string | null;
   snotelStations?: SnotelStationInfo[];
   onSnotelStationClick?: (stationData: SnotelStationInfo) => void;
   selectedSnotelStationId?: number | null;
-  selectedGeneration?: { id: number; type: 'plant' | 'generator' } | null;
-}
-
-interface SnotelStationInfo {
-  id: number;
-  name: string;
-  triplet: string;
-  latitude: number;
-  longitude: number;
-  elevation: number | null;
 }
 
 // Focus on Columbia River basin area - covering the basins you mentioned
@@ -176,10 +174,9 @@ export function InteractiveMap({
   selectedMarkerId,
   selectedPowerLineId,
   selectedFlowgate,
-  snotelStations = [],
+  snotelStations,
   onSnotelStationClick,
   selectedSnotelStationId,
-  selectedGeneration,
 }: InteractiveMapProps) {
   const [viewport, setViewport] = React.useState({
     latitude: initialLatitude,
@@ -193,29 +190,6 @@ export function InteractiveMap({
   const [clickedLineId, setClickedLineId] = React.useState<number | null>(null);
   const [generatorData, setGeneratorData] = React.useState<GeneratorData | null>(null);
   const [plantData, setPlantData] = React.useState<PowerPlantsData | null>(null);
-  const [isLegendVisible, setIsLegendVisible] = React.useState(false);
-  const [isMobileModalOpen, setIsMobileModalOpen] = React.useState(false);
-  const [isMobile, setIsMobile] = React.useState(false);
-  
-  const selectedGenId = selectedGeneration?.id ?? -1;
-  const selectedGenType = selectedGeneration?.type ?? '';
-
-  const snotelGeoJsonData = React.useMemo(() => {
-    if (!snotelStations || snotelStations.length === 0) {
-      return null;
-    }
-    return {
-      type: 'FeatureCollection' as const,
-      features: snotelStations.map(station => ({
-        type: 'Feature' as const,
-        geometry: {
-          type: 'Point' as const,
-          coordinates: [station.longitude, station.latitude],
-        },
-        properties: station,
-      })),
-    };
-  }, [snotelStations]);
   
   // Modern organized filter state
   const [filters, setFilters] = React.useState({
@@ -254,7 +228,6 @@ export function InteractiveMap({
   const showDams = filters.infrastructure.dams;
   const showPowerLines = filters.infrastructure.transmission.enabled;
   const showSubstations = filters.infrastructure.substations;
-  const showSnotelStations = filters.infrastructure.snotelStations;
   const showPlants = filters.generation.plants;
   const showGenerators = filters.generation.generators;
   const show500kV = filters.infrastructure.transmission.voltages['500kV'];
@@ -270,68 +243,27 @@ export function InteractiveMap({
   const showBiomass = filters.generation.types.biomass;
   const showGeothermal = filters.generation.types.geothermal;
   const showOtherTypes = filters.generation.types.other;
-
-  // Mobile detection
-  React.useEffect(() => {
-    const checkMobile = () => {
-      setIsMobile(window.innerWidth < 768); // Tailwind md breakpoint
-    };
-    
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
-  }, []);
+  const showSnotelStations = filters.infrastructure.snotelStations;
 
   // Helper function to update filters with proper typing
   const updateFilter = React.useCallback((path: string[], value: boolean | object) => {
     setFilters(prev => {
       const newFilters = { ...prev };
-      let current = newFilters as Record<string, any>;
+      let current = newFilters as Record<string, unknown>;
       for (let i = 0; i < path.length - 1; i++) {
-        const key = path[i];
-        const nextNode = current[key];
-        if (typeof nextNode === 'object' && nextNode !== null) {
-          current[key] = { ...nextNode };
-        } else {
-          current[key] = {};
-        }
-        current = current[key];
+        current[path[i]] = { ...current[path[i]] };
+        current = current[path[i]] as Record<string, unknown>;
       }
       current[path[path.length - 1]] = value;
       return newFilters;
     });
   }, []);
 
-  // Handle legend/modal toggle
-  const handleLegendToggle = React.useCallback(() => {
-    if (isMobile && !isFullScreen) {
-      setIsMobileModalOpen(true);
-    } else {
-      setIsLegendVisible(!isLegendVisible);
-    }
-  }, [isMobile, isFullScreen, isLegendVisible]);
-
-  const queryableLayers = React.useMemo(() => {
-    const layers = ['power-lines', 'power-lines-clickable'];
-    if (showPlants && plantData) layers.push('plant-points');
-    if (showGenerators && generatorData) layers.push('generator-points');
-    if (showSnotelStations && snotelGeoJsonData && viewport.zoom >= 5.8) {
-        layers.push('snotel-points');
-    }
-    return layers;
-  }, [showPlants, showGenerators, showSnotelStations, viewport.zoom, plantData, generatorData, snotelGeoJsonData]);
-
   // Add hover state for dam markers
   const [hoveredMarker, setHoveredMarker] = React.useState<MapMarker | null>(null);
   
   // Add hover state for generation markers
-  const [hoveredGeneration, setHoveredGeneration] = React.useState<{id: number, name: string, type: string, operator?: string, longitude: number, latitude: number} | null>(null);
-
-  // Add hover state for SNOTEL stations
-  const [hoveredSnotelStation, setHoveredSnotelStation] = React.useState<SnotelStationInfo | null>(null);
-
-  // Add hover state for power lines
-  const [hoveredPowerLine, setHoveredPowerLine] = React.useState<{ name: string; voltage: string; longitude: number; latitude: number; flowgate?: string | null; capacityFactor?: number; } | null>(null);
+  const [hoveredGeneration, setHoveredGeneration] = React.useState<{id: number, name: string, type: string, longitude: number, latitude: number} | null>(null);
 
   // Add debouncing for hover events to prevent flickering
   const hoverTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
@@ -387,14 +319,6 @@ export function InteractiveMap({
     setClickedLineId(null);
     if (onMarkerClick) {
       onMarkerClick(marker);
-    }
-  };
-
-  const handleSnotelStationClick = (station: SnotelStationInfo) => {
-    setSelectedFlowgateGroup(null);
-    setClickedLineId(null);
-    if (onSnotelStationClick) {
-      onSnotelStationClick(station);
     }
   };
 
@@ -579,9 +503,9 @@ export function InteractiveMap({
     }
     
     const filteredFeatures = allPlantData.features.filter(feature => {
-      const plantSource = ((feature.properties as any).plant_source || '').toLowerCase();
-      const plantMethod = ((feature.properties as any).plant_method || '').toLowerCase();
-      const type = ((feature.properties as any).type || '').toLowerCase();
+      const plantSource = (feature.properties.plant_source || '').toLowerCase();
+      const plantMethod = (feature.properties.plant_method || '').toLowerCase();
+      const type = (feature.properties.type || '').toLowerCase();
       
       return enabledTypes.some(enabledType => 
         plantSource.includes(enabledType.toLowerCase()) ||
@@ -618,193 +542,30 @@ export function InteractiveMap({
     return () => clearInterval(interval);
   }, []);
 
-  // Legend content component - shared between modal and regular legend
-  const LegendContent = () => (
-    <div className="space-y-4 text-xs">
-      {/* Selected Flowgate Info */}
-      {selectedFlowgateGroup && (
-        <div className="bg-cyan-50 border border-cyan-200 rounded-lg p-3 mb-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="font-medium text-cyan-800 text-xs mb-1">Active Selection</div>
-              <div className="text-cyan-700 text-xs font-mono truncate">{selectedFlowgateGroup}</div>
-            </div>
-            <button 
-              onClick={() => {
-                setSelectedFlowgateGroup(null);
-                setClickedLineId(null);
-              }}
-              className="text-cyan-600 hover:text-cyan-800 p-1 rounded-full hover:bg-cyan-100 transition-colors"
-              title="Clear selection"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-        </div>
-      )}
-      
-      {/* Infrastructure Section */}
-      <div>
-        <div className="flex items-center justify-between mb-2">
-          <h4 className="font-medium text-gray-800 text-xs uppercase tracking-wider">Infrastructure</h4>
-        </div>
-        <div className="space-y-2 pl-1">
-          {/* Dams */}
-          <label className="flex items-center gap-3 cursor-pointer hover:bg-gray-50 p-1.5 rounded-md transition-colors">
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={showDams}
-                onChange={(e) => updateFilter(['infrastructure', 'dams'], e.target.checked)}
-                className="w-4 h-4 text-red-600 border-gray-300 rounded focus:ring-red-500"
-              />
-              <svg className="w-4 h-4 fill-blue-600" viewBox="0 0 24 24">
-                <path d="M2 14h20l-2 6H4l-2-6zm0-2h20V8H2v4zm4-8h12v4H6V4z"/>
-              </svg>
-            </div>
-            <span className="text-gray-700 font-medium">Dams</span>
-          </label>
-          
-          {/* Transmission */}
-          <div className="space-y-2">
-            <label className="flex items-center gap-3 cursor-pointer hover:bg-gray-50 p-1.5 rounded-md transition-colors">
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={showPowerLines}
-                  onChange={(e) => updateFilter(['infrastructure', 'transmission', 'enabled'], e.target.checked)}
-                  className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                />
-                <div className="w-4 h-1 bg-gray-600 rounded-full"></div>
-              </div>
-              <span className="text-gray-700 font-medium">Transmission Lines</span>
-            </label>
-            
-            {showPowerLines && (
-              <div className="ml-6 space-y-2 border-l-2 border-gray-100 pl-3">
-                <div className="flex items-center gap-2 text-cyan-600 mb-1">
-                  <div className="w-3 h-0.5 bg-cyan-500 rounded"></div>
-                  <span className="text-xs">Selected lines highlighted</span>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-2">
-                  {[
-                    { key: '500kV', label: '500kV', height: '3px', color: 'bg-green-500' },
-                    { key: '230kV', label: '230kV', height: '2px', color: 'bg-green-500' },
-                    { key: '115kV', label: '115kV', height: '1.5px', color: 'bg-green-500' },
-                    { key: 'other', label: 'Other', height: '1px', color: 'bg-green-500' }
-                  ].map(voltage => (
-                    <label key={voltage.key} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1 rounded transition-colors">
-                      <input
-                        type="checkbox"
-                        checked={filters.infrastructure.transmission.voltages[voltage.key as keyof typeof filters.infrastructure.transmission.voltages]}
-                        onChange={(e) => updateFilter(['infrastructure', 'transmission', 'voltages', voltage.key], e.target.checked)}
-                        className="w-3 h-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                      />
-                      <div className={`w-3 ${voltage.color} rounded`} style={{ height: voltage.height }}></div>
-                      <span className="text-xs text-gray-600">{voltage.label}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-          
-          {/* Substations */}
-          <label className="flex items-center gap-3 cursor-pointer hover:bg-gray-50 p-1.5 rounded-md transition-colors">
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={showSubstations}
-                onChange={(e) => updateFilter(['infrastructure', 'substations'], e.target.checked)}
-                className="w-4 h-4 text-gray-600 border-gray-300 rounded focus:ring-gray-500"
-              />
-              <div className="w-3 h-3 rounded-full bg-gray-500"></div>
-            </div>
-            <span className="text-gray-700 font-medium">Substations</span>
-          </label>
+  const snotelGeoJsonData = React.useMemo(() => {
+    if (!snotelStations || snotelStations.length === 0) {
+      return null;
+    }
+    return {
+      type: 'FeatureCollection' as const,
+      features: snotelStations.map(station => ({
+        type: 'Feature' as const,
+        geometry: {
+          type: 'Point' as const,
+          coordinates: [station.longitude, station.latitude],
+        },
+        properties: station,
+      })),
+    };
+  }, [snotelStations]);
 
-          {/* SNOTEL Stations */}
-          <label className="flex items-center gap-3 cursor-pointer hover:bg-gray-50 p-1.5 rounded-md transition-colors">
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={showSnotelStations}
-                onChange={(e) => updateFilter(['infrastructure', 'snotelStations'], e.target.checked)}
-                className="w-4 h-4 text-sky-600 border-gray-300 rounded focus:ring-sky-500"
-              />
-              <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <circle cx="8" cy="8" r="5" fill="#0ea5e9" stroke="#FFFFFF" strokeWidth="2"/>
-              </svg>
-            </div>
-            <span className="text-gray-700 font-medium">SNOTEL Stations</span>
-          </label>
-        </div>
-      </div>
-
-      {/* Generation Section */}
-      <div className="border-t border-gray-200 pt-4">
-        <div className="flex items-center justify-between mb-2">
-          <h4 className="font-medium text-gray-800 text-xs uppercase tracking-wider">Generation</h4>
-        </div>
-        <div className="space-y-2 pl-1">
-          {/* Plants & Generators */}
-          <div className="grid grid-cols-2 gap-x-4">
-            <div className="flex items-center justify-between">
-              <label htmlFor="show-plants" className="text-xs text-gray-700 font-medium cursor-pointer">Plants</label>
-              <Switch
-                id="show-plants"
-                checked={showPlants}
-                onCheckedChange={(checked) => updateFilter(['generation', 'plants'], checked)}
-              />
-            </div>
-            <div className="flex items-center justify-between">
-              <label htmlFor="show-units" className="text-xs text-gray-700 font-medium cursor-pointer">Units</label>
-              <Switch
-                id="show-units"
-                checked={showGenerators}
-                onCheckedChange={(checked) => updateFilter(['generation', 'generators'], checked)}
-              />
-            </div>
-          </div>
-          
-          {/* Generation Types - show when either plants or generators are enabled */}
-          {(showPlants || showGenerators) && (
-            <div className="mt-3 border-t border-gray-100 pt-3">
-              <div className="text-xs text-gray-500 mb-2 font-medium">Filter by Type:</div>
-              <div className="grid grid-cols-2 gap-1.5">
-                {[
-                  { key: 'nuclear', label: 'Nuclear', color: 'bg-orange-500' },
-                  { key: 'solar', label: 'Solar', color: 'bg-yellow-500' },
-                  { key: 'wind', label: 'Wind', color: 'bg-green-400' },
-                  { key: 'hydro', label: 'Hydro', color: 'bg-blue-500' },
-                  { key: 'gas', label: 'Gas', color: 'bg-pink-500' },
-                  { key: 'coal', label: 'Coal', color: 'bg-amber-800' },
-                  { key: 'biomass', label: 'Biomass', color: 'bg-green-600' },
-                  { key: 'geothermal', label: 'Geo', color: 'bg-red-600' },
-                  { key: 'other', label: 'Other', color: 'bg-purple-500', span: 'col-span-2' }
-                ].map(type => (
-                  <label key={type.key} className={`flex items-center gap-1.5 cursor-pointer hover:bg-gray-50 p-1 rounded transition-colors ${type.span || ''}`}>
-                    <input
-                      type="checkbox"
-                      checked={filters.generation.types[type.key as keyof typeof filters.generation.types]}
-                      onChange={(e) => updateFilter(['generation', 'types', type.key], e.target.checked)}
-                      className="w-3 h-3 border-gray-300 rounded focus:ring-2"
-                      style={{ accentColor: type.color.replace('bg-', '#') }}
-                    />
-                    <div className={`w-2.5 h-2.5 rounded-full ${type.color}`}></div>
-                    <span className="text-xs text-gray-600">{type.label}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
+  const handleSnotelStationClick = (station: SnotelStationInfo) => {
+    setSelectedFlowgateGroup(null);
+    setClickedLineId(null);
+    if (onSnotelStationClick) {
+      onSnotelStationClick(station);
+    }
+  };
 
   if (isLoading) {
     return <MapSkeleton style={{ height, width: '100%' }} />;
@@ -830,7 +591,7 @@ export function InteractiveMap({
               return; // Exit early
             }
 
-            // Then: Generation (Plant or Generator)
+            // Check if we clicked on a generation marker first
             const plantFeature = features.find(f => f.source === 'power-plants' && f.layer?.id === 'plant-points');
             const generatorFeature = features.find(f => f.source === 'power-generators' && f.layer?.id === 'generator-points');
             
@@ -839,11 +600,11 @@ export function InteractiveMap({
                 id: plantFeature.properties.id,
                 name: plantFeature.properties.name || 'Unnamed Plant',
                 type: 'plant',
-                fuelType: (plantFeature.properties as any).plant_source || (plantFeature.properties as any).plant_method || (plantFeature.properties as any).type,
-                capacity: (plantFeature.properties as any).capacity_mw,
-                operator: (plantFeature.properties as any).operator,
-                status: (plantFeature.properties as any).status,
-                commissioningDate: (plantFeature.properties as any).commissioning_date
+                fuelType: plantFeature.properties.plant_source || plantFeature.properties.plant_method || plantFeature.properties.type,
+                capacity: plantFeature.properties.capacity_mw,
+                operator: plantFeature.properties.operator,
+                status: plantFeature.properties.status,
+                commissioningDate: plantFeature.properties.commissioning_date
               };
               
               if (onGenerationClick) {
@@ -855,15 +616,15 @@ export function InteractiveMap({
             if (generatorFeature && generatorFeature.properties) {
               const generatorData: GenerationClickData = {
                 id: generatorFeature.properties.id,
-                name: generatorFeature.properties.name || (generatorFeature.properties as any).plant_name || 'Unnamed Generator',
+                name: generatorFeature.properties.name || generatorFeature.properties.plant_name || 'Unnamed Generator',
                 type: 'generator',
-                fuelType: (generatorFeature.properties as any).fuel_type,
-                capacity: (generatorFeature.properties as any).capacity_mw,
-                operator: (generatorFeature.properties as any).operator,
-                status: (generatorFeature.properties as any).status,
-                commissioningDate: (generatorFeature.properties as any).commissioning_date,
-                plantName: (generatorFeature.properties as any).plant_name,
-                technology: (generatorFeature.properties as any).technology
+                fuelType: generatorFeature.properties.fuel_type,
+                capacity: generatorFeature.properties.capacity_mw,
+                operator: generatorFeature.properties.operator,
+                status: generatorFeature.properties.status,
+                commissioningDate: generatorFeature.properties.commissioning_date,
+                plantName: generatorFeature.properties.plant_name,
+                technology: generatorFeature.properties.technology
               };
               
               if (onGenerationClick) {
@@ -871,8 +632,10 @@ export function InteractiveMap({
               }
               return;
             }
-
-            // Finally: Power Line
+          }
+          
+          // Check if we clicked on a power line
+          if (features && features.length > 0) {
             const powerLineFeature = features.find(f => f.source === 'power-infrastructure' && (f.layer?.id === 'power-lines' || f.layer?.id === 'power-lines-clickable'));
             if (powerLineFeature && powerLineFeature.properties) {
               const lineId = powerLineFeature.properties.gid;
@@ -950,88 +713,79 @@ export function InteractiveMap({
           }
         }}
         onMouseEnter={(event) => {
-          const map = event.target;
-          const existingQueryableLayers = queryableLayers.filter(layerId => map.getLayer(layerId));
           // Check if we're hovering over a power line or generation marker
-          const features = map.queryRenderedFeatures(event.point, {
-            layers: existingQueryableLayers
+          const features = event.target.queryRenderedFeatures(event.point, {
+            layers: ['power-lines', 'power-lines-clickable', 'plant-points', 'generator-points']
           });
           
           if (features.length > 0) {
-            map.getCanvas().style.cursor = 'pointer';
+            event.target.getCanvas().style.cursor = 'pointer';
+            
+            // Check for generation markers to show tooltip
+            const plantFeature = features.find(f => f.layer?.id === 'plant-points');
+            const generatorFeature = features.find(f => f.layer?.id === 'generator-points');
+            
+            if (plantFeature && plantFeature.properties && plantFeature.geometry && plantFeature.geometry.type === 'Point') {
+              const coords = (plantFeature.geometry as PointGeometry).coordinates;
+              setHoveredGeneration({
+                id: plantFeature.properties.id,
+                name: plantFeature.properties.name || 'Unnamed Plant',
+                type: plantFeature.properties.plant_source || plantFeature.properties.plant_method || 'Power Plant',
+                longitude: coords[0],
+                latitude: coords[1]
+              });
+            } else if (generatorFeature && generatorFeature.properties && generatorFeature.geometry && generatorFeature.geometry.type === 'Point') {
+              const coords = (generatorFeature.geometry as PointGeometry).coordinates;
+              setHoveredGeneration({
+                id: generatorFeature.properties.id,
+                name: generatorFeature.properties.name || generatorFeature.properties.plant_name || 'Unnamed Generator',
+                type: generatorFeature.properties.fuel_type || 'Generator',
+                longitude: coords[0],
+                latitude: coords[1]
+              });
+            }
           }
         }}
         onMouseLeave={(event) => {
           // Reset cursor and clear generation hover
           event.target.getCanvas().style.cursor = '';
           setHoveredGeneration(null);
-          setHoveredSnotelStation(null);
-          setHoveredPowerLine(null);
         }}
         onMouseMove={(event) => {
-          const map = event.target;
-          const existingQueryableLayers = queryableLayers.filter(layerId => map.getLayer(layerId));
           // Update cursor based on what we're hovering over
-          const features = map.queryRenderedFeatures(event.point, {
-            layers: existingQueryableLayers
+          const features = event.target.queryRenderedFeatures(event.point, {
+            layers: ['power-lines', 'power-lines-clickable', 'plant-points', 'generator-points']
           });
           
-          map.getCanvas().style.cursor = features.length > 0 ? 'pointer' : '';
-
+          event.target.getCanvas().style.cursor = features.length > 0 ? 'pointer' : '';
+          
+          // Update generation hover state
           const plantFeature = features.find(f => f.layer?.id === 'plant-points');
           const generatorFeature = features.find(f => f.layer?.id === 'generator-points');
-          const snotelFeature = features.find(f => f.layer?.id === 'snotel-points');
-          const powerLineFeature = features.find(f => f.layer?.id === 'power-lines' || f.layer?.id === 'power-lines-clickable');
-
-          if (plantFeature?.properties) {
+          
+          if (plantFeature && plantFeature.properties && plantFeature.geometry && plantFeature.geometry.type === 'Point') {
+            const coords = (plantFeature.geometry as PointGeometry).coordinates;
             setHoveredGeneration({
               id: plantFeature.properties.id,
               name: plantFeature.properties.name || 'Unnamed Plant',
-              type: (plantFeature.properties as any).plant_source || (plantFeature.properties as any).plant_method || 'Power Plant',
-              operator: (plantFeature.properties as any).operator,
-              longitude: event.lngLat.lng,
-              latitude: event.lngLat.lat,
+              type: plantFeature.properties.plant_source || plantFeature.properties.plant_method || 'Power Plant',
+              longitude: coords[0],
+              latitude: coords[1]
             });
-            setHoveredSnotelStation(null);
-            setHoveredPowerLine(null);
-          } else if (generatorFeature?.properties) {
+          } else if (generatorFeature && generatorFeature.properties && generatorFeature.geometry && generatorFeature.geometry.type === 'Point') {
+            const coords = (generatorFeature.geometry as PointGeometry).coordinates;
             setHoveredGeneration({
               id: generatorFeature.properties.id,
-              name: generatorFeature.properties.name || (generatorFeature.properties as any).plant_name || 'Unnamed Generator',
-              type: (generatorFeature.properties as any).fuel_type || 'Generator',
-              operator: (generatorFeature.properties as any).operator,
-              longitude: event.lngLat.lng,
-              latitude: event.lngLat.lat,
-            });
-            setHoveredSnotelStation(null);
-            setHoveredPowerLine(null);
-          } else if (snotelFeature?.properties && snotelFeature.geometry.type === 'Point') {
-            const coords = (snotelFeature.geometry as PointGeometry).coordinates;
-            setHoveredSnotelStation({
-              ...(snotelFeature.properties as SnotelStationInfo),
+              name: generatorFeature.properties.name || generatorFeature.properties.plant_name || 'Unnamed Generator',
+              type: generatorFeature.properties.fuel_type || 'Generator',
               longitude: coords[0],
-              latitude: coords[1],
+              latitude: coords[1]
             });
-            setHoveredGeneration(null);
-            setHoveredPowerLine(null);
-          } else if (powerLineFeature?.properties) {
-            setHoveredPowerLine({
-              name: powerLineFeature.properties.name,
-              voltage: powerLineFeature.properties.voltage_formatted,
-              longitude: event.lngLat.lng,
-              latitude: event.lngLat.lat,
-              flowgate: powerLineFeature.properties.flowgate,
-              capacityFactor: powerLineFeature.properties.capacity_factor,
-            });
-            setHoveredGeneration(null);
-            setHoveredSnotelStation(null);
           } else {
             setHoveredGeneration(null);
-            setHoveredSnotelStation(null);
-            setHoveredPowerLine(null);
           }
         }}
-        interactiveLayerIds={queryableLayers}
+        interactiveLayerIds={['power-lines', 'power-lines-clickable', 'plant-points', 'generator-points']}
         minZoom={4}
         maxZoom={22}
         scrollZoom={true}
@@ -1085,532 +839,456 @@ export function InteractiveMap({
         </Source>
         
         {/* Power Infrastructure Layers */}
-        <Source
-          id="power-infrastructure"
-          type="geojson"
-          data={powerInfrastructureData || { type: 'FeatureCollection', features: [] }}
-        >
-          {/* Invisible wider power lines for easier clicking */}
-          <Layer
-            id="power-lines-clickable"
-            type="line"
-            filter={["==", ["get", "geometry_type"], "ST_LineString"]}
-            layout={{
-              visibility: showPowerLines ? 'visible' : 'none',
-              "line-cap": "round",
-              "line-join": "round"
-            }}
-            paint={{
-              "line-color": "transparent",
-              "line-width": 8, // Much wider invisible line for easier clicking
-              "line-opacity": 0
-            }}
-          />
-          
-          {/* Visible power lines (transmission lines) */}
-          <Layer
-            id="power-lines"
-            type="line"
-            filter={["==", ["get", "geometry_type"], "ST_LineString"]}
-            layout={{
-              visibility: showPowerLines ? 'visible' : 'none',
-              "line-cap": "round",
-              "line-join": "round"
-            }}
-            paint={{
-              "line-color": [
-                "case",
-                // If this line is part of selected flowgate group, highlight in cyan
-                [
-                  "any",
-                  ["==", ["get", "flowgate"], selectedFlowgateGroup || ""],
-                  ["==", ["get", "gid"], clickedLineId || -1]
-                ],
-                "#00bcd4", // Cyan for selected flowgate or clicked line
-                // Color flowgate lines based on capacity factor (more lenient scale)
-                ["==", ["get", "is_flowgate_line"], true],
-                [
-                  "case",
-                  // Green for capacity factor >= 1.0
-                  [">=", ["get", "capacity_factor"], 1.0],
-                  "#22c55e", // Green
-                  // Yellow for capacity factor 0.8 to < 1.0
-                  [">=", ["get", "capacity_factor"], 0.8],
-                  "#eab308", // Yellow
-                  // Orange for capacity factor 0.5 to < 0.8
-                  [">=", ["get", "capacity_factor"], 0.5],
-                  "#f97316", // Orange
-                  // Red for capacity factor < 0.5
-                  "#ef4444" // Red
-                ],
-                // All other non-flowgate lines are green
-                "#22c55e"
-              ],
-              "line-opacity": [
-                "case",
-                // Hide lines based on voltage visibility settings first
-                [
-                  "all",
-                  ["in", "500", ["to-string", ["get", "voltage"]]],
-                  !show500kV
-                ],
-                0, // Hide 500kV lines if disabled
-                [
-                  "all", 
-                  ["in", "230", ["to-string", ["get", "voltage"]]],
-                  !show230kV
-                ],
-                0, // Hide 230kV lines if disabled
-                [
-                  "all",
-                  ["in", "115", ["to-string", ["get", "voltage"]]],
-                  !show115kV
-                ],
-                0, // Hide 115kV lines if disabled
-                [
-                  "all",
-                  ["!", ["in", "500", ["to-string", ["get", "voltage"]]]],
-                  ["!", ["in", "230", ["to-string", ["get", "voltage"]]]],
-                  ["!", ["in", "115", ["to-string", ["get", "voltage"]]]],
-                  !showOtherVoltages
-                ],
-                0, // Hide other voltage lines if disabled
-                // For visible flowgate lines, use pulsing opacity
-                ["==", ["get", "is_flowgate_line"], true],
-                pulseOpacity, // Animated opacity value
-                // Default opacity for non-flowgate lines
-                0.6
-              ],
-              "line-width": [
-                "case",
-                // If this line is part of selected flowgate group, make it extra thick
-                [
-                  "any",
-                  ["==", ["get", "flowgate"], selectedFlowgateGroup || ""],
-                  ["==", ["get", "gid"], clickedLineId || -1]
-                ],
-                8, // Selected lines get extra thickness
-                
-                // Base width on voltage level - thicker = higher voltage
-                ["in", "500", ["to-string", ["get", "voltage"]]],
-                4, // 500kV lines - thickest (major transmission backbone)
-                ["in", "230", ["to-string", ["get", "voltage"]]],
-                2.5, // 230kV lines - medium-thick (regional transmission)
-                ["in", "115", ["to-string", ["get", "voltage"]]],
-                1.5, // 115kV lines - medium (local transmission)
-                
-                // Default for other/unknown voltages
-                1 // Thinnest for other voltages
-              ]
-            }}
-          />
+        {powerInfrastructureData && (
+          <Source
+            id="power-infrastructure"
+            type="geojson"
+            data={powerInfrastructureData}
+          >
+            {/* Invisible wider power lines for easier clicking */}
+            {showPowerLines && (
+              <Layer
+                id="power-lines-clickable"
+                type="line"
+                filter={["==", ["get", "geometry_type"], "ST_LineString"]}
+                paint={{
+                  "line-color": "transparent",
+                  "line-width": 8, // Much wider invisible line for easier clicking
+                  "line-opacity": 0
+                }}
+                layout={{
+                  "line-cap": "round",
+                  "line-join": "round"
+                }}
+              />
+            )}
+            
+            {/* Visible power lines (transmission lines) */}
+            {showPowerLines && (
+              <Layer
+                id="power-lines"
+                type="line"
+                filter={["==", ["get", "geometry_type"], "ST_LineString"]}
+                paint={{
+                  "line-color": [
+                    "case",
+                    // If this line is part of selected flowgate group, highlight in cyan
+                    [
+                      "any",
+                      ["==", ["get", "flowgate"], selectedFlowgateGroup || ""],
+                      ["==", ["get", "gid"], clickedLineId || -1]
+                    ],
+                    "#00bcd4", // Cyan for selected flowgate or clicked line
+                    // Color flowgate lines based on capacity factor (more lenient scale)
+                    ["==", ["get", "is_flowgate_line"], true],
+                    [
+                      "case",
+                      // Green for capacity factor < 0.7
+                      ["<", ["get", "capacity_factor"], 0.7],
+                      "#22c55e", // Green
+                      // Yellow for capacity factor 0.7-1.0
+                      ["<", ["get", "capacity_factor"], 1.0],
+                      "#eab308", // Yellow
+                      // Orange for capacity factor 1.0-1.3
+                      ["<", ["get", "capacity_factor"], 1.3],
+                      "#f97316", // Orange
+                      // Red for capacity factor >= 1.3
+                      "#ef4444" // Red
+                    ],
+                    // All other non-flowgate lines are neutral gray
+                    "#708090"
+                  ],
+                  "line-opacity": [
+                    "case",
+                    // Hide lines based on voltage visibility settings first
+                    [
+                      "all",
+                      ["in", "500", ["to-string", ["get", "voltage"]]],
+                      !show500kV
+                    ],
+                    0, // Hide 500kV lines if disabled
+                    [
+                      "all", 
+                      ["in", "230", ["to-string", ["get", "voltage"]]],
+                      !show230kV
+                    ],
+                    0, // Hide 230kV lines if disabled
+                    [
+                      "all",
+                      ["in", "115", ["to-string", ["get", "voltage"]]],
+                      !show115kV
+                    ],
+                    0, // Hide 115kV lines if disabled
+                    [
+                      "all",
+                      ["!", ["in", "500", ["to-string", ["get", "voltage"]]]],
+                      ["!", ["in", "230", ["to-string", ["get", "voltage"]]]],
+                      ["!", ["in", "115", ["to-string", ["get", "voltage"]]]],
+                      !showOtherVoltages
+                    ],
+                    0, // Hide other voltage lines if disabled
+                    // For visible flowgate lines, use pulsing opacity
+                    ["==", ["get", "is_flowgate_line"], true],
+                    pulseOpacity, // Animated opacity value
+                    // Default opacity for non-flowgate lines
+                    0.8
+                  ],
+                  "line-width": [
+                    "case",
+                    // If this line is part of selected flowgate group, make it extra thick
+                    [
+                      "any",
+                      ["==", ["get", "flowgate"], selectedFlowgateGroup || ""],
+                      ["==", ["get", "gid"], clickedLineId || -1]
+                    ],
+                    8, // Selected lines get extra thickness
+                    
+                    // Base width on voltage level - thicker = higher voltage
+                    ["in", "500", ["to-string", ["get", "voltage"]]],
+                    4, // 500kV lines - thickest (major transmission backbone)
+                    ["in", "230", ["to-string", ["get", "voltage"]]],
+                    2.5, // 230kV lines - medium-thick (regional transmission)
+                    ["in", "115", ["to-string", ["get", "voltage"]]],
+                    1.5, // 115kV lines - medium (local transmission)
+                    
+                    // Default for other/unknown voltages
+                    1 // Thinnest for other voltages
+                  ]
+                }}
+                layout={{
+                  "line-cap": "round",
+                  "line-join": "round"
+                }}
+              />
+            )}
 
-          {/* Transmission Line Labels - Show at zoom 6+ */}
-          <Layer
-            id="power-line-labels"
-            type="symbol"
-            filter={["==", ["get", "geometry_type"], "ST_LineString"]}
-            minzoom={6}
-            layout={{
-              visibility: showPowerLines ? 'visible' : 'none',
-              "text-field": [
-                "case",
-                // If line has both name and voltage, combine them
-                [
-                  "all",
-                  ["!=", ["get", "name"], null],
-                  ["!=", ["get", "name"], ""],
-                  ["!=", ["get", "voltage_formatted"], null],
-                  ["!=", ["get", "voltage_formatted"], ""]
-                ],
-                [
-                  "concat",
-                  ["get", "name"],
-                  " - ",
-                  ["get", "voltage_formatted"]
-                ],
-                // If line has name but no voltage, use name only
-                [
-                  "all",
-                  ["!=", ["get", "name"], null],
-                  ["!=", ["get", "name"], ""]
-                ],
-                ["get", "name"],
-                // If no name but has voltage, show formatted voltage
-                [
-                  "all",
-                  ["!=", ["get", "voltage_formatted"], null],
-                  ["!=", ["get", "voltage_formatted"], ""]
-                ],
-                ["get", "voltage_formatted"],
-                // If no name or voltage but has operator, show operator
-                ["!=", ["get", "operator"], null],
-                ["get", "operator"],
-                // Default fallback
-                "Transmission Line"
-              ],
-              "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
-              "text-size": [
-                "interpolate",
-                ["linear"],
-                ["zoom"],
-                8, 12,   // At zoom 8, text size 12 (increased from 9)
-                10, 14,  // At zoom 10, text size 14 (increased from 11)
-                12, 16,  // At zoom 12, text size 16 (increased from 12)
-                16, 18   // At zoom 16, text size 18 (increased from 14)
-              ],
-              "symbol-placement": "line",
-              "text-rotation-alignment": "map",
-              "text-pitch-alignment": "viewport",
-              "text-max-angle": 30,
-              "text-padding": 5,
-              "text-allow-overlap": false,
-              "text-ignore-placement": false
-            }}
-            paint={{
-              "text-color": [
-                "case",
-                // If this line is selected/highlighted, use cyan
-                [
-                  "any",
-                  ["==", ["get", "flowgate"], selectedFlowgateGroup || ""],
-                  ["==", ["get", "gid"], clickedLineId || -1]
-                ],
-                "#00bcd4",
-                // Otherwise use dark color for contrast
-                "#333333"
-              ],
-              "text-halo-color": "#ffffff",
-              "text-halo-width": 2,
-              "text-opacity": [
-                "case",
-                // Hide labels based on voltage visibility settings
-                [
-                  "all",
-                  ["in", "500", ["to-string", ["get", "voltage"]]],
-                  !show500kV
-                ],
-                0, // Hide 500kV labels if disabled
-                [
-                  "all", 
-                  ["in", "230", ["to-string", ["get", "voltage"]]],
-                  !show230kV
-                ],
-                0, // Hide 230kV labels if disabled
-                [
-                  "all",
-                  ["in", "115", ["to-string", ["get", "voltage"]]],
-                  !show115kV
-                ],
-                0, // Hide 115kV labels if disabled
-                [
-                  "all",
-                  ["!", ["in", "500", ["to-string", ["get", "voltage"]]]],
-                  ["!", ["in", "230", ["to-string", ["get", "voltage"]]]],
-                  ["!", ["in", "115", ["to-string", ["get", "voltage"]]]],
-                  !showOtherVoltages
-                ],
-                0, // Hide other voltage labels if disabled
-                0.9 // Default opacity
-              ]
-            }}
-          />
+            {/* Transmission Line Labels - Show at zoom 6+ */}
+            {showPowerLines && (
+              <Layer
+                id="power-line-labels"
+                type="symbol"
+                filter={["==", ["get", "geometry_type"], "ST_LineString"]}
+                minzoom={6}
+                layout={{
+                  "text-field": [
+                    "case",
+                    // If line has both name and voltage, combine them
+                    [
+                      "all",
+                      ["!=", ["get", "name"], null],
+                      ["!=", ["get", "name"], ""],
+                      ["!=", ["get", "voltage_formatted"], null],
+                      ["!=", ["get", "voltage_formatted"], ""]
+                    ],
+                    [
+                      "concat",
+                      ["get", "name"],
+                      " - ",
+                      ["get", "voltage_formatted"]
+                    ],
+                    // If line has name but no voltage, use name only
+                    [
+                      "all",
+                      ["!=", ["get", "name"], null],
+                      ["!=", ["get", "name"], ""]
+                    ],
+                    ["get", "name"],
+                    // If no name but has voltage, show formatted voltage
+                    [
+                      "all",
+                      ["!=", ["get", "voltage_formatted"], null],
+                      ["!=", ["get", "voltage_formatted"], ""]
+                    ],
+                    ["get", "voltage_formatted"],
+                    // If no name or voltage but has operator, show operator
+                    ["!=", ["get", "operator"], null],
+                    ["get", "operator"],
+                    // Default fallback
+                    "Transmission Line"
+                  ],
+                  "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
+                  "text-size": [
+                    "interpolate",
+                    ["linear"],
+                    ["zoom"],
+                    8, 12,   // At zoom 8, text size 12 (increased from 9)
+                    10, 14,  // At zoom 10, text size 14 (increased from 11)
+                    12, 16,  // At zoom 12, text size 16 (increased from 12)
+                    16, 18   // At zoom 16, text size 18 (increased from 14)
+                  ],
+                  "symbol-placement": "line",
+                  "text-rotation-alignment": "map",
+                  "text-pitch-alignment": "viewport",
+                  "text-max-angle": 30,
+                  "text-padding": 5,
+                  "text-allow-overlap": false,
+                  "text-ignore-placement": false
+                }}
+                paint={{
+                  "text-color": [
+                    "case",
+                    // If this line is selected/highlighted, use cyan
+                    [
+                      "any",
+                      ["==", ["get", "flowgate"], selectedFlowgateGroup || ""],
+                      ["==", ["get", "gid"], clickedLineId || -1]
+                    ],
+                    "#00bcd4",
+                    // Otherwise use dark color for contrast
+                    "#333333"
+                  ],
+                  "text-halo-color": "#ffffff",
+                  "text-halo-width": 2,
+                  "text-opacity": [
+                    "case",
+                    // Hide labels based on voltage visibility settings
+                    [
+                      "all",
+                      ["in", "500", ["to-string", ["get", "voltage"]]],
+                      !show500kV
+                    ],
+                    0, // Hide 500kV labels if disabled
+                    [
+                      "all", 
+                      ["in", "230", ["to-string", ["get", "voltage"]]],
+                      !show230kV
+                    ],
+                    0, // Hide 230kV labels if disabled
+                    [
+                      "all",
+                      ["in", "115", ["to-string", ["get", "voltage"]]],
+                      !show115kV
+                    ],
+                    0, // Hide 115kV labels if disabled
+                    [
+                      "all",
+                      ["!", ["in", "500", ["to-string", ["get", "voltage"]]]],
+                      ["!", ["in", "230", ["to-string", ["get", "voltage"]]]],
+                      ["!", ["in", "115", ["to-string", ["get", "voltage"]]]],
+                      !showOtherVoltages
+                    ],
+                    0, // Hide other voltage labels if disabled
+                    0.9 // Default opacity
+                  ]
+                }}
+              />
+            )}
 
-          {/* Power stations and plants (polygons) */}
-          <Layer
-            id="power-polygons"
-            type="fill"
-            filter={["in", ["get", "geometry_type"], ["literal", ["ST_Polygon", "ST_MultiPolygon"]]]}
-            layout={{ visibility: showPlants ? 'visible' : 'none' }}
-            paint={{
-              "fill-color": "#9C27B0",
-              "fill-opacity": 0.6,
-              "fill-outline-color": "#333333"
-            }}
-          />
+            {/* Power stations and plants (polygons) */}
+            {showPlants && (
+              <Layer
+                id="power-polygons"
+                type="fill"
+                filter={["in", ["get", "geometry_type"], ["literal", ["ST_Polygon", "ST_MultiPolygon"]]]}
+                paint={{
+                  "fill-color": "#9C27B0",
+                  "fill-opacity": 0.6,
+                  "fill-outline-color": "#333333"
+                }}
+              />
+            )}
 
-          {/* Power station and plant outlines */}
-          <Layer
-            id="power-polygon-outlines"
-            type="line"
-            filter={["in", ["get", "geometry_type"], ["literal", ["ST_Polygon", "ST_MultiPolygon"]]]}
-            layout={{ visibility: showPlants ? 'visible' : 'none' }}
-            paint={{
-              "line-color": "#333333",
-              "line-width": 1,
-              "line-opacity": 0.8
-            }}
-          />
+            {/* Power station and plant outlines */}
+            {showPlants && (
+              <Layer
+                id="power-polygon-outlines"
+                type="line"
+                filter={["in", ["get", "geometry_type"], ["literal", ["ST_Polygon", "ST_MultiPolygon"]]]}
+                paint={{
+                  "line-color": "#333333",
+                  "line-width": 1,
+                  "line-opacity": 0.8
+                }}
+              />
+            )}
 
-          {/* Power infrastructure points (substations, etc.) */}
-          <Layer
-            id="power-points"
-            type="circle"
-            filter={["==", ["get", "geometry_type"], "ST_Point"]}
-            layout={{ visibility: showSubstations ? 'visible' : 'none' }}
-            paint={{
-              "circle-color": "#757575",
-              "circle-radius": 4,
-              "circle-opacity": 0.8,
-              "circle-stroke-color": "#333333",
-              "circle-stroke-width": 1
-            }}
-          />
-        </Source>
-        
-        {/* SNOTEL Stations Layer - More performant than individual markers */}
-        <Source id="snotel-stations" type="geojson" data={snotelGeoJsonData || { type: 'FeatureCollection', features: [] }}>
-          <Layer
-            id="snotel-points"
-            type="circle"
-            layout={{
-              visibility: showSnotelStations && viewport.zoom >= 5.8 ? 'visible' : 'none'
-            }}
-            paint={{
-              'circle-color': [
-                'case',
-                ['==', ['to-number', ['get', 'id']], selectedSnotelStationId || -1],
-                '#2563eb', // Selected: Darker Blue
-                '#0ea5e9'  // Default: Sky Blue
-              ],
-              'circle-radius': [
-                'case',
-                ['==', ['to-number', ['get', 'id']], selectedSnotelStationId || -1],
-                8, // Selected radius
-                5  // Default radius
-              ],
-              'circle-stroke-color': '#ffffff',
-              'circle-stroke-width': 2,
-              'circle-opacity': 0.9,
-            }}
-          />
-        </Source>
+            {/* Power infrastructure points (substations, etc.) */}
+            {showSubstations && (
+              <Layer
+                id="power-points"
+                type="circle"
+                filter={["==", ["get", "geometry_type"], "ST_Point"]}
+                paint={{
+                  "circle-color": "#757575",
+                  "circle-radius": 4,
+                  "circle-opacity": 0.8,
+                  "circle-stroke-color": "#333333",
+                  "circle-stroke-width": 1
+                }}
+              />
+            )}
+          </Source>
+        )}
         
         {/* Power Plant Layers */}
-        <Source
-          id="power-plants"
-          type="geojson"
-          data={plantData || { type: 'FeatureCollection', features: [] }}
-        >
-          {/* Plant polygons/points */}
-          <Layer
-            id="plant-points"
-            type="circle"
-            layout={{ visibility: showPlants ? 'visible' : 'none' }}
-            paint={{
-              "circle-color": [
-                "case",
-                // Selected state
-                ["all", ["==", ["get", "id"], selectedGenId], ["==", "plant", selectedGenType]],
-                "#ffeb3b", // Bright Yellow for selected
-                // Check plant_source, plant_method, and type fields
-                ["in", ["downcase", ["coalesce", ["get", "plant_source"], ""]], ["literal", ["nuclear"]]],
-                "#ff4500", // Nuclear - orange-red
-                ["in", ["downcase", ["coalesce", ["get", "plant_source"], ""]], ["literal", ["solar", "photovoltaic"]]],
-                "#ffd700", // Solar - gold
-                ["in", ["downcase", ["coalesce", ["get", "plant_source"], ""]], ["literal", ["wind"]]],
-                "#32cd32", // Wind - lime green
-                ["in", ["downcase", ["coalesce", ["get", "plant_source"], ""]], ["literal", ["hydro", "water"]]],
-                "#1e90ff", // Hydro - dodger blue
-                ["in", ["downcase", ["coalesce", ["get", "plant_source"], ""]], ["literal", ["gas", "natural_gas"]]],
-                "#ff69b4", // Gas - hot pink
-                ["in", ["downcase", ["coalesce", ["get", "plant_source"], ""]], ["literal", ["coal"]]],
-                "#8b4513", // Coal - saddle brown
-                ["in", ["downcase", ["coalesce", ["get", "plant_source"], ""]], ["literal", ["biomass", "biogas"]]],
-                "#228b22", // Biomass - forest green
-                ["in", ["downcase", ["coalesce", ["get", "plant_source"], ""]], ["literal", ["geothermal"]]],
-                "#dc143c", // Geothermal - crimson
-                // Check plant_method as fallback
-                ["in", ["downcase", ["coalesce", ["get", "plant_method"], ""]], ["literal", ["nuclear"]]],
-                "#ff4500",
-                ["in", ["downcase", ["coalesce", ["get", "plant_method"], ""]], ["literal", ["solar", "photovoltaic"]]],
-                "#ffd700",
-                ["in", ["downcase", ["coalesce", ["get", "plant_method"], ""]], ["literal", ["wind"]]],
-                "#32cd32",
-                ["in", ["downcase", ["coalesce", ["get", "plant_method"], ""]], ["literal", ["hydro", "water"]]],
-                "#1e90ff",
-                ["in", ["downcase", ["coalesce", ["get", "plant_method"], ""]], ["literal", ["gas", "natural_gas"]]],
-                "#ff69b4",
-                ["in", ["downcase", ["coalesce", ["get", "plant_method"], ""]], ["literal", ["coal"]]],
-                "#8b4513",
-                ["in", ["downcase", ["coalesce", ["get", "plant_method"], ""]], ["literal", ["biomass", "biogas"]]],
-                "#228b22",
-                ["in", ["downcase", ["coalesce", ["get", "plant_method"], ""]], ["literal", ["geothermal"]]],
-                "#dc143c",
-                // Check type as final fallback
-                ["in", ["downcase", ["coalesce", ["get", "type"], ""]], ["literal", ["nuclear"]]],
-                "#ff4500",
-                ["in", ["downcase", ["coalesce", ["get", "type"], ""]], ["literal", ["solar", "photovoltaic"]]],
-                "#ffd700",
-                ["in", ["downcase", ["coalesce", ["get", "type"], ""]], ["literal", ["wind"]]],
-                "#32cd32",
-                ["in", ["downcase", ["coalesce", ["get", "type"], ""]], ["literal", ["hydro", "water"]]],
-                "#1e90ff",
-                ["in", ["downcase", ["coalesce", ["get", "type"], ""]], ["literal", ["gas", "natural_gas"]]],
-                "#ff69b4",
-                ["in", ["downcase", ["coalesce", ["get", "type"], ""]], ["literal", ["coal"]]],
-                "#8b4513",
-                ["in", ["downcase", ["coalesce", ["get", "type"], ""]], ["literal", ["biomass", "biogas"]]],
-                "#228b22",
-                ["in", ["downcase", ["coalesce", ["get", "type"], ""]], ["literal", ["geothermal"]]],
-                "#dc143c",
-                "#9370db" // Other - medium purple (default)
-              ],
-              "circle-radius": [
-                "interpolate",
-                ["linear"],
-                ["zoom"],
-                6, [
+        {plantData && showPlants && (
+          <Source
+            id="power-plants"
+            type="geojson"
+            data={plantData}
+          >
+            {/* Plant polygons/points */}
+            <Layer
+              id="plant-points"
+              type="circle"
+              paint={{
+                "circle-color": [
                   "case",
-                  ["all", ["==", ["get", "id"], selectedGenId], ["==", "plant", selectedGenType]],
-                  8, // Slightly larger radius when selected
-                  4  // Default radius at zoom 6
+                  // Check plant_source, plant_method, and type fields
+                  ["in", ["downcase", ["coalesce", ["get", "plant_source"], ""]], ["literal", ["nuclear"]]],
+                  "#ff4500", // Nuclear - orange-red
+                  ["in", ["downcase", ["coalesce", ["get", "plant_source"], ""]], ["literal", ["solar", "photovoltaic"]]],
+                  "#ffd700", // Solar - gold
+                  ["in", ["downcase", ["coalesce", ["get", "plant_source"], ""]], ["literal", ["wind"]]],
+                  "#32cd32", // Wind - lime green
+                  ["in", ["downcase", ["coalesce", ["get", "plant_source"], ""]], ["literal", ["hydro", "water"]]],
+                  "#1e90ff", // Hydro - dodger blue
+                  ["in", ["downcase", ["coalesce", ["get", "plant_source"], ""]], ["literal", ["gas", "natural_gas"]]],
+                  "#ff69b4", // Gas - hot pink
+                  ["in", ["downcase", ["coalesce", ["get", "plant_source"], ""]], ["literal", ["coal"]]],
+                  "#8b4513", // Coal - saddle brown
+                  ["in", ["downcase", ["coalesce", ["get", "plant_source"], ""]], ["literal", ["biomass", "biogas"]]],
+                  "#228b22", // Biomass - forest green
+                  ["in", ["downcase", ["coalesce", ["get", "plant_source"], ""]], ["literal", ["geothermal"]]],
+                  "#dc143c", // Geothermal - crimson
+                  // Check plant_method as fallback
+                  ["in", ["downcase", ["coalesce", ["get", "plant_method"], ""]], ["literal", ["nuclear"]]],
+                  "#ff4500",
+                  ["in", ["downcase", ["coalesce", ["get", "plant_method"], ""]], ["literal", ["solar", "photovoltaic"]]],
+                  "#ffd700",
+                  ["in", ["downcase", ["coalesce", ["get", "plant_method"], ""]], ["literal", ["wind"]]],
+                  "#32cd32",
+                  ["in", ["downcase", ["coalesce", ["get", "plant_method"], ""]], ["literal", ["hydro", "water"]]],
+                  "#1e90ff",
+                  ["in", ["downcase", ["coalesce", ["get", "plant_method"], ""]], ["literal", ["gas", "natural_gas"]]],
+                  "#ff69b4",
+                  ["in", ["downcase", ["coalesce", ["get", "plant_method"], ""]], ["literal", ["coal"]]],
+                  "#8b4513",
+                  ["in", ["downcase", ["coalesce", ["get", "plant_method"], ""]], ["literal", ["biomass", "biogas"]]],
+                  "#228b22",
+                  ["in", ["downcase", ["coalesce", ["get", "plant_method"], ""]], ["literal", ["geothermal"]]],
+                  "#dc143c",
+                  // Check type as final fallback
+                  ["in", ["downcase", ["coalesce", ["get", "type"], ""]], ["literal", ["nuclear"]]],
+                  "#ff4500",
+                  ["in", ["downcase", ["coalesce", ["get", "type"], ""]], ["literal", ["solar", "photovoltaic"]]],
+                  "#ffd700",
+                  ["in", ["downcase", ["coalesce", ["get", "type"], ""]], ["literal", ["wind"]]],
+                  "#32cd32",
+                  ["in", ["downcase", ["coalesce", ["get", "type"], ""]], ["literal", ["hydro", "water"]]],
+                  "#1e90ff",
+                  ["in", ["downcase", ["coalesce", ["get", "type"], ""]], ["literal", ["gas", "natural_gas"]]],
+                  "#ff69b4",
+                  ["in", ["downcase", ["coalesce", ["get", "type"], ""]], ["literal", ["coal"]]],
+                  "#8b4513",
+                  ["in", ["downcase", ["coalesce", ["get", "type"], ""]], ["literal", ["biomass", "biogas"]]],
+                  "#228b22",
+                  ["in", ["downcase", ["coalesce", ["get", "type"], ""]], ["literal", ["geothermal"]]],
+                  "#dc143c",
+                  "#9370db" // Other - medium purple (default)
                 ],
-                10, [
-                  "case",
-                  ["all", ["==", ["get", "id"], selectedGenId], ["==", "plant", selectedGenType]],
-                  12, // Slightly larger radius when selected
-                  8   // Default radius at zoom 10
+                "circle-radius": [
+                  "interpolate",
+                  ["linear"],
+                  ["zoom"],
+                  6, 4,
+                  10, 8,
+                  14, 12
                 ],
-                14, [
-                  "case",
-                  ["all", ["==", ["get", "id"], selectedGenId], ["==", "plant", selectedGenType]],
-                  16, // Slightly larger radius when selected
-                  12  // Default radius at zoom 14
-                ]
-              ],
-              "circle-opacity": 0.8,
-              "circle-stroke-color": [
-                "case",
-                ["all", ["==", ["get", "id"], selectedGenId], ["==", "plant", selectedGenType]],
-                "#333333", // Dark stroke for selected
-                "#ffffff"
-              ],
-              "circle-stroke-width": [
-                "case",
-                ["all", ["==", ["get", "id"], selectedGenId], ["==", "plant", selectedGenType]],
-                3, // Thicker stroke for selected
-                2
-              ]
-            }}
-          />
-          
-          {/* Plant labels at high zoom */}
-          <Layer
-            id="plant-labels"
-            type="symbol"
-            minzoom={10}
-            layout={{
-              visibility: showPlants ? 'visible' : 'none',
-              "text-field": ["get", "name"],
-              "text-font": ["Open Sans Bold"],
-              "text-size": 11,
-              "text-offset": [0, 2],
-              "text-anchor": "top"
-            }}
-            paint={{
-              "text-color": "#333333",
-              "text-halo-color": "#ffffff",
-              "text-halo-width": 2
-            }}
-          />
-        </Source>
+                "circle-opacity": 0.7,
+                "circle-stroke-color": "#ffffff",
+                "circle-stroke-width": 2
+              }}
+            />
+            
+            {/* Plant labels at high zoom */}
+            <Layer
+              id="plant-labels"
+              type="symbol"
+              minzoom={10}
+              layout={{
+                "text-field": ["get", "name"],
+                "text-font": ["Open Sans Bold"],
+                "text-size": 11,
+                "text-offset": [0, 2],
+                "text-anchor": "top"
+              }}
+              paint={{
+                "text-color": "#333333",
+                "text-halo-color": "#ffffff",
+                "text-halo-width": 2
+              }}
+            />
+          </Source>
+        )}
         
         {/* Power Generator Layers */}
-        <Source
-          id="power-generators"
-          type="geojson"
-          data={generatorData || { type: 'FeatureCollection', features: [] }}
-        >
-          {/* Generator points */}
-          <Layer
-            id="generator-points"
-            type="circle"
-            layout={{ visibility: showGenerators ? 'visible' : 'none' }}
-            paint={{
-              "circle-color": [
-                "case",
-                // Selected state
-                ["all", ["==", ["get", "id"], selectedGenId], ["==", "generator", selectedGenType]],
-                "#ffeb3b", // Bright Yellow for selected
-                // Use fuel_type field (which combines generator_source and generator_type)
-                ["in", ["downcase", ["coalesce", ["get", "fuel_type"], ""]], ["literal", ["nuclear"]]],
-                "#ff4500", // Nuclear - orange-red
-                ["in", ["downcase", ["coalesce", ["get", "fuel_type"], ""]], ["literal", ["solar", "photovoltaic"]]],
-                "#ffd700", // Solar - gold
-                ["in", ["downcase", ["coalesce", ["get", "fuel_type"], ""]], ["literal", ["wind"]]],
-                "#32cd32", // Wind - lime green
-                ["in", ["downcase", ["coalesce", ["get", "fuel_type"], ""]], ["literal", ["hydro", "water"]]],
-                "#1e90ff", // Hydro - dodger blue
-                ["in", ["downcase", ["coalesce", ["get", "fuel_type"], ""]], ["literal", ["gas", "natural_gas"]]],
-                "#ff69b4", // Gas - hot pink
-                ["in", ["downcase", ["coalesce", ["get", "fuel_type"], ""]], ["literal", ["coal"]]],
-                "#8b4513", // Coal - saddle brown
-                ["in", ["downcase", ["coalesce", ["get", "fuel_type"], ""]], ["literal", ["biomass", "biogas"]]],
-                "#228b22", // Biomass - forest green
-                ["in", ["downcase", ["coalesce", ["get", "fuel_type"], ""]], ["literal", ["geothermal"]]],
-                "#dc143c", // Geothermal - crimson
-                "#9370db" // Other - medium purple (default)
-              ],
-              "circle-radius": [
-                "interpolate",
-                ["linear"],
-                ["zoom"],
-                8, [
+        {generatorData && showGenerators && (
+          <Source
+            id="power-generators"
+            type="geojson"
+            data={generatorData}
+          >
+            {/* Generator points */}
+            <Layer
+              id="generator-points"
+              type="circle"
+              paint={{
+                "circle-color": [
                   "case",
-                  ["all", ["==", ["get", "id"], selectedGenId], ["==", "generator", selectedGenType]],
-                  4, // Slightly larger radius when selected
-                  2  // Default radius at zoom 8
+                  // Use fuel_type field (which combines generator_source and generator_type)
+                  ["in", ["downcase", ["coalesce", ["get", "fuel_type"], ""]], ["literal", ["nuclear"]]],
+                  "#ff4500", // Nuclear - orange-red
+                  ["in", ["downcase", ["coalesce", ["get", "fuel_type"], ""]], ["literal", ["solar", "photovoltaic"]]],
+                  "#ffd700", // Solar - gold
+                  ["in", ["downcase", ["coalesce", ["get", "fuel_type"], ""]], ["literal", ["wind"]]],
+                  "#32cd32", // Wind - lime green
+                  ["in", ["downcase", ["coalesce", ["get", "fuel_type"], ""]], ["literal", ["hydro", "water"]]],
+                  "#1e90ff", // Hydro - dodger blue
+                  ["in", ["downcase", ["coalesce", ["get", "fuel_type"], ""]], ["literal", ["gas", "natural_gas"]]],
+                  "#ff69b4", // Gas - hot pink
+                  ["in", ["downcase", ["coalesce", ["get", "fuel_type"], ""]], ["literal", ["coal"]]],
+                  "#8b4513", // Coal - saddle brown
+                  ["in", ["downcase", ["coalesce", ["get", "fuel_type"], ""]], ["literal", ["biomass", "biogas"]]],
+                  "#228b22", // Biomass - forest green
+                  ["in", ["downcase", ["coalesce", ["get", "fuel_type"], ""]], ["literal", ["geothermal"]]],
+                  "#dc143c", // Geothermal - crimson
+                  "#9370db" // Other - medium purple (default)
                 ],
-                12, [
-                  "case",
-                  ["all", ["==", ["get", "id"], selectedGenId], ["==", "generator", selectedGenType]],
-                  6, // Slightly larger radius when selected
-                  4  // Default radius at zoom 12
+                "circle-radius": [
+                  "interpolate",
+                  ["linear"],
+                  ["zoom"],
+                  8, 2,
+                  12, 4,
+                  16, 6
                 ],
-                16, [
-                  "case",
-                  ["all", ["==", ["get", "id"], selectedGenId], ["==", "generator", selectedGenType]],
-                  8, // Slightly larger radius when selected
-                  6  // Default radius at zoom 16
-                ]
-              ],
-              "circle-opacity": 0.8,
-              "circle-stroke-color": [
-                "case",
-                ["all", ["==", ["get", "id"], selectedGenId], ["==", "generator", selectedGenType]],
-                "#333333", // Dark stroke for selected
-                "#ffffff"
-              ],
-              "circle-stroke-width": [
-                "case",
-                ["all", ["==", ["get", "id"], selectedGenId], ["==", "generator", selectedGenType]],
-                2, // Thicker stroke for selected
-                1
-              ]
-            }}
-          />
-          
-          {/* Generator labels at very high zoom */}
-          <Layer
-            id="generator-labels"
-            type="symbol"
-            minzoom={14}
-            layout={{
-              visibility: showGenerators ? 'visible' : 'none',
-              "text-field": ["coalesce", ["get", "name"], ["get", "plant_name"]],
-              "text-font": ["Open Sans Regular"],
-              "text-size": 9,
-              "text-offset": [0, 1.2],
-              "text-anchor": "top"
-            }}
-            paint={{
-              "text-color": "#333333",
-              "text-halo-color": "#ffffff",
-              "text-halo-width": 1
-            }}
-          />
-        </Source>
+                "circle-opacity": 0.8,
+                "circle-stroke-color": "#ffffff",
+                "circle-stroke-width": 1
+              }}
+            />
+            
+            {/* Generator labels at very high zoom */}
+            <Layer
+              id="generator-labels"
+              type="symbol"
+              minzoom={14}
+              layout={{
+                "text-field": ["coalesce", ["get", "name"], ["get", "plant_name"]],
+                "text-font": ["Open Sans Regular"],
+                "text-size": 9,
+                "text-offset": [0, 1.2],
+                "text-anchor": "top"
+              }}
+              paint={{
+                "text-color": "#333333",
+                "text-halo-color": "#ffffff",
+                "text-halo-width": 1
+              }}
+            />
+          </Source>
+        )}
 
         {/* Dam markers with proper dam icons */}
         {showDams && markers && markers.length > 0 && markers.map((marker) => (
@@ -1686,26 +1364,6 @@ export function InteractiveMap({
           </Popup>
         )}
 
-        {/* SNOTEL Station hover popup */}
-        {hoveredSnotelStation && (
-          <Popup
-            latitude={hoveredSnotelStation.latitude}
-            longitude={hoveredSnotelStation.longitude}
-            closeButton={false}
-            closeOnClick={false}
-            offset={[0, -20]}
-            className="snotel-hover-popup"
-            style={{ pointerEvents: 'none' }}
-          >
-            <div style={{ pointerEvents: 'none', color: '#333333', fontWeight: '500', fontSize: '14px' }}>
-              <div className="font-medium">{hoveredSnotelStation.name}</div>
-              {hoveredSnotelStation.elevation && (
-                <div className="text-xs text-gray-600">{hoveredSnotelStation.elevation.toLocaleString()} ft</div>
-              )}
-            </div>
-          </Popup>
-        )}
-
         {/* Generation hover popup */}
         {hoveredGeneration && (
           <Popup
@@ -1720,82 +1378,42 @@ export function InteractiveMap({
             <div style={{ pointerEvents: 'none', color: '#333333', fontWeight: '500', fontSize: '14px' }}>
               <div className="font-medium">{hoveredGeneration.name}</div>
               <div className="text-xs text-gray-600 capitalize">{hoveredGeneration.type}</div>
-              {hoveredGeneration.operator && (
-                <div className="text-xs text-gray-500">Operator: {hoveredGeneration.operator}</div>
-              )}
             </div>
           </Popup>
         )}
 
-        {/* Power Line hover popup */}
-        {hoveredPowerLine && (
-          <Popup
-            latitude={hoveredPowerLine.latitude}
-            longitude={hoveredPowerLine.longitude}
-            closeButton={false}
-            closeOnClick={false}
-            offset={[0, -15]}
-            className="power-line-hover-popup"
-            style={{ pointerEvents: 'none' }}
-          >
-            <div style={{ pointerEvents: 'none', color: '#333333', fontSize: '14px' }}>
-              <div className="font-semibold">{hoveredPowerLine.name}</div>
-              <div className="text-xs text-gray-600">{hoveredPowerLine.voltage}</div>
-              {hoveredPowerLine.flowgate && hoveredPowerLine.flowgate !== 'null' && (
-                <div className="mt-2 pt-2 border-t border-gray-200">
-                  <div className="text-xs">
-                    <span className="font-medium text-gray-700">Flowgate:</span>
-                    <span className="font-mono text-xs ml-1">{hoveredPowerLine.flowgate}</span>
-                  </div>
-                  {hoveredPowerLine.capacityFactor !== undefined && hoveredPowerLine.capacityFactor !== null && (
-                    <div className="text-xs">
-                      <span className="font-medium text-gray-700">Capacity:</span>
-                      <span className="font-mono text-xs ml-1">{(hoveredPowerLine.capacityFactor * 100).toFixed(1)}%</span>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </Popup>
-        )}
+        {/* Snotel Stations Layer */}
+        <Source id="snotel-stations" type="geojson" data={snotelGeoJsonData || { type: 'FeatureCollection', features: [] }}>
+          <Layer
+            id="snotel-points"
+            type="circle"
+            layout={{
+              visibility: showSnotelStations && viewport.zoom >= 5.8 ? 'visible' : 'none'
+            }}
+            paint={{
+              'circle-color': [
+                'case',
+                ['==', ['to-number', ['get', 'id']], selectedSnotelStationId || -1],
+                '#2563eb', // Selected: Darker Blue
+                '#0ea5e9'  // Default: Sky Blue
+              ],
+              'circle-radius': [
+                'case',
+                ['==', ['to-number', ['get', 'id']], selectedSnotelStationId || -1],
+                8, // Selected radius
+                5  // Default radius
+              ],
+              'circle-stroke-color': '#ffffff',
+              'circle-stroke-width': 2,
+              'circle-opacity': 0.9,
+            }}
+          />
+        </Source>
       </ReactMapGL>
-
-      {/* Mobile Modal for Map Layers */}
-      {isMobileModalOpen && (
-        <div 
-          className="fixed inset-0 bg-black/50 z-[9999] flex items-end justify-center"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) {
-              setIsMobileModalOpen(false);
-            }
-          }}
-        >
-          <div className="bg-white rounded-t-2xl w-full max-w-[calc(100vw-2rem)] mx-4 mb-4 max-h-[80vh] overflow-hidden">
-            {/* Modal Header */}
-            <div className="flex items-center justify-between p-4 border-b bg-gray-50">
-              <h3 className="font-semibold text-gray-900 text-lg">Map Layers</h3>
-              <button
-                onClick={() => setIsMobileModalOpen(false)}
-                className="p-2 rounded-full hover:bg-gray-200 transition-colors"
-                aria-label="Close modal"
-              >
-                <svg className="w-5 h-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            
-            {/* Modal Content */}
-            <div className="p-4 overflow-y-auto max-h-[calc(80vh-80px)]">
-              <LegendContent />
-            </div>
-          </div>
-        </div>
-      )}
       
       {/* Columbia River System Label Overlay with Full Screen Button */}
       <div 
-        className="absolute top-4 left-4 bg-white/95 rounded-lg px-3 py-2 border"
+        className="absolute top-4 left-4 bg-white/95 rounded-lg px-3 py-2 shadow-lg border"
         style={{ zIndex: 40 }}
       >
         <div className="flex items-center justify-between gap-3">
@@ -1824,31 +1442,198 @@ export function InteractiveMap({
       
       {/* Modern Legend */}
       <div 
-        className="absolute bottom-2 right-2 bg-white/95 backdrop-blur-sm rounded-md border border-gray-200"
+        className="absolute bottom-4 right-4 bg-white/95 backdrop-blur-sm rounded-xl shadow-xl border border-gray-200"
         style={{ zIndex: 40, minWidth: '240px', maxWidth: '280px' }}
       >
-        <div className={isLegendVisible ? "p-4" : "p-3"}>
-          <div className={`flex items-center justify-between ${(isLegendVisible && !isMobile) ? 'mb-3' : ''}`}>
+        <div className="p-4">
+          <div className="flex items-center justify-between mb-3">
             <h3 className="font-semibold text-gray-900 text-sm">Map Layers</h3>
-            <button
-              onClick={handleLegendToggle}
-              className="p-1 rounded-full hover:bg-gray-200 transition-colors"
-              title={isLegendVisible ? "Hide legend" : "Show legend"}
-            >
-              {(isLegendVisible && !isMobile) ? (
-                <svg className="w-4 h-4 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 15l-6-6-6 6" />
-                </svg>
-              ) : (
-                <svg className="w-4 h-4 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 9l6 6 6-6" />
-                </svg>
-              )}
-            </button>
           </div>
           
-          {/* Regular legend for desktop or fullscreen */}
-          {isLegendVisible && !isMobile && <LegendContent />}
+          {/* Selected Flowgate Info */}
+          {selectedFlowgateGroup && (
+            <div className="bg-cyan-50 border border-cyan-200 rounded-lg p-3 mb-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="font-medium text-cyan-800 text-xs mb-1">Active Selection</div>
+                  <div className="text-cyan-700 text-xs font-mono truncate">{selectedFlowgateGroup}</div>
+                </div>
+                <button 
+                  onClick={() => {
+                    setSelectedFlowgateGroup(null);
+                    setClickedLineId(null);
+                  }}
+                  className="text-cyan-600 hover:text-cyan-800 p-1 rounded-full hover:bg-cyan-100 transition-colors"
+                  title="Clear selection"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          )}
+          
+          <div className="space-y-4 text-xs">
+            {/* Infrastructure Section */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="font-medium text-gray-800 text-xs uppercase tracking-wider">Infrastructure</h4>
+              </div>
+              <div className="space-y-2 pl-1">
+                {/* Dams */}
+                <label className="flex items-center gap-3 cursor-pointer hover:bg-gray-50 p-1.5 rounded-md transition-colors">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={showDams}
+                      onChange={(e) => updateFilter(['infrastructure', 'dams'], e.target.checked)}
+                      className="w-4 h-4 text-red-600 border-gray-300 rounded focus:ring-red-500"
+                    />
+                    <svg className="w-4 h-4 fill-blue-600" viewBox="0 0 24 24">
+                      <path d="M2 14h20l-2 6H4l-2-6zm0-2h20V8H2v4zm4-8h12v4H6V4z"/>
+                    </svg>
+                  </div>
+                  <span className="text-gray-700 font-medium">Dams</span>
+                </label>
+                
+                {/* Transmission */}
+                <div className="space-y-2">
+                  <label className="flex items-center gap-3 cursor-pointer hover:bg-gray-50 p-1.5 rounded-md transition-colors">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={showPowerLines}
+                        onChange={(e) => updateFilter(['infrastructure', 'transmission', 'enabled'], e.target.checked)}
+                        className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                      />
+                      <div className="w-4 h-1 bg-gray-600 rounded-full"></div>
+                    </div>
+                    <span className="text-gray-700 font-medium">Transmission Lines</span>
+                  </label>
+                  
+                  {showPowerLines && (
+                    <div className="ml-6 space-y-2 border-l-2 border-gray-100 pl-3">
+                      <div className="flex items-center gap-2 text-cyan-600 mb-1">
+                        <div className="w-3 h-0.5 bg-cyan-500 rounded"></div>
+                        <span className="text-xs">Selected lines highlighted</span>
+                      </div>
+                      
+                      <div className="grid grid-cols-2 gap-2">
+                        {[
+                          { key: '500kV', label: '500kV', height: '3px', color: 'bg-gray-600' },
+                          { key: '230kV', label: '230kV', height: '2px', color: 'bg-gray-600' },
+                          { key: '115kV', label: '115kV', height: '1.5px', color: 'bg-gray-600' },
+                          { key: 'other', label: 'Other', height: '1px', color: 'bg-gray-600' }
+                        ].map(voltage => (
+                          <label key={voltage.key} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1 rounded transition-colors">
+                            <input
+                              type="checkbox"
+                              checked={filters.infrastructure.transmission.voltages[voltage.key as keyof typeof filters.infrastructure.transmission.voltages]}
+                              onChange={(e) => updateFilter(['infrastructure', 'transmission', 'voltages', voltage.key], e.target.checked)}
+                              className="w-3 h-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                            />
+                            <div className={`w-3 ${voltage.color} rounded`} style={{ height: voltage.height }}></div>
+                            <span className="text-xs text-gray-600">{voltage.label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                
+                {/* Substations */}
+                <label className="flex items-center gap-3 cursor-pointer hover:bg-gray-50 p-1.5 rounded-md transition-colors">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={showSubstations}
+                      onChange={(e) => updateFilter(['infrastructure', 'substations'], e.target.checked)}
+                      className="w-4 h-4 text-gray-600 border-gray-300 rounded focus:ring-gray-500"
+                    />
+                    <div className="w-3 h-3 rounded-full bg-gray-500"></div>
+                  </div>
+                  <span className="text-gray-700 font-medium">Substations</span>
+                </label>
+
+                {/* SNOTEL Stations */}
+                <label className="flex items-center gap-3 cursor-pointer hover:bg-gray-50 p-1.5 rounded-md transition-colors">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={showSnotelStations}
+                      onChange={(e) => updateFilter(['infrastructure', 'snotelStations'], e.target.checked)}
+                      className="w-4 h-4 text-sky-600 border-gray-300 rounded focus:ring-sky-500"
+                    />
+                    <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <circle cx="8" cy="8" r="5" fill="#0ea5e9" stroke="#FFFFFF" strokeWidth="2"/>
+                    </svg>
+                  </div>
+                  <span className="text-gray-700 font-medium">SNOTEL Stations</span>
+                </label>
+              </div>
+            </div>
+
+            {/* Generation Section */}
+            <div className="border-t border-gray-200 pt-4">
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="font-medium text-gray-800 text-xs uppercase tracking-wider">Generation</h4>
+              </div>
+              <div className="space-y-2 pl-1">
+                {/* Plants & Generators */}
+                <div className="grid grid-cols-2 gap-x-4">
+                  <div className="flex items-center justify-between">
+                    <label htmlFor="show-plants" className="text-xs text-gray-700 font-medium cursor-pointer">Plants</label>
+                    <Switch
+                      id="show-plants"
+                      checked={showPlants}
+                      onCheckedChange={(checked) => updateFilter(['generation', 'plants'], checked)}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <label htmlFor="show-units" className="text-xs text-gray-700 font-medium cursor-pointer">Units</label>
+                    <Switch
+                      id="show-units"
+                      checked={showGenerators}
+                      onCheckedChange={(checked) => updateFilter(['generation', 'generators'], checked)}
+                    />
+                  </div>
+                </div>
+                
+                {/* Generation Types - show when either plants or generators are enabled */}
+                {(showPlants || showGenerators) && (
+                  <div className="mt-3 border-t border-gray-100 pt-3">
+                    <div className="text-xs text-gray-500 mb-2 font-medium">Filter by Type:</div>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {[
+                        { key: 'nuclear', label: 'Nuclear', color: 'bg-orange-500' },
+                        { key: 'solar', label: 'Solar', color: 'bg-yellow-500' },
+                        { key: 'wind', label: 'Wind', color: 'bg-green-400' },
+                        { key: 'hydro', label: 'Hydro', color: 'bg-blue-500' },
+                        { key: 'gas', label: 'Gas', color: 'bg-pink-500' },
+                        { key: 'coal', label: 'Coal', color: 'bg-amber-800' },
+                        { key: 'biomass', label: 'Biomass', color: 'bg-green-600' },
+                        { key: 'geothermal', label: 'Geo', color: 'bg-red-600' },
+                        { key: 'other', label: 'Other', color: 'bg-purple-500', span: 'col-span-2' }
+                      ].map(type => (
+                        <label key={type.key} className={`flex items-center gap-1.5 cursor-pointer hover:bg-gray-50 p-1 rounded transition-colors ${type.span || ''}`}>
+                          <input
+                            type="checkbox"
+                            checked={filters.generation.types[type.key as keyof typeof filters.generation.types]}
+                            onChange={(e) => updateFilter(['generation', 'types', type.key], e.target.checked)}
+                            className="w-3 h-3 border-gray-300 rounded focus:ring-2"
+                            style={{ accentColor: type.color.replace('bg-', '#') }}
+                          />
+                          <div className={`w-2.5 h-2.5 rounded-full ${type.color}`}></div>
+                          <span className="text-xs text-gray-600">{type.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -1857,7 +1642,7 @@ export function InteractiveMap({
   return (
     <div 
       style={{ height, width: '100%' }} 
-      className="rounded-xl border bg-card text-card-foreground overflow-hidden"
+      className="rounded-xl border bg-card text-card-foreground shadow-sm overflow-hidden"
     >
       {isFullScreen ? (
         <div 
@@ -1874,3 +1659,5 @@ export function InteractiveMap({
     </div>
   );
 }
+
+// Remember to set your NEXT_PUBLIC_MAPBOX_TOKEN environment variable! 
