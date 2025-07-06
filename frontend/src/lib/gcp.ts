@@ -30,7 +30,7 @@ export const streamAgentResponse = async (
   onClose: () => void,
   onError: (error: Error) => void
 ) => {
-  const url = "https://us-central1-crystal-2f87e.cloudfunctions.net/energy-agent";
+  const url = "https://us-central1-crystal-2f87e.cloudfunctions.net/gcp-cli-energy-agent";
 
   try {
     const response = await fetch(url, {
