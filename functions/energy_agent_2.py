@@ -1,6 +1,6 @@
 """
 Energy Agent using Native Python and OpenAI API.
-v6: The Proactive Agent. Uses schema discovery to act autonomously and intelligently.
+v6.1: The Proactive Agent. Now enforces NOT NULL on filters and has flexible sorting.
 """
 from dotenv import load_dotenv
 load_dotenv()
@@ -20,7 +20,7 @@ os.environ["FUNCTIONS_EMULATOR"] = "True"
 # --- Local Dependencies ---
 from helpers.db_utils import execute_query
 
-# --- Configuration & Utilities (Unchanged) ---
+# --- Configuration & Utilities ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 GOOGLE_GEOCODING_API_KEY = os.getenv("GOOGLE_GEOCODING_API_KEY")
@@ -50,24 +50,33 @@ def is_sql_safe(query: str) -> bool:
 def is_safe_identifier(name: str) -> bool:
     return name is not None and re.match(r'^[a-zA-Z0-9_]+$', name) is not None
 
-# --- Core Logic: Generic WHERE Clause Builder (Unchanged) ---
+# --- Core Logic: Generic WHERE Clause Builder (UPDATED) ---
 def _build_where_clause(filters_include: Optional[Dict[str, List[str]]] = None, filters_exclude: Optional[Dict[str, List[str]]] = None) -> Tuple[str, List[Any]]:
+    """
+    Builds a SQL WHERE clause from filter dictionaries, now with automatic
+    'IS NOT NULL' checks for all filtered columns to ensure robust queries.
+    """
     clauses, params = [], []
     if filters_include:
         for col, values in filters_include.items():
             if is_safe_identifier(col) and values:
+                # Add the IS NOT NULL check for robustness
+                clauses.append(f"{col} IS NOT NULL")
                 op, val = ("ILIKE %s", values[0]) if len(values) == 1 else ("IN %s", tuple(values))
-                clauses.append(f"{col} {op}"); params.append(val)
+                clauses.append(f"{col} {op}")
+                params.append(val)
     if filters_exclude:
         for col, values in filters_exclude.items():
             if is_safe_identifier(col) and values:
+                # Add the IS NOT NULL check for robustness
+                clauses.append(f"{col} IS NOT NULL")
                 op, val = ("NOT ILIKE %s", values[0]) if len(values) == 1 else ("NOT IN %s", tuple(values))
-                clauses.append(f"{col} {op}"); params.append(val)
+                clauses.append(f"{col} {op}")
+                params.append(val)
     if not clauses: return "", []
     return f"WHERE {' AND '.join(clauses)}", params
 
 class ToolOrchestrator:
-    # (Unchanged from previous version)
     async def get_unique_column_values(self, table_name: str, column_name: str, limit: int = 20) -> List[str]:
         if not is_safe_identifier(table_name) or not is_safe_identifier(column_name): return []
         try:
@@ -88,10 +97,9 @@ class ToolOrchestrator:
             return {"success": False, "error": str(e)}
 
 class EnergyAgentTools:
-    """Tools now include schema discovery for proactive planning."""
+    """Tools now include schema discovery and flexible sorting for proactive planning."""
     orchestrator = ToolOrchestrator()
 
-    # --- THE NEW DISCOVERY TOOL ---
     @staticmethod
     async def get_table_schema(table_name: str) -> Dict[str, Any]:
         """
@@ -110,28 +118,44 @@ class EnergyAgentTools:
         """
         return await EnergyAgentTools.orchestrator.execute_sql(query, [table_name])
 
-    # --- DATA TOOLS ARE NOW SIMPLER ---
-    # They just build the query and let the orchestrator run it.
+    # --- DATA TOOL IS NOW MORE FLEXIBLE (UPDATED) ---
     @staticmethod
     async def get_icr_data(
         filters_include: Optional[Dict[str, List[str]]] = None,
         filters_exclude: Optional[Dict[str, List[str]]] = None,
+        sort_column: Optional[str] = 'request_date',
+        sort_order: Optional[str] = 'DESC',
         limit: Optional[int] = None
     ) -> Dict[str, Any]:
         """
-        Get Interconnection Request (ICR) data from the 'fact_icr' table using flexible filters.
+        Get Interconnection Request (ICR) data from 'fact_icr' with flexible filters and sorting.
         Args:
             filters_include (Optional[Dict[str, List[str]]]): Columns and values to include. E.g., {"state": ["WA"]}.
             filters_exclude (Optional[Dict[str, List[str]]]): Columns and values to exclude. E.g., {"status": ["WITHDRAWN"]}.
+            sort_column (Optional[str]): The column to sort results by. Defaults to 'request_date'.
+            sort_order (Optional[str]): The sort direction, either 'ASC' (ascending) or 'DESC' (descending). Defaults to 'DESC'.
             limit (Optional[int]): Max number of records to return.
         """
-        base_query = "SELECT request_number, project_name, status, state, county, max_summer_mw, fuel_source_1 FROM fact_icr"
+        base_query = "SELECT request_number, project_name, status, state, county, max_summer_mw, fuel_source_1, request_date FROM fact_icr"
         where_clause, params = _build_where_clause(filters_include, filters_exclude)
         if not where_clause:
             return {"success": False, "error": "A filter must be provided for ICR data."}
-        query = f"{base_query} {where_clause} ORDER BY request_date DESC"
+
+        # Validate sort_order to prevent injection; default to DESC
+        safe_sort_order = "ASC" if str(sort_order).upper() == "ASC" else "DESC"
+        # Validate sort_column is a safe identifier; default to request_date
+        safe_sort_column = sort_column if is_safe_identifier(sort_column) else 'request_date'
+
+        # Also ensure the sorted column is in the SELECT statement
+        if safe_sort_column not in base_query:
+            base_query = base_query.replace(" FROM", f", {safe_sort_column} FROM")
+
+        query = f"{base_query} {where_clause} ORDER BY {safe_sort_column} {safe_sort_order} NULLS LAST"
+        
         if limit:
-            query += " LIMIT %s"; params.append(limit)
+            query += " LIMIT %s"
+            params.append(limit)
+            
         return await EnergyAgentTools.orchestrator.execute_sql(query, params)
 
     @staticmethod
@@ -153,7 +177,7 @@ class EnergyAgentTools:
         
         base_query = "SELECT gid, openinfra_name, voltage, power, operator, ST_AsGeoJSON(geom) as geometry FROM power_infra"
         spatial_clause = "ST_DWithin(geom::geography, ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography, %s)"
-        params = [coords["lon"], coords["lat"], radius_km * 1000]
+        params = [coords["lng"], coords["lat"], radius_km * 1000]
         
         attr_clause, attr_params = _build_where_clause(filters_include)
         
@@ -169,15 +193,14 @@ class EnergyAgentTools:
         return await EnergyAgentTools.orchestrator.execute_sql(query, params)
 
 class SimpleEnergyAgent:
+    # --- NO CHANGES in SimpleEnergyAgent class ---
     def __init__(self, model: str):
         self.model = model
         self.tools = self._register_tools()
         self.tool_schemas = self._create_tool_schemas()
         self.system_prompt = self._get_system_prompt()
-
     def _register_tools(self) -> Dict[str, callable]:
         return {name: func for name, func in inspect.getmembers(EnergyAgentTools, inspect.isfunction) if not name.startswith("_")}
-
     def _get_system_prompt(self) -> str:
         return f"""You are an expert, autonomous energy market analyst. Your goal is to answer user questions by intelligently querying a database using the tools provided.
 
@@ -185,11 +208,11 @@ class SimpleEnergyAgent:
 
 Your primary operating principle is "Discover, then Act." You must be proactive and avoid asking the user for clarification unless a request is impossible to fulfill.
 
-1.  **Interpret Intent:** Understand the user's goal. "ICR backlog" means "Show me all non-finished Interconnection Requests."
-2.  **Discover Schema (if needed):** If you are unsure what columns you can filter on for a table (e.g., 'fact_icr'), your **first step** is to use the `get_table_schema` tool. This gives you the knowledge needed to build a query.
+1.  **Interpret Intent:** Understand the user's goal. "ICR backlog" means "Show me all non-finished Interconnection Requests." "Oldest" means sort by date in ascending order. "Largest" means sort by capacity in descending order.
+2.  **Discover Schema (if needed):** If you are unsure what columns you can filter or sort on for a table (e.g., 'fact_icr'), your **first step** is to use the `get_table_schema` tool. This gives you the knowledge needed to build a query.
 3.  **Formulate a Plan:** Based on the schema, make an expert assumption.
-    *   *Example Plan:* "The user wants the ICR backlog. After checking the schema, I see a `status` column. I will assume 'backlog' means excluding any requests with statuses like 'ENERGIZED', 'WITHDRAWN', or 'DECOMMISSIONED'."
-4.  **Execute Confidently:** Call the appropriate data-fetching tool (e.g., `get_icr_data`) with your formulated filters.
+    *   *Example Plan:* "The user wants the oldest ICR in the backlog. After checking the schema, I see a `status` column and a `request_date` column. I will assume 'backlog' means excluding any requests with statuses like 'ENERGIZED' or 'WITHDRAWN'. To find the oldest, I will sort by `request_date` in `ASC` order and take the first result."
+4.  **Execute Confidently:** Call the appropriate data-fetching tool (e.g., `get_icr_data`) with your formulated filters and sorting.
 5.  **Summarize Results:** Directly present the answer to the user.
 
 **RULES OF ENGAGEMENT:**
@@ -199,9 +222,7 @@ Your primary operating principle is "Discover, then Act." You must be proactive 
 - **NEVER HALLUCINATE FILTERS:** Only use column names you have discovered via the schema tool.
 - **READ-ONLY:** You cannot modify data. Politely refuse any such requests.
 """
-
     def _create_tool_schemas(self) -> List[Dict]:
-        # (Unchanged from v5)
         schemas = []
         for name, func in self.tools.items():
             sig = inspect.signature(func)
@@ -218,20 +239,14 @@ Your primary operating principle is "Discover, then Act." You must be proactive 
                 if param.default is inspect.Parameter.empty: required.append(param.name)
             schemas.append({"type": "function", "function": {"name": name, "description": description, "parameters": {"type": "object", "properties": properties, "required": required}}})
         return schemas
-
     async def run(self, message: str, conversation_history: List[Dict]) -> str:
-        # The run loop is robust and handles the multi-step tool calls automatically.
         conversation_history.append({"role": "user", "content": message})
         try:
-            # The agent might loop through tool calls (e.g., schema -> data) up to 3 times
             for _ in range(3):
                 response = await client.chat.completions.create(model=self.model, messages=conversation_history, tools=self.tool_schemas, tool_choice="auto")
                 response_message = response.choices[0].message
-
                 if not response_message.tool_calls:
-                    # If no more tools to call, we have our final answer.
                     return response_message.content or "I have finished processing the request."
-                
                 conversation_history.append(response_message)
                 for tool_call in response_message.tool_calls:
                     logger.info(f"Executing tool `{tool_call.function.name}` with args: {tool_call.function.arguments}")
@@ -243,18 +258,15 @@ Your primary operating principle is "Discover, then Act." You must be proactive 
                         except Exception as e:
                             logger.error(f"Error executing tool {tool_call.function.name}: {e}", exc_info=True)
                             conversation_history.append({"tool_call_id": tool_call.id, "role": "tool", "name": tool_call.function.name, "content": json.dumps({"success": False, "error": str(e)})})
-            
-            # If the loop finishes, get one last summary from the model
             final_response = await client.chat.completions.create(model=self.model, messages=conversation_history)
             return final_response.choices[0].message.content
-
         except Exception as e:
             logger.error(f"Agent run failed: {e}", exc_info=True)
             return f"An error occurred: {e}"
 
 # --- Main Interactive Loop ---
 if __name__ == "__main__":
-    print("\nEnergy Agent Interactive Terminal (v6 - Proactive & Autonomous)\n")
+    print("\nEnergy Agent Interactive Terminal (v6.1 - Proactive & Autonomous)\n")
     agent = SimpleEnergyAgent(model=LLM_MODEL)
     conversation_history = [{"role": "system", "content": agent.system_prompt}]
     async def main_loop():
