@@ -4,6 +4,7 @@ import os
 import shutil
 from pathlib import Path
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # --- Configuration ---
 PROJECT_ID = "crystal-2f87e"  # Your GCP Project ID
@@ -11,10 +12,13 @@ REGION = "us-central1"        # The region for your function
 
 # List of functions to deploy
 # Format: (handler_module, function_name_in_code, desired_deployed_name, memory)
-# handler_module is the python module path, e.g. 'energy_platform.energy_agent'
+# handler_module is the python module path, e.g. 'energy_agent.energy_agent'
 FUNCTIONS_TO_DEPLOY = [
-    ("energy_platform.energy_agent", "energy_agent", "energy-agent", "512MB")
+    ("energy_agent.energy_agent", "energy_agent", "energy-agent", "512MB"),
+    ("get_power_infra.get_power_infra", "get_power_infrastructure", "get-power-infrastructure", "512MB"),
 ]
+
+GCP_CLI_PREFIX = "gcp-cli-"
 
 # Files and folders to always include if present
 ALWAYS_INCLUDE = [".env"]
@@ -60,7 +64,7 @@ def collect_all_imports(build_dir):
 def build_deploy_dir(handler_module):
     """
     Build a minimal deploy directory for the function.
-    handler_module: e.g. 'energy_platform.energy_agent'
+    handler_module: e.g. 'energy_agent.energy_agent'
     Returns the path to the build directory.
     """
     build_dir = f"build_{handler_module.replace('.', '_')}"
@@ -71,7 +75,7 @@ def build_deploy_dir(handler_module):
     # Copy handler module and its parent package
     parts = handler_module.split('.')
     if len(parts) > 1:
-        # e.g. energy_platform.energy_agent -> copy energy_platform/
+        # e.g. energy_agent.energy_agent -> copy energy_agent/
         top_dir = parts[0]
         copy_item(top_dir, os.path.join(build_dir, top_dir))
     else:
@@ -115,7 +119,9 @@ def generate_requirements_with_pipreqs(build_dir):
 
 def deploy_function(handler_module, entry_point, deployed_name, memory, project, region):
     """Deploys a single Cloud Function from a minimal build directory."""
-    print(f"--- Deploying function '{deployed_name}' ---")
+    # Prefix the deployed function name
+    deployed_name_with_prefix = f"{GCP_CLI_PREFIX}{deployed_name}"
+    print(f"--- Deploying function '{deployed_name_with_prefix}' ---")
 
     build_dir = build_deploy_dir(handler_module)
     write_main_py(build_dir, handler_module, entry_point)
@@ -127,7 +133,7 @@ def deploy_function(handler_module, entry_point, deployed_name, memory, project,
         "gcloud",
         "functions",
         "deploy",
-        deployed_name,
+        deployed_name_with_prefix,
         "--gen2",
         f"--project={project}",
         f"--region={region}",
@@ -156,10 +162,10 @@ def deploy_function(handler_module, entry_point, deployed_name, memory, project,
 
         # Check for errors
         if process.returncode != 0:
-            print(f"\n[ERROR] Deployment failed for {deployed_name} with exit code {process.returncode}.")
+            print(f"\n[ERROR] Deployment failed for {deployed_name_with_prefix} with exit code {process.returncode}.")
             return False
         else:
-            print(f"\n[SUCCESS] Successfully deployed {deployed_name}.")
+            print(f"\n[SUCCESS] Successfully deployed {deployed_name_with_prefix}.")
             return True
 
     except FileNotFoundError:
@@ -173,17 +179,29 @@ def deploy_function(handler_module, entry_point, deployed_name, memory, project,
         remove_build_dir(build_dir)
 
 def main():
-    """Main function to deploy all configured Cloud Functions."""
+    """Main function to deploy all configured Cloud Functions in parallel."""
     print("Starting deployment of Google Cloud Functions...")
 
-    success_count = 0
-    failure_count = 0
+    results = []
+    with ThreadPoolExecutor() as executor:
+        future_to_func = {
+            executor.submit(
+                deploy_function,
+                handler_module, entry_point, deployed_name, memory, PROJECT_ID, REGION
+            ): (handler_module, deployed_name)
+            for handler_module, entry_point, deployed_name, memory in FUNCTIONS_TO_DEPLOY
+        }
+        for future in as_completed(future_to_func):
+            handler_module, deployed_name = future_to_func[future]
+            try:
+                result = future.result()
+                results.append((handler_module, deployed_name, result))
+            except Exception as exc:
+                print(f"\n[ERROR] {deployed_name} generated an exception: {exc}")
+                results.append((handler_module, deployed_name, False))
 
-    for handler_module, entry_point, deployed_name, memory in FUNCTIONS_TO_DEPLOY:
-        if deploy_function(handler_module, entry_point, deployed_name, memory, PROJECT_ID, REGION):
-            success_count += 1
-        else:
-            failure_count += 1
+    success_count = sum(1 for _, _, r in results if r)
+    failure_count = sum(1 for _, _, r in results if not r)
 
     print("\n--- Deployment Summary ---")
     print(f"Successfully deployed: {success_count}")
