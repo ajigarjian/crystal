@@ -14,6 +14,7 @@ import requests
 
 # --- Local Dependencies ---
 from .sql_agent import SQLAgent, ToolOrchestrator, _build_where_clause, is_safe_identifier
+from helpers.db_utils import get_connection_pool  # Use explicit pool management like power_infra
 
 # --- Configuration & Utilities ---
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -375,6 +376,8 @@ def energy_agent(request):
     import logging
     from flask import jsonify, Response
     from helpers.db_utils import check_usage_limit
+    pool = get_connection_pool()
+    conn = None
     
     logger = logging.getLogger(__name__)
     logger.info("energy_agent function initialized successfully.")
@@ -390,10 +393,23 @@ def energy_agent(request):
         response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
         return response
 
-    # Delegate the streaming response to the agent-specific handler
-    stream = energy_agent_stream_generator(request)
-    response = Response(stream, mimetype='application/x-ndjson')
-    response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
-    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
-    return response 
+    try:
+        conn = pool.getconn()
+        # Optionally, you could pass conn to downstream logic if needed
+        stream = energy_agent_stream_generator(request)
+        response = Response(stream, mimetype='application/x-ndjson')
+        response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        return response
+    except Exception as e:
+        logger.error(f"Error in energy_agent entrypoint: {e}")
+        response = jsonify({"error": "An internal error occurred."})
+        response.status_code = 500
+        response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        return response
+    finally:
+        if conn:
+            pool.putconn(conn) 
