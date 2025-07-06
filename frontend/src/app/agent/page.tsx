@@ -8,13 +8,37 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Send, Sparkles, Zap, MessageCircle, ArrowRight } from "lucide-react";
+import { streamAgentResponse } from "@/lib/gcp";
+import { ToolCallDisplay } from "@/components/ToolCallDisplay";
+
+interface ToolCallContent {
+  name: string;
+  arguments: Record<string, unknown>;
+}
 
 interface Message {
   id: string;
-  type: "user" | "assistant";
-  content: string;
+  type: "user" | "assistant" | "tool_code";
+  content: string | ToolCallContent;
   timestamp: Date;
 }
+
+const FormattedMessageContent = ({ content }: { content: string }) => {
+  if (!content) {
+    return null;
+  }
+  const parts = content.split(/(\*\*.*?\*\*)/g);
+  return (
+    <>
+      {parts.map((part, index) => {
+        if (part.startsWith('**') && part.endsWith('**')) {
+          return <strong key={index}>{part.slice(2, -2)}</strong>;
+        }
+        return part;
+      })}
+    </>
+  );
+};
 
 const examplePrompts = [
   {
@@ -50,7 +74,7 @@ export default function AgentMode() {
   }, [messages]);
 
   const handleSendMessage = async () => {
-    if (!input.trim()) return;
+    if (!input.trim() || isLoading) return;
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -58,22 +82,80 @@ export default function AgentMode() {
       content: input,
       timestamp: new Date(),
     };
-
-    setMessages((prev) => [...prev, userMessage]);
+    
+    const currentInput = input;
     setInput("");
     setIsLoading(true);
 
-    // Simulate AI response
-    setTimeout(() => {
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        type: "assistant",
-        content: "I'm processing your request. This is a demo response that shows how the Agent Mode interface will work with real AI capabilities.",
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, assistantMessage]);
-      setIsLoading(false);
-    }, 1500);
+    const newMessages: Message[] = [...messages, userMessage];
+    setMessages(newMessages);
+
+    const assistantMessageId = (Date.now() + 1).toString();
+    setMessages((prev) => [
+        ...prev,
+        {
+            id: assistantMessageId,
+            type: 'assistant',
+            content: '',
+            timestamp: new Date(),
+        }
+    ]);
+
+    const history = newMessages
+      .filter(msg => msg.type === 'user' || msg.type === 'assistant')
+      .map((msg) => ({
+          role: msg.type as 'user' | 'assistant',
+          content: msg.content as string,
+      }));
+    history.pop(); 
+
+    await streamAgentResponse(
+      currentInput,
+      history,
+      (chunk) => {
+        if (chunk.type === "text" && typeof chunk.content === 'string') {
+          setMessages(prev => prev.map(msg => 
+            msg.id === assistantMessageId 
+              ? { ...msg, content: (msg.content as string) + chunk.content }
+              : msg
+          ));
+        } else if (chunk.type === "tool_code") {
+          const toolMessage: Message = {
+            id: (Date.now() + Math.random()).toString(),
+            type: "tool_code",
+            content: chunk.content as ToolCallContent,
+            timestamp: new Date(),
+          };
+          setMessages(prev => {
+            const assistantIndex = prev.findIndex(m => m.id === assistantMessageId);
+            if (assistantIndex > -1) {
+              const newMsgs = [...prev];
+              newMsgs.splice(assistantIndex, 0, toolMessage);
+              return newMsgs;
+            }
+            return [...prev, toolMessage];
+          });
+        } else if (chunk.type === "error") {
+          setMessages(prev => prev.map(msg => 
+            msg.id === assistantMessageId 
+              ? { ...msg, content: (msg.content as string) + `\n\n**Error:** ${chunk.content}` }
+              : msg
+          ));
+        }
+      },
+      () => { // onClose
+        setIsLoading(false);
+        inputRef.current?.focus();
+      },
+      (error) => { // onError
+        setMessages(prev => prev.map(msg => 
+          msg.id === assistantMessageId 
+            ? { ...msg, content: (msg.content as string) + `\n\n**API Error:** ${error.message}` }
+            : msg
+        ));
+        setIsLoading(false);
+      }
+    );
   };
 
   const handleExamplePrompt = (prompt: string) => {
@@ -180,40 +262,52 @@ export default function AgentMode() {
           <div className="space-y-6">
             <ScrollArea className="h-[60vh]">
               <div className="space-y-4">
-                {messages.map((message) => (
-                  <div
-                    key={message.id}
-                    className={`flex ${
-                      message.type === "user" ? "justify-end" : "justify-start"
-                    }`}
-                  >
+                {messages.map((message) => {
+                  if (message.type === 'tool_code') {
+                    const toolContent = message.content as ToolCallContent;
+                    return (
+                      <ToolCallDisplay
+                        key={message.id}
+                        name={toolContent.name}
+                        args={toolContent.arguments}
+                      />
+                    );
+                  }
+                  return (
                     <div
-                      className={`max-w-xs md:max-w-md lg:max-w-lg xl:max-w-xl p-4 rounded-2xl ${
-                        message.type === "user"
-                          ? "bg-blue-500 text-white"
-                          : "bg-white dark:bg-slate-800 text-slate-900 dark:text-white border border-slate-200 dark:border-slate-700"
+                      key={message.id}
+                      className={`flex ${
+                        message.type === "user" ? "justify-end" : "justify-start"
                       }`}
                     >
-                      <p className="whitespace-pre-wrap leading-relaxed">
-                        {message.content}
-                      </p>
-                      <div className="flex items-center gap-2 mt-2">
-                        <span
-                          className={`text-xs ${
-                            message.type === "user"
-                              ? "text-blue-100"
-                              : "text-slate-500 dark:text-slate-400"
-                          }`}
-                        >
-                          {message.timestamp.toLocaleTimeString([], {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                        </span>
+                      <div
+                        className={`max-w-xs md:max-w-md lg:max-w-lg xl:max-w-xl p-4 rounded-2xl ${
+                          message.type === "user"
+                            ? "bg-blue-500 text-white"
+                            : "bg-white dark:bg-slate-800 text-slate-900 dark:text-white border border-slate-200 dark:border-slate-700"
+                        }`}
+                      >
+                        <p className="whitespace-pre-wrap leading-relaxed">
+                          <FormattedMessageContent content={message.content as string} />
+                        </p>
+                        <div className="flex items-center gap-2 mt-2">
+                          <span
+                            className={`text-xs ${
+                              message.type === "user"
+                                ? "text-blue-100"
+                                : "text-slate-500 dark:text-slate-400"
+                            }`}
+                          >
+                            {message.timestamp.toLocaleTimeString([], {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          </span>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
 
                 {isLoading && (
                   <div className="flex justify-start">

@@ -154,10 +154,10 @@ class SQLAgent:
             })
         return schemas
 
-    async def run(self, message: str, conversation_history: List[Dict]) -> str:
+    async def run(self, message: str, conversation_history: List[Dict]):
         """
         Main execution loop for the agent.
-        Takes a user message and conversation history, and returns the agent's final text response.
+        Takes a user message and conversation history, and yields the agent's actions and final response.
         """
         conversation_history.append({"role": "user", "content": message})
 
@@ -174,7 +174,9 @@ class SQLAgent:
 
                 if not response_message.tool_calls:
                     logger.info("No more tool calls from LLM. Finalizing response.")
-                    return response_message.content or "I have finished processing the request."
+                    if response_message.content:
+                        yield json.dumps({"type": "text", "content": response_message.content})
+                    return
 
                 conversation_history.append(response_message)
 
@@ -185,6 +187,13 @@ class SQLAgent:
                     if func := self.tools.get(tool_name):
                         try:
                             args = json.loads(tool_call.function.arguments)
+                            yield json.dumps({
+                                "type": "tool_code",
+                                "content": {
+                                    "name": tool_name,
+                                    "arguments": args
+                                }
+                            })
                             result = await func(**args)
 
                             logger.debug(f"RAW tool result for `{tool_name}`: {result}")
@@ -207,9 +216,16 @@ class SQLAgent:
                             })
 
             # After the loop, get a final response from the model
-            final_response = await client.chat.completions.create(model=self.model, messages=conversation_history)
-            return final_response.choices[0].message.content
+            final_response_stream = await client.chat.completions.create(
+                model=self.model, 
+                messages=conversation_history,
+                stream=True
+            )
+            async for chunk in final_response_stream:
+                content = chunk.choices[0].delta.content
+                if content:
+                    yield json.dumps({"type": "text", "content": content})
 
         except Exception as e:
             logger.error(f"Agent run failed entirely: {e}", exc_info=True)
-            return f"An error occurred: {e}" 
+            yield json.dumps({"type": "error", "content": f"An error occurred: {str(e)}"}) 

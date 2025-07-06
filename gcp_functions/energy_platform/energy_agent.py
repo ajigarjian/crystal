@@ -13,7 +13,7 @@ import asyncio
 import requests
 
 # --- Local Dependencies ---
-from sql_agent import SQLAgent, ToolOrchestrator, _build_where_clause, is_safe_identifier
+from .sql_agent import SQLAgent, ToolOrchestrator, _build_where_clause, is_safe_identifier
 
 # --- Configuration & Utilities ---
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -288,6 +288,59 @@ SYSTEM_PROMPT = """You are an expert, autonomous energy market analyst. Your goa
 - **NEVER GUESS:** Don't guess IDs, column names, or filter values. Use discovery tools (`get_table_schema`, `get_unique_column_values`, `get_all_metrics`) to find them.
 - **RETURN ALL DATA:** By default, return all matching data. Do not use the `limit` parameter unless the user explicitly asks for a specific number of items (e.g., "top 5", "10 most recent").
 """
+
+def energy_agent_stream_generator(request):
+    """
+    Handles a request for the energy agent and returns a streaming generator.
+    The request parsing is done upfront, while the actual processing is
+    deferred to a generator that runs outside the initial request context.
+    """
+    # Eagerly parse the request data while in context to avoid "working outside of request context" errors.
+    try:
+        request_data = request.get_json(silent=True) or {}
+        message = request_data.get('message', '')
+        history = request_data.get('history', [])
+    except Exception as e:
+        logger.error(f"Error parsing request JSON: {e}", exc_info=True)
+        def error_generator():
+            yield json.dumps({"type": "error", "content": "Invalid request data."}) + '\n'
+        return error_generator()
+
+    # This generator function will be executed by the web server outside the main request thread.
+    def generator():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            if not message:
+                yield f'{json.dumps({"type": "error", "content": "Message parameter is required"})}\n'
+                return
+
+            conversation_history = [{"role": "system", "content": SYSTEM_PROMPT}] + history
+
+            agent = SQLAgent(
+                model=LLM_MODEL,
+                system_prompt=SYSTEM_PROMPT,
+                tools_class=EnergyAgentTools
+            )
+            
+            async_gen = agent.run(message, conversation_history)
+            
+            while True:
+                try:
+                    chunk = loop.run_until_complete(async_gen.__anext__())
+                    yield f"{chunk}\n"
+                except StopAsyncIteration:
+                    break
+        except Exception as e:
+            logger.error(f"Error during agent execution stream: {e}", exc_info=True)
+            error_payload = json.dumps({"type": "error", "content": "An internal error occurred during the stream."})
+            yield f"{error_payload}\n"
+        finally:
+            loop.close()
+            
+    return generator()
+
 
 def main():
     """Main function to run the interactive agent."""
