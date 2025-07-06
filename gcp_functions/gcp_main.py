@@ -11,6 +11,8 @@ import traceback
 import logging
 from flask import Flask, request as flask_request, jsonify, make_response, Response
 
+os.environ["FUNCTIONS_EMULATOR"] = "True" # This file should only be run from the local emulator, never deployed.
+
 # Set the DJANGO_SETTINGS_MODULE environment variable
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "django_app.settings")
 
@@ -68,20 +70,8 @@ def energy_agent(request):
     Energy Agent endpoint for GCP Cloud Functions. It delegates the streaming logic
     to a specialized handler.
     """
-    logger.info("energy_agent function initialized successfully.")
-
-    # Rate limiting
-    ip_address = request.headers.get('X-Forwarded-For', request.remote_addr) if hasattr(request, 'headers') else None
-    exceeded, error_message = check_usage_limit(ip_address, 'energy_agent')
-    if exceeded:
-        response = jsonify({"error": error_message})
-        response.status_code = 429
-        return _add_cors_headers(response)
-
-    # Delegate the streaming response to the agent-specific handler
-    stream = energy_agent_stream_generator(request)
-    response = Response(stream, mimetype='application/x-ndjson')
-    return _add_cors_headers(response)
+    from energy_platform.energy_agent import energy_agent as agent_entry
+    return agent_entry(request)
 
 def hello_world(request):
     """Dummy Hello World endpoint for testing purposes."""

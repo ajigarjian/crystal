@@ -11,8 +11,6 @@ import os
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
-os.environ["FUNCTIONS_EMULATOR"] = "True"
-
 # --- Local Dependencies ---
 from helpers.db_utils import execute_query
 

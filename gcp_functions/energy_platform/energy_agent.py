@@ -364,4 +364,36 @@ def main():
     asyncio.run(main_loop())
 
 if __name__ == "__main__":
-    main() 
+    main()
+
+# --- GCP Cloud Function entry point ---
+def energy_agent(request):
+    """
+    Energy Agent endpoint for GCP Cloud Functions. It delegates the streaming logic
+    to a specialized handler.
+    """
+    import logging
+    from flask import jsonify, Response
+    from helpers.db_utils import check_usage_limit
+    
+    logger = logging.getLogger(__name__)
+    logger.info("energy_agent function initialized successfully.")
+
+    # Rate limiting
+    ip_address = request.headers.get('X-Forwarded-For', request.remote_addr) if hasattr(request, 'headers') else None
+    exceeded, error_message = check_usage_limit(ip_address, 'energy_agent')
+    if exceeded:
+        response = jsonify({"error": error_message})
+        response.status_code = 429
+        response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        return response
+
+    # Delegate the streaming response to the agent-specific handler
+    stream = energy_agent_stream_generator(request)
+    response = Response(stream, mimetype='application/x-ndjson')
+    response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+    return response 

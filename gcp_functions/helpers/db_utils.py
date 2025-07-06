@@ -39,35 +39,19 @@ def get_connection_pool(min_conn=1, max_conn=20):
                     port=os.environ.get('DB_PORT', 1234)
                 )
             else:
-                # Production environment - use Unix socket or public IP
-                db_instance = os.environ.get('DB_INSTANCE', 'crystal-2f87e:us-east4:crystal-sql')
+                # Production environment - use private IP (same VPC, serverless VPC connector)
                 db_name = os.environ.get('DB_NAME')
                 db_user = os.environ.get('DB_USER')
                 db_password = os.environ.get('DB_PASSWORD')
-                
-                # Try connecting via Unix socket first
-                try:
-                    socket_dir = os.environ.get('DB_SOCKET_DIR', '/cloudsql')
-                    unix_socket = f'{socket_dir}/{db_instance}'
-                    
-                    _pool = psycopg2.pool.ThreadedConnectionPool(
-                        min_conn, max_conn,
-                        dbname=db_name,
-                        user=db_user,
-                        password=db_password,
-                        host=unix_socket
-                    )
-                except Exception as socket_error:
-                    logger.warning(f"Socket pool creation failed, trying public IP: {socket_error}")
-                    # Fall back to public IP connection
-                    _pool = psycopg2.pool.ThreadedConnectionPool(
-                        min_conn, max_conn,
-                        dbname=db_name,
-                        user=db_user,
-                        password=db_password,
-                        host='34.48.13.135',
-                        port=5432
-                    )
+                private_ip = os.environ.get('DB_PRIVATE_IP', '172.28.48.3')  # Set your private IP here or via env
+                _pool = psycopg2.pool.ThreadedConnectionPool(
+                    min_conn, max_conn,
+                    dbname=db_name,
+                    user=db_user,
+                    password=db_password,
+                    host=private_ip,
+                    port=5432
+                )
             
             logger.info("Connection pool created successfully")
         except Exception as e:
@@ -93,24 +77,13 @@ def get_sqlalchemy_engine():
             db_url = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
             _engine = create_engine(db_url)
         else:
-            # Production environment - try Unix socket first, then public IP
-            db_instance = os.environ.get('DB_INSTANCE', 'crystal-2f87e:us-east4:crystal-sql')
+            # Production environment - use private IP (same VPC, serverless VPC connector)
             db_name = os.environ.get('DB_NAME')
             db_user = os.environ.get('DB_USER')
             db_password = os.environ.get('DB_PASSWORD')
-            
-            try:
-                # Unix socket path for Cloud SQL
-                socket_dir = os.environ.get('DB_SOCKET_DIR', '/cloudsql')
-                unix_socket = f'{socket_dir}/{db_instance}'
-                
-                db_url = f"postgresql://{db_user}:{db_password}@/{db_name}?host={unix_socket}"
-                _engine = create_engine(db_url)
-            except Exception as socket_error:
-                logger.warning(f"Socket engine creation failed, trying public IP: {socket_error}")
-                # Fall back to public IP connection
-                db_url = f"postgresql://{db_user}:{db_password}@34.48.13.135:5432/{db_name}"
-                _engine = create_engine(db_url)
+            private_ip = os.environ.get('DB_PRIVATE_IP', '10.0.0.3')  # Set your private IP here or via env
+            db_url = f"postgresql://{db_user}:{db_password}@{private_ip}:5432/{db_name}"
+            _engine = create_engine(db_url)
     
     return _engine
 
