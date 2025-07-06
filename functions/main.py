@@ -5,6 +5,9 @@ import decimal # Add import for decimal
 import math
 
 from factchecker.interconnection.icr import compute_diffs, download_icr_excel, fetch_existing_icr, send_email, upload_diff_to_gcs, upsert_icr # Add import for math
+import math
+
+from factchecker.interconnection.icr import compute_diffs, download_icr_excel, fetch_existing_icr, send_email, upload_diff_to_gcs, upsert_icr # Add import for math
 
 # Set the DJANGO_SETTINGS_MODULE environment variable
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "factchecker.settings")
