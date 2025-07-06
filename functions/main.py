@@ -2,7 +2,9 @@ import os
 import django
 from django.conf import settings
 import decimal # Add import for decimal
-import math # Add import for math
+import math
+
+from factchecker.interconnection.icr import compute_diffs, download_icr_excel, fetch_existing_icr, send_email, upload_diff_to_gcs, upsert_icr # Add import for math
 
 # Set the DJANGO_SETTINGS_MODULE environment variable
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "factchecker.settings")
@@ -2881,3 +2883,105 @@ def get_bpa_generation_timeseries(request: https_fn.Request) -> https_fn.Respons
             status=500,
             headers={"Content-Type": "application/json"}
         )
+    
+
+@https_fn.on_request(
+    cors=options.CorsOptions(
+        cors_origins=[
+            "https://crystal-2f87e.web.app",
+            "https://askcrystal.info",
+            "https://www.askcrystal.info",
+            "http://localhost:3000",
+            "http://localhost:5173",
+        ],
+        cors_methods=["get", "post", "options"],
+    ),
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=60,
+)
+def ingest_bpa_icr(request: https_fn.Request) -> https_fn.Response:
+    """
+    Ingest BPA ICR Excel, publish diffs, upsert to DB via our Django pool.
+    """
+    headers = {"Access-Control-Allow-Origin": "*"}
+
+    ICR_URL       = (
+        "https://www.bpa.gov/-/media/Aep/transmission-media-documents/"
+        "InterconnectionQueueOutput.xlsx"
+    )
+    
+    ICR_DIFF_BUCKET = "crystal-icr-reports"
+    # CORS preflight
+    if request.method == "OPTIONS":
+        return ("", 204, {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type",
+            "Access-Control-Max-Age": "3600",
+        })
+
+    logger.info("Starting BPA ICR ingest")
+
+    # 1) Download & parse latest Excel
+    try:
+        df_new = download_icr_excel(ICR_URL)
+        df_new.set_index("request_number", inplace=True)
+    except Exception as e:
+        logger.error(f"Failed to download or parse ICR Excel: {e}", exc_info=True)
+        return https_fn.Response(
+            json.dumps({"status": "error", "message": "Download/parse failed", "details": str(e)}),
+            status=500,
+            headers=headers
+        )
+
+    # 2) Fetch existing state from Django’s pool
+    pool = get_connection_pool()
+    conn = pool.getconn()
+    try:
+        df_old = fetch_existing_icr(conn)
+
+        # 3) Compute diffs
+        df_diff = compute_diffs(df_new, df_old)
+
+        # 4) If any changes, write diff file, publish Pub/Sub, email
+        if not df_diff.empty:
+            print("There was a change!")
+            print(df_diff)
+            # diff_uri = upload_diff_to_gcs(df_diff, ICR_DIFF_BUCKET)
+            # publish_notification(
+            #     os.environ["ICR_PUBSUB_TOPIC"],
+            #     {
+            #         "event": "icr_diff",
+            #         "diff_uri": diff_uri,
+            #         "rows_changed": len(df_diff),
+            #         "timestamp_utc": datetime.utcnow().isoformat() + "Z",
+            #     },
+            # )
+            # # optional email alert
+            # html = (
+            #     f"<p>ICR diff detected: {len(df_diff)} changes.</p>"
+            #     f"<p>See <a href='{diff_uri}'>{diff_uri}</a></p>"
+            # )
+            # send_email("BPA ICR Diff Notification", html)
+
+        # 5) Upsert all rows
+        affected = upsert_icr(conn, df_new)
+        conn.commit()
+
+        msg = {
+            "status": "success",
+            "message": f"ICR ingest complete – {len(df_diff)} diffs, {affected} upserted."
+        }
+        logger.info(msg["message"])
+        return https_fn.Response(json.dumps(msg), status=200, headers=headers)
+
+    except Exception as err:
+        conn.rollback()
+        logger.exception("ICR ingest transaction failed")
+        return https_fn.Response(
+            json.dumps({"status": "error", "message": str(err)}),
+            status=500,
+            headers=headers
+        )
+    finally:
+        pool.putconn(conn)
