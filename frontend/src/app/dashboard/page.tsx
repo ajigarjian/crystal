@@ -23,7 +23,7 @@ import { Separator } from "@/components/ui/separator"
 import { MetricsTable, transformSectionCardDataToMetrics } from "@/components/metrics-table"
 import { ChartBPAGenerationMix } from "@/components/chart-bpa-generation-mix"
 
-import { getDashboardSectionCards, getDashboardSectionCardsOptimized, SectionCardData, getDamLocations, DamLocation, getSnotelStations, SnotelStationData, getSnotelStationSummary, getPowerGenerators, getPowerPlants, GeneratorData, PowerPlantsData, initializeSmartWarmers } from "@/lib/firebase"
+import { getDashboardSectionCards, SectionCardData, getDamLocations, DamLocation, getSnotelStations, SnotelStationData, getSnotelStationSummary, getPowerGenerators, getPowerPlants, GeneratorData, PowerPlantsData } from "@/lib/firebase"
 
 export interface DamInfo {
   id: number;
@@ -273,8 +273,7 @@ export default function Page() {
       try {
         if (selectedFeature?.type === 'dam') {
           const damData = selectedFeature.data as DamInfo;
-          // Use optimized version with smart caching and pre-loading
-          const data = await getDashboardSectionCardsOptimized(damData.id);
+          const data = await getDashboardSectionCards(damData.id);
           setCurrentSectionCardData(data);
         } else if (selectedFeature?.type === 'snotel') {
           const snotelData = selectedFeature.data as SnotelStationInfo;
@@ -365,17 +364,6 @@ export default function Page() {
     }
     
     loadPowerGeneratorsForSearch();
-  }, []);
-
-  // Initialize enterprise-grade smart warming and caching
-  React.useEffect(() => {
-    // Initialize smart warming system on dashboard load
-    // This will:
-    // 1. Track user engagement (mouse movements, scrolling, etc.)
-    // 2. Pre-warm functions if user shows genuine interest
-    // 3. Pre-cache popular dam data for instant loading
-    // 4. Set up intelligent periodic warming
-    initializeSmartWarmers();
   }, []);
 
   // Prepare search data

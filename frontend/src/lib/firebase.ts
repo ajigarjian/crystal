@@ -1248,295 +1248,13 @@ export const warmAllFunctions = async () => {
   }
 };
 
-// ===== ENTERPRISE-GRADE SMART WARMING & CACHING =====
-
-/**
- * 🚀 ENTERPRISE-GRADE SMART WARMING & CACHING SYSTEM
- * 
- * This system implements industry-standard performance optimization strategies
- * used by Fortune 500 companies to reduce latency while controlling costs.
- * 
- * 🎯 WHAT IT DOES:
- * 1. Tracks user engagement to avoid wasting resources on bounce traffic
- * 2. Pre-warms Cloud Functions only when users show genuine interest
- * 3. Pre-caches popular dam data for instant loading
- * 4. Uses intelligent localStorage caching to reduce API calls
- * 5. Implements periodic warming only when user is active
- * 
- * 💰 COST BREAKDOWN:
- * - Static data caching: $0 (uses localStorage)
- * - Smart function warming: ~$0.50/month (10-15 targeted calls)
- * - Popular dam pre-caching: ~$2-5/month (top 4 dams)
- * - Total estimated cost: ~$3-6/month
- * 
- * ⚡ PERFORMANCE IMPACT:
- * - Reduces cold starts from 2-3 seconds to 0 seconds
- * - Popular dam clicks load instantly (pre-cached)
- * - 60-80% reduction in perceived latency
- * - Intelligent caching prevents redundant API calls
- * 
- * 🏢 ENTERPRISE FEATURES:
- * - Engagement-based warming (prevents waste on bounce traffic)
- * - Data-driven popular content pre-caching
- * - Intelligent cache invalidation with TTL
- * - Graceful degradation (warming failures are silent)
- * - Production-only warming (no dev environment waste)
- * 
- * 📊 ANALYTICS INTEGRATION:
- * - Tracks user engagement score
- * - Monitors cache hit rates
- * - Provides performance metrics in console
- * 
- * Used by companies like Netflix, Spotify, and Airbnb for similar optimization.
- */
-
-/**
- * Enhanced warming strategy with engagement detection and intelligent pre-caching
- * Used by Fortune 500 companies to reduce latency while controlling costs
- */
-
-// Engagement tracking for smart warming decisions
-let userEngagementScore = 0;
-let pageLoadTime = Date.now();
-let mouseMovements = 0;
-let scrollEvents = 0;
-let clickEvents = 0;
-
-// Track user engagement to determine warming eligibility
-const trackUserEngagement = () => {
-  const timeSinceLoad = Date.now() - pageLoadTime;
-  const engagementMetrics = {
-    timeOnPage: timeSinceLoad / 1000, // seconds
-    interactions: mouseMovements + scrollEvents + clickEvents,
-    avgInteractionRate: (mouseMovements + scrollEvents + clickEvents) / Math.max(timeSinceLoad / 1000, 1)
-  };
-  
-  // Calculate engagement score (0-100)
-  userEngagementScore = Math.min(100, 
-    (engagementMetrics.timeOnPage * 10) + 
-    (engagementMetrics.interactions * 2) + 
-    (engagementMetrics.avgInteractionRate * 20)
-  );
-  
-  return userEngagementScore;
-};
-
-// Set up engagement tracking listeners
-if (typeof window !== 'undefined') {
-  window.addEventListener('mousemove', () => mouseMovements++, { passive: true });
-  window.addEventListener('scroll', () => scrollEvents++, { passive: true });
-  window.addEventListener('click', () => clickEvents++, { passive: true });
-}
-
-/**
- * Smart pre-warming strategy that adapts based on user behavior
- * Only warms functions when user shows genuine engagement
- */
-export const smartWarmAndCache = async () => {
-  // Skip warming in development to avoid hitting local emulator unnecessarily
-  if (process.env.NODE_ENV === 'development') {
-    console.log('🔥 Smart warming skipped in development mode');
-    return;
-  }
-
-  // Phase 1: Wait for engagement signal (industry standard: 2-3 seconds)
-  await new Promise(resolve => setTimeout(resolve, 2000));
-  
-  // Phase 2: Check if user is still engaged
-  const engagementScore = trackUserEngagement();
-  if (engagementScore < 10) {
-    console.log('🔥 Smart warming skipped - low engagement score:', engagementScore);
-    return;
-  }
-
-  console.log('🔥 Starting smart warming - engagement score:', engagementScore);
-  
-  // Phase 3: Aggressive caching of static data (no additional cost)
-  await cacheStaticData();
-  
-  // Phase 4: Smart function warming based on engagement level
-  if (engagementScore > 30) {
-    await warmHighValueFunctions();
-  }
-  
-  // Phase 5: Pre-cache most common dam data for instant loading
-  if (engagementScore > 50) {
-    await preCachePopularDamData();
-  }
-};
-
-/**
- * Cache static data that rarely changes
- * Cost: $0 (uses localStorage, no API calls)
- */
-const cacheStaticData = async () => {
-  const cacheTimestamp = Date.now();
-  const cacheKey = 'crystal_static_data_v2';
-  const existingCache = localStorage.getItem(cacheKey);
-  
-  if (existingCache) {
-    const { timestamp } = JSON.parse(existingCache);
-    // Cache static data for 6 hours (it rarely changes)
-    if (cacheTimestamp - timestamp < 6 * 60 * 60 * 1000) {
-      console.log('📦 Static data cache still valid');
-      return;
-    }
-  }
-  
-  try {
-    // Only cache if not already cached recently
-    const [damLocations, snotelStations] = await Promise.all([
-      getDamLocations(),
-      getSnotelStations()
-    ]);
-    
-    const staticData = {
-      damLocations,
-      snotelStations,
-      timestamp: cacheTimestamp
-    };
-    
-    localStorage.setItem(cacheKey, JSON.stringify(staticData));
-    console.log('📦 Static data cached successfully');
-  } catch (error) {
-    console.warn('📦 Static data caching failed:', error);
-  }
-};
-
-/**
- * Warm the most critical functions that users interact with
- * Cost: ~$0.50/month (10-15 warming calls)
- */
-const warmHighValueFunctions = async () => {
-  const region = functions.region || 'us-central1';
-  const projectId = firebaseConfig.projectId;
-  const baseUrl = `https://${region}-${projectId}.cloudfunctions.net`;
-  
-  // Warm only the functions users actually click on (data-driven selection)
-  const criticalFunctions = [
-    'get_dashboard_section_cards_data',  // Most common: dam clicks
-    'get_inflow_timeseries',            // Second most common: chart loading
-    'get_snotel_station_observations',  // Third most common: station clicks
-    'get_ttc_flowgate_data'             // Fourth most common: flowgate analysis
-  ];
-  
-  const warmingPromises = criticalFunctions.map(functionName => 
-    fetch(`${baseUrl}/${functionName}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ warming: true })
-    }).catch(() => {}) // Silently ignore warming failures
-  );
-  
-  await Promise.allSettled(warmingPromises);
-  console.log('🔥 High-value functions warmed');
-};
-
-/**
- * Pre-cache data for the most popular dams to provide instant loading
- * Cost: ~$2-5/month (pre-cache 3-5 most popular dams)
- */
-const preCachePopularDamData = async () => {
-  // Data-driven: These are the most clicked dams based on usage analytics
-  const popularDamIds = [1, 2, 6, 7]; // Grand Coulee, Chief Joseph, The Dalles, Bonneville
-  
-  const cacheKey = 'crystal_popular_dams_v1';
-  const existingCache = localStorage.getItem(cacheKey);
-  
-  if (existingCache) {
-    const { timestamp } = JSON.parse(existingCache);
-    // Cache popular dam data for 30 minutes (it's somewhat dynamic)
-    if (Date.now() - timestamp < 30 * 60 * 1000) {
-      console.log('📊 Popular dam data cache still valid');
-      return;
-    }
-  }
-  
-  try {
-    // Pre-fetch section cards for popular dams
-    const popularDamDataPromises = popularDamIds.map(async (damId) => {
-      try {
-        const sectionCards = await getDashboardSectionCards(damId);
-        return { damId, sectionCards };
-      } catch (error) {
-        console.warn(`Failed to pre-cache dam ${damId}:`, error);
-        return { damId, sectionCards: [] };
-      }
-    });
-    
-    const popularDamData = await Promise.all(popularDamDataPromises);
-    
-    const cacheData = {
-      data: popularDamData,
-      timestamp: Date.now()
-    };
-    
-    localStorage.setItem(cacheKey, JSON.stringify(cacheData));
-    console.log('📊 Popular dam data pre-cached');
-  } catch (error) {
-    console.warn('📊 Popular dam pre-caching failed:', error);
-  }
-};
-
-/**
- * Enhanced initialization with smart warming
- * Replaces the basic initializeAppWarmers
- */
-export const initializeSmartWarmers = async () => {
-  // Start smart warming process
-  smartWarmAndCache();
-  
-  // Set up periodic warming only for production (every 8 minutes to stay warm)
-  if (process.env.NODE_ENV === 'production') {
-    setInterval(() => {
-      // Only warm if user is still on the page
-      if (document.visibilityState === 'visible') {
-        warmHighValueFunctions();
-      }
-    }, 8 * 60 * 1000); // 8 minutes
-  }
-};
-
-// Legacy function - kept for backward compatibility but enhanced
+// Warm functions on app initialization
 export const initializeAppWarmers = async () => {
-  console.log('🔥 Initializing smart warmers...');
-  return initializeSmartWarmers();
-};
-
-/**
- * Enhanced cache for dashboard section cards with popular dam pre-loading
- */
-export const getDashboardSectionCardsOptimized = async (damId: number) => {
-  // First check if we have pre-cached data for popular dams
-  const popularDamsCacheKey = 'crystal_popular_dams_v1';
-  const popularDamsCache = localStorage.getItem(popularDamsCacheKey);
+  // Warm critical functions immediately
+  warmAllFunctions();
   
-  if (popularDamsCache) {
-    const { data: popularDamData, timestamp } = JSON.parse(popularDamsCache);
-    
-    // Check if cache is still valid (30 minutes)
-    if (Date.now() - timestamp < 30 * 60 * 1000) {
-      const preCachedData = popularDamData.find((item: any) => item.damId === damId);
-      if (preCachedData && preCachedData.sectionCards.length > 0) {
-        console.log(`📊 Using pre-cached data for popular dam ${damId}`);
-        return preCachedData.sectionCards;
-      }
-    }
-  }
-  
-  // Fall back to regular caching
-  const regularCacheKey = `dashboard_cards_${damId}`;
-  const cached = apiCache.get(regularCacheKey);
-  if (cached) {
-    console.log(`📦 Using cached data for dam ${damId}`);
-    return cached;
-  }
-  
-  // Make API call and cache result
-  const data = await getDashboardSectionCards(damId);
-  apiCache.set(regularCacheKey, data, 30 * 1000); // 30 seconds cache
-  
-  return data;
+  // Set up periodic warming (every 10 minutes to keep functions hot)
+  setInterval(warmAllFunctions, 10 * 60 * 1000);
 };
 
 // Implement intelligent caching with TTL and invalidation
@@ -1589,7 +1307,17 @@ export const getPowerInfrastructureOptimized = async (bbox?: string, zoom?: numb
 };
 
 // Dashboard cards need shorter cache since they're more dynamic
-// (This function has been replaced with the enhanced version above)
+export const getDashboardSectionCardsOptimized = async (damId: number) => {
+  const cacheKey = `dashboard_cards_${damId}`;
+  
+  const cached = apiCache.get(cacheKey);
+  if (cached) return cached;
+  
+  const data = await getDashboardSectionCards(damId);
+  apiCache.set(cacheKey, data, 30 * 1000); // 30 seconds cache for dashboard
+  
+  return data;
+};
 
 // Deduplicate simultaneous identical requests
 const pendingRequests = new Map<string, Promise<any>>();
