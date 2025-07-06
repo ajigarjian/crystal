@@ -21,7 +21,7 @@ _Session = None
 # Global connection pool
 _pool = None
 
-def get_connection_pool(min_conn=1, max_conn=20):
+def get_connection_pool(min_conn=2, max_conn=30):
     """Create or get the connection pool"""
     global _pool
     
@@ -125,31 +125,26 @@ def get_db_session():
     return _Session()
 
 def execute_query(query, params=None, fetch_all=True):
-    """Execute a query and return results"""
-    conn = None
-    pool = get_connection_pool() # Get the pool
+    """Execute a query and return results with proper connection management"""
+    pool = get_connection_pool()
+    conn = pool.getconn()
+    
     try:
-        conn = pool.getconn() # Get connection from pool
-        conn.autocommit = True # Optional: Ensure commands are committed
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(query, params)
-            conn.commit() # Explicitly commit the transaction
             if fetch_all:
                 results = cursor.fetchall()
             else:
                 results = cursor.fetchone()
-            # Ensure cursor is closed before returning connection to pool
-            cursor.close() 
             return results
     except Exception as e:
-        # Rollback in case of error
         if conn:
-            conn.rollback() 
+            conn.rollback()
         logger.error(f"Query execution error: {e}")
         raise
     finally:
         if conn:
-            pool.putconn(conn) # Return connection to pool correctly
+            pool.putconn(conn)
 
 def get_usable_resources(dataset_id):
     """
