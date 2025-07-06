@@ -37,6 +37,10 @@ except Exception as django_setup_error:
 
 from helpers.db_utils import check_usage_limit
 from energy_agent.energy_agent import energy_agent_stream_generator
+# Import power functions
+from get_power_generators.get_power_generators import get_power_generators
+from get_power_infra.get_power_infra import get_power_infrastructure
+from get_power_plants.get_power_plants import get_power_plants
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -96,6 +100,24 @@ def hello_world_route():
         return _add_cors_headers(Response(status=204))
     return hello_world(flask_request)
 
+@app.route('/get-power-generators', methods=['GET', 'POST', 'OPTIONS'])
+def get_power_generators_route():
+    if flask_request.method == "OPTIONS":
+        return _add_cors_headers(Response(status=204))
+    return get_power_generators(flask_request)
+
+@app.route('/get-power-infrastructure', methods=['GET', 'POST', 'OPTIONS'])
+def get_power_infrastructure_route():
+    if flask_request.method == "OPTIONS":
+        return _add_cors_headers(Response(status=204))
+    return get_power_infrastructure(flask_request)
+
+@app.route('/get-power-plants', methods=['GET', 'POST', 'OPTIONS'])
+def get_power_plants_route():
+    if flask_request.method == "OPTIONS":
+        return _add_cors_headers(Response(status=204))
+    return get_power_plants(flask_request)
+
 def main(request):
     """
     Main entry point for GCP Cloud Functions that dispatches requests to the Flask app.
@@ -113,3 +135,12 @@ if __name__ == "__main__":
 
 # --- GCP Cloud Functions entry points ---
 # Deploy with entry point 'energy_agent' or 'hello_world' as needed 
+
+def get_power_generators_entry(request):
+    return get_power_generators(request)
+
+def get_power_infrastructure_entry(request):
+    return get_power_infrastructure(request)
+
+def get_power_plants_entry(request):
+    return get_power_plants(request) 

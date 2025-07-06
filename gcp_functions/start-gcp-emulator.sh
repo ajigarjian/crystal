@@ -19,6 +19,11 @@ cd "$(dirname "$0")"
 echo "Installing dependencies from requirements.txt..."
 pip install -r requirements.txt
 
+# List all top-level functions in the source file
+
+echo "Loaded functions in '$SOURCE_FILE':"
+python3 -c "import ast; print(', '.join([f.name for f in ast.parse(open('$SOURCE_FILE').read()).body if isinstance(f, ast.FunctionDef)]))"
+
 # Start the Functions Framework emulator
 echo "Starting emulator for all functions in '$SOURCE_FILE' on port $PORT..."
 functions-framework --source "$SOURCE_FILE" --target "main" --port "$PORT" --debug

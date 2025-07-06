@@ -339,7 +339,7 @@ export default function Page() {
   React.useEffect(() => {
     async function loadPowerInfrastructureForSearch() {
       try {
-        const { getPowerInfrastructure } = await import("@/lib/firebase");
+        const { getPowerInfrastructure } = await import("@/lib/gcp");
         const data = await getPowerInfrastructure();
         setPowerInfrastructureData(data);
       } catch (error) {
