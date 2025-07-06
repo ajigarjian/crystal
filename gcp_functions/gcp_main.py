@@ -36,7 +36,7 @@ except Exception as django_setup_error:
             raise
 
 from helpers.db_utils import check_usage_limit
-from energy_platform.energy_agent import energy_agent_stream_generator
+from energy_agent.energy_agent import energy_agent_stream_generator
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -70,7 +70,7 @@ def energy_agent(request):
     Energy Agent endpoint for GCP Cloud Functions. It delegates the streaming logic
     to a specialized handler.
     """
-    from energy_platform.energy_agent import energy_agent as agent_entry
+    from energy_agent.energy_agent import energy_agent as agent_entry
     return agent_entry(request)
 
 def hello_world(request):

@@ -3,6 +3,13 @@ Database utility functions for Firebase Cloud Functions.
 Provides connection and query execution for PostgreSQL database.
 """
 
+# Load environment variables from .env if present
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 import os
 import logging
 import psycopg2

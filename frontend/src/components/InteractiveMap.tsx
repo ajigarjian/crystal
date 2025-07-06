@@ -4,7 +4,7 @@ import * as React from 'react';
 import ReactMapGL, { Marker, Popup, NavigationControl, ViewStateChangeEvent, Source, Layer } from 'react-map-gl/mapbox';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { MapSkeleton } from "@/components/MapSkeleton";
-import { getPowerInfrastructure, PowerInfrastructureData, getPowerGenerators, GeneratorData, getPowerPlants, PowerPlantsData } from "@/lib/firebase";
+import { getPowerInfrastructure, PowerInfrastructureData, getPowerGenerators, GeneratorData, getPowerPlants, PowerPlantsData } from "@/lib/gcp";
 import { Switch } from "@/components/ui/switch";
 
 interface PointGeometry {
@@ -251,7 +251,8 @@ export function InteractiveMap({
       const newFilters = { ...prev };
       let current = newFilters as Record<string, unknown>;
       for (let i = 0; i < path.length - 1; i++) {
-        current[path[i]] = { ...current[path[i]] };
+        const currVal = current[path[i]];
+        current[path[i]] = (currVal && typeof currVal === 'object') ? { ...currVal } : {};
         current = current[path[i]] as Record<string, unknown>;
       }
       current[path[path.length - 1]] = value;
@@ -503,14 +504,11 @@ export function InteractiveMap({
     }
     
     const filteredFeatures = allPlantData.features.filter(feature => {
-      const plantSource = (feature.properties.plant_source || '').toLowerCase();
-      const plantMethod = (feature.properties.plant_method || '').toLowerCase();
-      const type = (feature.properties.type || '').toLowerCase();
-      
-      return enabledTypes.some(enabledType => 
-        plantSource.includes(enabledType.toLowerCase()) ||
-        plantMethod.includes(enabledType.toLowerCase()) ||
-        type.includes(enabledType.toLowerCase())
+      const fuelType = (feature.properties.fuel_type || '').toLowerCase();
+      const technology = (feature.properties.technology || '').toLowerCase();
+      return enabledTypes.some(enabledType =>
+        fuelType.includes(enabledType.toLowerCase()) ||
+        technology.includes(enabledType.toLowerCase())
       );
     });
     
@@ -600,7 +598,7 @@ export function InteractiveMap({
                 id: plantFeature.properties.id,
                 name: plantFeature.properties.name || 'Unnamed Plant',
                 type: 'plant',
-                fuelType: plantFeature.properties.plant_source || plantFeature.properties.plant_method || plantFeature.properties.type,
+                fuelType: plantFeature.properties.fuel_type || plantFeature.properties.technology || 'Unknown',
                 capacity: plantFeature.properties.capacity_mw,
                 operator: plantFeature.properties.operator,
                 status: plantFeature.properties.status,
@@ -618,13 +616,13 @@ export function InteractiveMap({
                 id: generatorFeature.properties.id,
                 name: generatorFeature.properties.name || generatorFeature.properties.plant_name || 'Unnamed Generator',
                 type: 'generator',
-                fuelType: generatorFeature.properties.fuel_type,
+                fuelType: generatorFeature.properties.fuel_type || generatorFeature.properties.technology || 'Generator',
                 capacity: generatorFeature.properties.capacity_mw,
                 operator: generatorFeature.properties.operator,
                 status: generatorFeature.properties.status,
                 commissioningDate: generatorFeature.properties.commissioning_date,
                 plantName: generatorFeature.properties.plant_name,
-                technology: generatorFeature.properties.technology
+                technology: generatorFeature.properties.technology || 'Unknown'
               };
               
               if (onGenerationClick) {
@@ -730,7 +728,7 @@ export function InteractiveMap({
               setHoveredGeneration({
                 id: plantFeature.properties.id,
                 name: plantFeature.properties.name || 'Unnamed Plant',
-                type: plantFeature.properties.plant_source || plantFeature.properties.plant_method || 'Power Plant',
+                type: plantFeature.properties.fuel_type || plantFeature.properties.technology || 'Power Plant',
                 longitude: coords[0],
                 latitude: coords[1]
               });
@@ -739,7 +737,7 @@ export function InteractiveMap({
               setHoveredGeneration({
                 id: generatorFeature.properties.id,
                 name: generatorFeature.properties.name || generatorFeature.properties.plant_name || 'Unnamed Generator',
-                type: generatorFeature.properties.fuel_type || 'Generator',
+                type: generatorFeature.properties.fuel_type || generatorFeature.properties.technology || 'Generator',
                 longitude: coords[0],
                 latitude: coords[1]
               });
@@ -768,7 +766,7 @@ export function InteractiveMap({
             setHoveredGeneration({
               id: plantFeature.properties.id,
               name: plantFeature.properties.name || 'Unnamed Plant',
-              type: plantFeature.properties.plant_source || plantFeature.properties.plant_method || 'Power Plant',
+              type: plantFeature.properties.fuel_type || plantFeature.properties.technology || 'Power Plant',
               longitude: coords[0],
               latitude: coords[1]
             });
@@ -777,7 +775,7 @@ export function InteractiveMap({
             setHoveredGeneration({
               id: generatorFeature.properties.id,
               name: generatorFeature.properties.name || generatorFeature.properties.plant_name || 'Unnamed Generator',
-              type: generatorFeature.properties.fuel_type || 'Generator',
+              type: generatorFeature.properties.fuel_type || generatorFeature.properties.technology || 'Generator',
               longitude: coords[0],
               latitude: coords[1]
             });
@@ -1134,56 +1132,39 @@ export function InteractiveMap({
               paint={{
                 "circle-color": [
                   "case",
-                  // Check plant_source, plant_method, and type fields
-                  ["in", ["downcase", ["coalesce", ["get", "plant_source"], ""]], ["literal", ["nuclear"]]],
+                  // Check fuel_type, technology fields
+                  ["in", ["downcase", ["coalesce", ["get", "fuel_type"], ""]], ["literal", ["nuclear"]]],
                   "#ff4500", // Nuclear - orange-red
-                  ["in", ["downcase", ["coalesce", ["get", "plant_source"], ""]], ["literal", ["solar", "photovoltaic"]]],
+                  ["in", ["downcase", ["coalesce", ["get", "fuel_type"], ""]], ["literal", ["solar", "photovoltaic"]]],
                   "#ffd700", // Solar - gold
-                  ["in", ["downcase", ["coalesce", ["get", "plant_source"], ""]], ["literal", ["wind"]]],
+                  ["in", ["downcase", ["coalesce", ["get", "fuel_type"], ""]], ["literal", ["wind"]]],
                   "#32cd32", // Wind - lime green
-                  ["in", ["downcase", ["coalesce", ["get", "plant_source"], ""]], ["literal", ["hydro", "water"]]],
+                  ["in", ["downcase", ["coalesce", ["get", "fuel_type"], ""]], ["literal", ["hydro", "water"]]],
                   "#1e90ff", // Hydro - dodger blue
-                  ["in", ["downcase", ["coalesce", ["get", "plant_source"], ""]], ["literal", ["gas", "natural_gas"]]],
+                  ["in", ["downcase", ["coalesce", ["get", "fuel_type"], ""]], ["literal", ["gas", "natural_gas"]]],
                   "#ff69b4", // Gas - hot pink
-                  ["in", ["downcase", ["coalesce", ["get", "plant_source"], ""]], ["literal", ["coal"]]],
+                  ["in", ["downcase", ["coalesce", ["get", "fuel_type"], ""]], ["literal", ["coal"]]],
                   "#8b4513", // Coal - saddle brown
-                  ["in", ["downcase", ["coalesce", ["get", "plant_source"], ""]], ["literal", ["biomass", "biogas"]]],
+                  ["in", ["downcase", ["coalesce", ["get", "fuel_type"], ""]], ["literal", ["biomass", "biogas"]]],
                   "#228b22", // Biomass - forest green
-                  ["in", ["downcase", ["coalesce", ["get", "plant_source"], ""]], ["literal", ["geothermal"]]],
+                  ["in", ["downcase", ["coalesce", ["get", "fuel_type"], ""]], ["literal", ["geothermal"]]],
                   "#dc143c", // Geothermal - crimson
-                  // Check plant_method as fallback
-                  ["in", ["downcase", ["coalesce", ["get", "plant_method"], ""]], ["literal", ["nuclear"]]],
+                  // Check technology as fallback
+                  ["in", ["downcase", ["coalesce", ["get", "technology"], ""]], ["literal", ["nuclear"]]],
                   "#ff4500",
-                  ["in", ["downcase", ["coalesce", ["get", "plant_method"], ""]], ["literal", ["solar", "photovoltaic"]]],
+                  ["in", ["downcase", ["coalesce", ["get", "technology"], ""]], ["literal", ["solar", "photovoltaic"]]],
                   "#ffd700",
-                  ["in", ["downcase", ["coalesce", ["get", "plant_method"], ""]], ["literal", ["wind"]]],
+                  ["in", ["downcase", ["coalesce", ["get", "technology"], ""]], ["literal", ["wind"]]],
                   "#32cd32",
-                  ["in", ["downcase", ["coalesce", ["get", "plant_method"], ""]], ["literal", ["hydro", "water"]]],
+                  ["in", ["downcase", ["coalesce", ["get", "technology"], ""]], ["literal", ["hydro", "water"]]],
                   "#1e90ff",
-                  ["in", ["downcase", ["coalesce", ["get", "plant_method"], ""]], ["literal", ["gas", "natural_gas"]]],
+                  ["in", ["downcase", ["coalesce", ["get", "technology"], ""]], ["literal", ["gas", "natural_gas"]]],
                   "#ff69b4",
-                  ["in", ["downcase", ["coalesce", ["get", "plant_method"], ""]], ["literal", ["coal"]]],
+                  ["in", ["downcase", ["coalesce", ["get", "technology"], ""]], ["literal", ["coal"]]],
                   "#8b4513",
-                  ["in", ["downcase", ["coalesce", ["get", "plant_method"], ""]], ["literal", ["biomass", "biogas"]]],
+                  ["in", ["downcase", ["coalesce", ["get", "technology"], ""]], ["literal", ["biomass", "biogas"]]],
                   "#228b22",
-                  ["in", ["downcase", ["coalesce", ["get", "plant_method"], ""]], ["literal", ["geothermal"]]],
-                  "#dc143c",
-                  // Check type as final fallback
-                  ["in", ["downcase", ["coalesce", ["get", "type"], ""]], ["literal", ["nuclear"]]],
-                  "#ff4500",
-                  ["in", ["downcase", ["coalesce", ["get", "type"], ""]], ["literal", ["solar", "photovoltaic"]]],
-                  "#ffd700",
-                  ["in", ["downcase", ["coalesce", ["get", "type"], ""]], ["literal", ["wind"]]],
-                  "#32cd32",
-                  ["in", ["downcase", ["coalesce", ["get", "type"], ""]], ["literal", ["hydro", "water"]]],
-                  "#1e90ff",
-                  ["in", ["downcase", ["coalesce", ["get", "type"], ""]], ["literal", ["gas", "natural_gas"]]],
-                  "#ff69b4",
-                  ["in", ["downcase", ["coalesce", ["get", "type"], ""]], ["literal", ["coal"]]],
-                  "#8b4513",
-                  ["in", ["downcase", ["coalesce", ["get", "type"], ""]], ["literal", ["biomass", "biogas"]]],
-                  "#228b22",
-                  ["in", ["downcase", ["coalesce", ["get", "type"], ""]], ["literal", ["geothermal"]]],
+                  ["in", ["downcase", ["coalesce", ["get", "technology"], ""]], ["literal", ["geothermal"]]],
                   "#dc143c",
                   "#9370db" // Other - medium purple (default)
                 ],

@@ -16,6 +16,8 @@ REGION = "us-central1"        # The region for your function
 FUNCTIONS_TO_DEPLOY = [
     ("energy_agent.energy_agent", "energy_agent", "energy-agent", "512MB"),
     ("get_power_infra.get_power_infra", "get_power_infrastructure", "get-power-infrastructure", "512MB"),
+    ("get_power_generators.get_power_generators", "get_power_generators", "get-power-generators", "512MB"),
+    ("get_power_plants.get_power_plants", "get_power_plants", "get-power-plants", "512MB"),
 ]
 
 GCP_CLI_PREFIX = "gcp-cli-"
@@ -67,7 +69,11 @@ def build_deploy_dir(handler_module):
     handler_module: e.g. 'energy_agent.energy_agent'
     Returns the path to the build directory.
     """
-    build_dir = f"build_{handler_module.replace('.', '_')}"
+    build_temp_root = os.path.join(os.path.dirname(__file__), 'build_temp')
+    if not os.path.exists(build_temp_root):
+        os.makedirs(build_temp_root)
+
+    build_dir = os.path.join(build_temp_root, f"build_{handler_module.replace('.', '_')}")
     if os.path.exists(build_dir):
         shutil.rmtree(build_dir)
     os.makedirs(build_dir)
@@ -178,40 +184,44 @@ def deploy_function(handler_module, entry_point, deployed_name, memory, project,
         # Always remove build dir after deploy attempt
         remove_build_dir(build_dir)
 
+def remove_build_temp_root():
+    build_temp_root = os.path.join(os.path.dirname(__file__), 'build_temp')
+    if os.path.exists(build_temp_root):
+        try:
+            shutil.rmtree(build_temp_root)
+        except Exception:
+            pass
+
 def main():
-    """Main function to deploy all configured Cloud Functions in parallel."""
+    """Main function to deploy all configured Cloud Functions serially."""
     print("Starting deployment of Google Cloud Functions...")
 
     results = []
-    with ThreadPoolExecutor() as executor:
-        future_to_func = {
-            executor.submit(
-                deploy_function,
-                handler_module, entry_point, deployed_name, memory, PROJECT_ID, REGION
-            ): (handler_module, deployed_name)
-            for handler_module, entry_point, deployed_name, memory in FUNCTIONS_TO_DEPLOY
-        }
-        for future in as_completed(future_to_func):
-            handler_module, deployed_name = future_to_func[future]
+    try:
+        for handler_module, entry_point, deployed_name, memory in FUNCTIONS_TO_DEPLOY:
             try:
-                result = future.result()
+                result = deploy_function(
+                    handler_module, entry_point, deployed_name, memory, PROJECT_ID, REGION
+                )
                 results.append((handler_module, deployed_name, result))
             except Exception as exc:
                 print(f"\n[ERROR] {deployed_name} generated an exception: {exc}")
                 results.append((handler_module, deployed_name, False))
 
-    success_count = sum(1 for _, _, r in results if r)
-    failure_count = sum(1 for _, _, r in results if not r)
+        success_count = sum(1 for _, _, r in results if r)
+        failure_count = sum(1 for _, _, r in results if not r)
 
-    print("\n--- Deployment Summary ---")
-    print(f"Successfully deployed: {success_count}")
-    print(f"Failed to deploy: {failure_count}")
+        print("\n--- Deployment Summary ---")
+        print(f"Successfully deployed: {success_count}")
+        print(f"Failed to deploy: {failure_count}")
 
-    if failure_count > 0:
-        print("\nSome deployments failed. Please check the logs above for details.")
-        sys.exit(1)
-    else:
-        print("\nAll functions deployed successfully!")
+        if failure_count > 0:
+            print("\nSome deployments failed. Please check the logs above for details.")
+            sys.exit(1)
+        else:
+            print("\nAll functions deployed successfully!")
+    finally:
+        remove_build_temp_root()
 
 if __name__ == "__main__":
     main() 
