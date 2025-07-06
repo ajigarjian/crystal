@@ -23,14 +23,6 @@ function getFunctionsBaseUrl(): string {
   return 'https://us-central1-crystal-2f87e.cloudfunctions.net';
 }
 
-// Helper to get the correct function name depending on the environment
-function getFunctionName(name: string): string {
-  if (typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'development') {
-    return name.replace(/^gcp-cli-/, '');
-  }
-  return name;
-}
-
 export const streamAgentResponse = async (
   message: string,
   history: HistoryMessage[],
@@ -133,7 +125,7 @@ export interface PowerInfrastructureData {
  * @param zoom Optional zoom level for simplification
  */
 export const getPowerInfrastructure = async (zoom?: number): Promise<PowerInfrastructureData> => {
-  let url = `${getFunctionsBaseUrl()}/${getFunctionName('gcp-cli-get-power-infrastructure')}`;
+  let url = `${getFunctionsBaseUrl()}/gcp-cli-get-power-infrastructure`;
   if (zoom !== undefined) {
     url += `?zoom=${zoom}`;
   }
@@ -192,7 +184,7 @@ export const getPowerGenerators = async (
   zoom?: number,
   types?: string
 ): Promise<GeneratorData> => {
-  let url = `${getFunctionsBaseUrl()}/${getFunctionName('gcp-cli-get-power-generators')}`;
+  let url = `${getFunctionsBaseUrl()}/gcp-cli-get-power-generators`;
   const params = new URLSearchParams();
   if (zoom !== undefined) params.append('zoom', zoom.toString());
   if (types) params.append('types', types);
@@ -254,7 +246,7 @@ export const getPowerPlants = async (
   zoom?: number,
   types?: string
 ): Promise<PowerPlantsData> => {
-  let url = `${getFunctionsBaseUrl()}/${getFunctionName('gcp-cli-get-power-plants')}`;
+  let url = `${getFunctionsBaseUrl()}/gcp-cli-get-power-plants`;
   const params = new URLSearchParams();
   if (zoom !== undefined) params.append('zoom', zoom.toString());
   if (types) params.append('types', types);
