@@ -28,8 +28,12 @@ _Session = None
 # Global connection pool
 _pool = None
 
-def get_connection_pool(min_conn=2, max_conn=30):
-    """Create or get the connection pool"""
+def get_connection_pool(min_conn=1, max_conn=2):
+    """
+    Create or get the connection pool.
+    For serverless environments and small databases (e.g., 600 MB),
+    a small pool size (1-5) is recommended to avoid exhausting DB connections.
+    """
     global _pool
     
     if _pool is None:
