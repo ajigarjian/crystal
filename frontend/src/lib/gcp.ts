@@ -15,12 +15,18 @@ interface StreamOnChunkData {
   content: string | ToolCallContent;
 }
 
-// Helper to get the correct base URL depending on the environment
-function getFunctionsBaseUrl(): string {
+// Helper to get the correct base URL and function name prefix depending on the environment
+function getFunctionsBaseUrl(): { baseUrl: string; prefixFunctionName: (name: string) => string } {
   if (typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'development') {
-    return 'http://localhost:8081';
+    return {
+      baseUrl: 'http://localhost:8081',
+      prefixFunctionName: (name: string) => name,
+    };
   }
-  return 'https://us-central1-crystal-2f87e.cloudfunctions.net';
+  return {
+    baseUrl: 'https://us-central1-crystal-2f87e.cloudfunctions.net',
+    prefixFunctionName: (name: string) => `gcp-cli-${name}`,
+  };
 }
 
 export const streamAgentResponse = async (
@@ -30,7 +36,8 @@ export const streamAgentResponse = async (
   onClose: () => void,
   onError: (error: Error) => void
 ) => {
-  const url = "https://us-central1-crystal-2f87e.cloudfunctions.net/gcp-cli-energy-agent";
+  const { baseUrl, prefixFunctionName } = getFunctionsBaseUrl();
+  const url = `${baseUrl}/${prefixFunctionName('energy-agent')}`;
 
   try {
     const response = await fetch(url, {
@@ -125,7 +132,8 @@ export interface PowerInfrastructureData {
  * @param zoom Optional zoom level for simplification
  */
 export const getPowerInfrastructure = async (zoom?: number): Promise<PowerInfrastructureData> => {
-  let url = `${getFunctionsBaseUrl()}/gcp-cli-get-power-infrastructure`;
+  const { baseUrl, prefixFunctionName } = getFunctionsBaseUrl();
+  let url = `${baseUrl}/${prefixFunctionName('get-power-infrastructure')}`;
   if (zoom !== undefined) {
     url += `?zoom=${zoom}`;
   }
@@ -184,7 +192,8 @@ export const getPowerGenerators = async (
   zoom?: number,
   types?: string
 ): Promise<GeneratorData> => {
-  let url = `${getFunctionsBaseUrl()}/gcp-cli-get-power-generators`;
+  const { baseUrl, prefixFunctionName } = getFunctionsBaseUrl();
+  let url = `${baseUrl}/${prefixFunctionName('get-power-generators')}`;
   const params = new URLSearchParams();
   if (zoom !== undefined) params.append('zoom', zoom.toString());
   if (types) params.append('types', types);
@@ -246,7 +255,8 @@ export const getPowerPlants = async (
   zoom?: number,
   types?: string
 ): Promise<PowerPlantsData> => {
-  let url = `${getFunctionsBaseUrl()}/gcp-cli-get-power-plants`;
+  const { baseUrl, prefixFunctionName } = getFunctionsBaseUrl();
+  let url = `${baseUrl}/${prefixFunctionName('get-power-plants')}`;
   const params = new URLSearchParams();
   if (zoom !== undefined) params.append('zoom', zoom.toString());
   if (types) params.append('types', types);
