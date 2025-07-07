@@ -5,6 +5,9 @@ import decimal # Add import for decimal
 import math
 
 from factchecker.interconnection.icr import compute_diffs, download_icr_excel, fetch_existing_icr, send_email, upload_diff_to_gcs, upsert_icr # Add import for math
+import math
+
+from factchecker.interconnection.icr import compute_diffs, download_icr_excel, fetch_existing_icr, send_email, upload_diff_to_gcs, upsert_icr # Add import for math
 
 # Set the DJANGO_SETTINGS_MODULE environment variable
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "factchecker.settings")
@@ -1446,7 +1449,10 @@ def get_inflow_timeseries(request: https_fn.Request) -> https_fn.Response:
     """
     Fetch timeseries data for any metric. For inflow (metric_id=6), includes observed, 
     forecast, and forecast error data. For other metrics, returns simple historical data.
+    OPTIMIZED: Single query instead of 100+ separate queries.
     """
+    # Add performance timing
+    start_time = time.time()
     logger.info("Received request for metric timeseries data.")
 
     # Parse query params
@@ -1481,106 +1487,108 @@ def get_inflow_timeseries(request: https_fn.Request) -> https_fn.Response:
 
         try:
             with conn.cursor() as cursor:
-                # For inflow (metric_id=6), use the existing rich logic with forecasts and errors
+                # Time the query execution
+                query_start = time.time()
+                
                 if metric_id_to_query == 6:
-                    # Step 1: Get observed data
-                    observed_query = """
-                        SELECT ts_utc, value_num, 'observed' as data_type
+                    # OPTIMIZED: Single query for inflow with observed, forecast, and forecast errors
+                    optimized_inflow_query = """
+                    WITH base_data AS (
+                        -- Get all data points in the time range
+                        SELECT 
+                            ts_utc, 
+                            value_num, 
+                            quality,
+                            DATE(ts_utc) as obs_date
                         FROM fact_dam_ops
-                        WHERE dam_id = %s AND metric_id = %s AND quality = 'R' 
+                        WHERE dam_id = %s AND metric_id = %s 
                           AND ts_utc >= %s AND ts_utc <= %s
-                        ORDER BY ts_utc ASC;
-                    """
-                        
-                    cursor.execute(observed_query, (dam_id_to_query, metric_id_to_query, start_utc, now_utc))
-                    observed_rows = cursor.fetchall()
-                        
-                    # Step 2: Get current forecast data
-                    forecast_query = """
-                        SELECT f.ts_utc, f.value_num, 'forecast' as data_type
+                          AND value_num IS NOT NULL
+                    ),
+                    observed_data AS (
+                        -- Observed data points
+                        SELECT 
+                            ts_utc,
+                            value_num,
+                            'observed' as data_type,
+                            obs_date
+                        FROM base_data 
+                        WHERE quality = 'R'
+                    ),
+                    forecast_data AS (
+                        -- Current forecast data (future points)
+                        SELECT DISTINCT ON (f.ts_utc)
+                            f.ts_utc,
+                            f.value_num,
+                            'forecast' as data_type
                         FROM fact_dam_ops f
                         INNER JOIN (
                             SELECT dam_id, metric_id, MAX(ts_utc) as latest_forecast_time
                             FROM fact_dam_ops
                             WHERE dam_id = %s AND metric_id = %s AND quality = 'F'
                             GROUP BY dam_id, metric_id
-                        ) latest ON f.dam_id = latest.dam_id 
-                                  AND f.metric_id = latest.metric_id
+                        ) latest ON f.dam_id = latest.dam_id AND f.metric_id = latest.metric_id
                         WHERE f.dam_id = %s AND f.metric_id = %s AND f.quality = 'F'
                           AND f.ts_utc > %s
-                        ORDER BY f.ts_utc ASC;
+                        ORDER BY f.ts_utc, f.ts_utc DESC
+                    ),
+                    forecast_averages AS (
+                        -- Pre-calculate average forecasts by date for error calculation
+                        SELECT 
+                            obs_date,
+                            AVG(value_num) as avg_forecast,
+                            COUNT(*) as forecast_count
+                        FROM base_data 
+                        WHERE quality = 'F'
+                        GROUP BY obs_date
+                    ),
+                    forecast_errors AS (
+                        -- Calculate forecast errors for observed points
+                        SELECT 
+                            od.ts_utc,
+                            (od.value_num - fa.avg_forecast) as error_value,
+                            'forecast_error' as data_type
+                        FROM observed_data od
+                        INNER JOIN forecast_averages fa ON od.obs_date = fa.obs_date
+                        WHERE fa.avg_forecast IS NOT NULL
+                    )
+                    -- Union all data types
+                    SELECT ts_utc, value_num, data_type FROM observed_data
+                    UNION ALL
+                    SELECT ts_utc, value_num, data_type FROM forecast_data
+                    UNION ALL
+                    SELECT ts_utc, error_value as value_num, data_type FROM forecast_errors
+                    ORDER BY ts_utc ASC
+                    LIMIT 5000;
                     """
                     
-                    cursor.execute(forecast_query, (
-                        dam_id_to_query, metric_id_to_query,
-                        dam_id_to_query, metric_id_to_query, now_utc
+                    cursor.execute(optimized_inflow_query, (
+                        dam_id_to_query, metric_id_to_query, start_utc, now_utc,  # base_data params
+                        dam_id_to_query, metric_id_to_query,                      # forecast subquery params
+                        dam_id_to_query, metric_id_to_query, now_utc               # forecast_data params
                     ))
-                    forecast_rows = cursor.fetchall()
+                    all_rows = cursor.fetchall()
                     
-                    # Step 3: Calculate forecast errors for observed data points
-                    forecast_error_rows = []
-                    
-                    logger.info(f"Processing {len(observed_rows)} observed data points for forecast errors")
-                    
-                    for obs_row in observed_rows:
-                        obs_ts = obs_row[0]
-                        obs_value = float(obs_row[1]) if obs_row[1] is not None else None
-                        
-                        if obs_value is None:
-                            continue
-                        
-                        # Get the date of the observation (ignoring time)
-                        obs_date = obs_ts.date()
-                        
-                        # Find all forecasts for the same day (00:00, 06:00, 12:00, 18:00)
-                        error_query = """
-                            SELECT AVG(value_num) as avg_forecast, COUNT(*) as forecast_count
-                            FROM fact_dam_ops
-                            WHERE dam_id = %s AND metric_id = %s AND quality = 'F'
-                              AND DATE(ts_utc) = %s
-                            GROUP BY DATE(ts_utc);
-                        """
-                        
-                        cursor.execute(error_query, (dam_id_to_query, metric_id_to_query, obs_date))
-                        forecast_result = cursor.fetchone()
-                        
-                        if forecast_result and forecast_result[0] is not None:
-                            avg_forecast = float(forecast_result[0])
-                            forecast_count = forecast_result[1]
-                            error_value = obs_value - avg_forecast  # positive = under-forecasted, negative = over-forecasted
-                            
-                            logger.info(f"Forecast error for {obs_ts}: observed={obs_value}, avg_forecast={avg_forecast} (from {forecast_count} forecasts), error={error_value}")
-                            
-                            forecast_error_rows.append((obs_ts, error_value, 'forecast_error'))
-                        else:
-                            logger.info(f"No forecasts found for date {obs_date}")
-
-                    logger.info(f"Generated {len(forecast_error_rows)} forecast error data points")
-                    
-                    # Combine all results
-                    all_rows = []
-                    all_rows.extend(observed_rows)
-                    all_rows.extend(forecast_rows)
-                    all_rows.extend(forecast_error_rows)
                 else:
-                    # For other metrics, get simple historical time series
-                    historical_query = """
+                    # OPTIMIZED: Simple query for other metrics
+                    simple_query = """
                         SELECT ts_utc, value_num, 'observed' as data_type
                         FROM fact_dam_ops
                         WHERE dam_id = %s AND metric_id = %s 
                           AND ts_utc >= %s AND ts_utc <= %s
                           AND value_num IS NOT NULL
-                        ORDER BY ts_utc ASC;
+                        ORDER BY ts_utc ASC
+                        LIMIT 5000;
                     """
                     
-                    cursor.execute(historical_query, (dam_id_to_query, metric_id_to_query, start_utc, now_utc))
+                    cursor.execute(simple_query, (dam_id_to_query, metric_id_to_query, start_utc, now_utc))
                     all_rows = cursor.fetchall()
-                    
-                    logger.info(f"Retrieved {len(all_rows)} historical data points for metric_id {metric_id_to_query}")
                 
-                # Sort by timestamp
-                all_rows.sort(key=lambda x: x[0])
+                query_end = time.time()
+                logger.info(f"PERFORMANCE: Query executed in {query_end - query_start:.3f} seconds")
+                logger.info(f"Retrieved {len(all_rows)} total data points for metric_id {metric_id_to_query}")
                 
+                # Process results (same logic as before)
                 result = []
                 for row in all_rows:
                     ts_utc_val_dt = row[0].astimezone(timezone.utc)
@@ -1607,10 +1615,16 @@ def get_inflow_timeseries(request: https_fn.Request) -> https_fn.Response:
                             "data_type": data_type
                         })
 
+                total_time = time.time() - start_time
+                logger.info(f"PERFORMANCE: Total function execution: {total_time:.3f} seconds")
+
                 return https_fn.Response(
                     json.dumps(result),
                     status=200,
-                    headers={"Content-Type": "application/json"}
+                    headers={
+                        "Content-Type": "application/json",
+                        "X-Execution-Time": f"{total_time:.3f}s"
+                    }
                 )
 
         except Exception as db_error:
@@ -1654,7 +1668,7 @@ def get_dashboard_section_cards_data(request: https_fn.Request) -> https_fn.Resp
     """
     HTTP Cloud Function to fetch the latest operational data for dashboard section cards.
     Accepts a 'dam_id' query parameter (defaults to 1).
-    Queries the 'fact_dam_ops' table for the given dam_id and specific metric_ids.
+    Optimized version with single query instead of 8 separate queries.
     """
     logger.info("Received request for dashboard section cards data.")
 
@@ -1669,15 +1683,11 @@ def get_dashboard_section_cards_data(request: https_fn.Request) -> https_fn.Resp
                     status=200,
                     headers={"Content-Type": "application/json"}
                 )
-        except Exception: # pylint: disable=broad-except
-            # If JSON parsing fails for a POST, it's not a valid warming request, proceed
+        except Exception:
             pass
-    
-    # For actual data fetching, typically a GET request is used.
-    # No specific request body is expected for this data retrieval.
 
     # Parse query params for dam_id
-    dam_id_param = request.args.get('dam_id', '1')  # Default to '1' (Grand Coulee Dam)
+    dam_id_param = request.args.get('dam_id', '1')
     try:
         dam_id_to_query = int(dam_id_param)
     except ValueError:
@@ -1689,112 +1699,92 @@ def get_dashboard_section_cards_data(request: https_fn.Request) -> https_fn.Resp
     try:
         pool = get_connection_pool()
         conn = pool.getconn()
-        card_data_list = []
         
-        # Dam ID is now dynamically set from the request parameter
-        # dam_id_to_query = 1 # This line is replaced by the parsing logic above
-
         try:
             with conn.cursor() as cursor:
+                # OPTIMIZED: Single query to get all metrics at once
+                # This replaces the 8 separate queries in the original loop
+                optimized_query = """
+                WITH metric_list AS (
+                    -- All metric IDs from METRICS_CONFIG
+                    SELECT unnest(ARRAY[3, 5, 6, 7, 8, 9, 10, 13]) AS metric_id
+                ),
+                current_data AS (
+                    SELECT 
+                        f.metric_id,
+                        f.ts_utc, 
+                        f.value_num,
+                        ROW_NUMBER() OVER (PARTITION BY f.metric_id ORDER BY f.ts_utc DESC) as rn
+                    FROM fact_dam_ops f
+                    INNER JOIN metric_list ml ON f.metric_id = ml.metric_id
+                    WHERE f.dam_id = %s 
+                      AND (f.quality = 'R' OR f.metric_id != 6)  -- Only inflow (6) needs 'R' quality
+                ),
+                previous_data AS (
+                    SELECT 
+                        f.metric_id,
+                        f.ts_utc, 
+                        f.value_num,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY f.metric_id 
+                            ORDER BY ABS(EXTRACT(EPOCH FROM (f.ts_utc - (CURRENT_TIMESTAMP - INTERVAL '24 hours')))) ASC
+                        ) as rn
+                    FROM fact_dam_ops f
+                    INNER JOIN metric_list ml ON f.metric_id = ml.metric_id
+                    WHERE f.dam_id = %s 
+                      AND (f.quality = 'R' OR f.metric_id != 6)
+                      AND f.ts_utc BETWEEN (CURRENT_TIMESTAMP - INTERVAL '25 hours') 
+                                       AND (CURRENT_TIMESTAMP - INTERVAL '23 hours')
+                )
+                SELECT 
+                    c.metric_id,
+                    c.ts_utc as current_ts,
+                    c.value_num as current_value,
+                    p.ts_utc as previous_ts,
+                    p.value_num as previous_value
+                FROM current_data c
+                LEFT JOIN previous_data p ON c.metric_id = p.metric_id AND p.rn = 1
+                WHERE c.rn = 1
+                ORDER BY c.metric_id;
+                """
+                
+                cursor.execute(optimized_query, (dam_id_to_query, dam_id_to_query))
+                all_metric_rows = cursor.fetchall()
+                
+                # Create a dictionary for quick lookup
+                metric_data = {}
+                for row in all_metric_rows:
+                    metric_id, current_ts, current_value, previous_ts, previous_value = row
+                    metric_data[metric_id] = {
+                        'current_ts': current_ts,
+                        'current_value': current_value,
+                        'previous_ts': previous_ts,
+                        'previous_value': previous_value
+                    }
+                
+                # Process each metric using the same logic as before
+                card_data_list = []
+                
                 for card_title, config in METRICS_CONFIG.items():
                     metric_id_to_query = config["metric_id"]
                     
-                    # Enhanced query to get both current and 24-hour previous values
-                    if metric_id_to_query == 6:  # Inflow metric - only observed data
-                        query_sql = """
-                            WITH current_data AS (
-                                SELECT f.ts_utc, f.value_num
-                                FROM fact_dam_ops f
-                                INNER JOIN (
-                                    SELECT metric_id, MAX(ts_utc) as max_ts_utc
-                                    FROM fact_dam_ops
-                                    WHERE dam_id = %s AND metric_id = %s AND quality = 'R'
-                                    GROUP BY metric_id
-                                ) latest_f ON f.metric_id = latest_f.metric_id AND f.ts_utc = latest_f.max_ts_utc
-                                WHERE f.dam_id = %s AND f.metric_id = %s AND f.quality = 'R'
-                            ),
-                            previous_data AS (
-                                SELECT f.ts_utc, f.value_num
-                                FROM fact_dam_ops f
-                                INNER JOIN (
-                                    SELECT 
-                                        metric_id, 
-                                        ts_utc,
-                                        ROW_NUMBER() OVER (ORDER BY ABS(EXTRACT(EPOCH FROM (ts_utc - (SELECT ts_utc - INTERVAL '24 hours' FROM current_data))))) as rn
-                                    FROM fact_dam_ops
-                                    WHERE dam_id = %s AND metric_id = %s AND quality = 'R'
-                                      AND ts_utc <= (SELECT ts_utc - INTERVAL '23 hours' FROM current_data)
-                                      AND ts_utc >= (SELECT ts_utc - INTERVAL '25 hours' FROM current_data)
-                                ) nearest_prev ON f.metric_id = nearest_prev.metric_id AND f.ts_utc = nearest_prev.ts_utc AND nearest_prev.rn = 1
-                                WHERE f.dam_id = %s AND f.metric_id = %s AND f.quality = 'R'
-                            )
-                            SELECT 
-                                c.ts_utc as current_ts,
-                                c.value_num as current_value,
-                                p.ts_utc as previous_ts,
-                                p.value_num as previous_value
-                            FROM current_data c
-                            LEFT JOIN previous_data p ON true;
-                        """
-                        cursor.execute(query_sql, (
-                            dam_id_to_query, metric_id_to_query, dam_id_to_query, metric_id_to_query,
-                            dam_id_to_query, metric_id_to_query, dam_id_to_query, metric_id_to_query
-                        ))
-                    else:
-                        # Enhanced query for other metrics (no quality filter)
-                        query_sql = """
-                            WITH current_data AS (
-                                SELECT f.ts_utc, f.value_num
-                                FROM fact_dam_ops f
-                                INNER JOIN (
-                                    SELECT metric_id, MAX(ts_utc) as max_ts_utc
-                                    FROM fact_dam_ops
-                                    WHERE dam_id = %s AND metric_id = %s
-                                    GROUP BY metric_id
-                                ) latest_f ON f.metric_id = latest_f.metric_id AND f.ts_utc = latest_f.max_ts_utc
-                                WHERE f.dam_id = %s AND f.metric_id = %s
-                            ),
-                            previous_data AS (
-                                SELECT f.ts_utc, f.value_num
-                                FROM fact_dam_ops f
-                                INNER JOIN (
-                                    SELECT 
-                                        metric_id, 
-                                        ts_utc,
-                                        ROW_NUMBER() OVER (ORDER BY ABS(EXTRACT(EPOCH FROM (ts_utc - (SELECT ts_utc - INTERVAL '24 hours' FROM current_data))))) as rn
-                                    FROM fact_dam_ops
-                                    WHERE dam_id = %s AND metric_id = %s
-                                      AND ts_utc <= (SELECT ts_utc - INTERVAL '23 hours' FROM current_data)
-                                      AND ts_utc >= (SELECT ts_utc - INTERVAL '25 hours' FROM current_data)
-                                ) nearest_prev ON f.metric_id = nearest_prev.metric_id AND f.ts_utc = nearest_prev.ts_utc AND nearest_prev.rn = 1
-                                WHERE f.dam_id = %s AND f.metric_id = %s
-                            )
-                            SELECT 
-                                c.ts_utc as current_ts,
-                                c.value_num as current_value,
-                                p.ts_utc as previous_ts,
-                                p.value_num as previous_value
-                            FROM current_data c
-                            LEFT JOIN previous_data p ON true;
-                        """
-                        cursor.execute(query_sql, (
-                            dam_id_to_query, metric_id_to_query, dam_id_to_query, metric_id_to_query,
-                            dam_id_to_query, metric_id_to_query, dam_id_to_query, metric_id_to_query
-                        ))
+                    # Get data from our single query results
+                    row_data = metric_data.get(metric_id_to_query)
                     
-                    row = cursor.fetchone()
-                    
-                    # Initialize defaults
+                    # Initialize defaults (same as original)
                     value_display = f"N/A {config['unit']}"
                     timestamp_iso = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
                     trend_val = "neutral"
                     change_24h = None
                     change_24h_percent = None
                     
-                    if row and row[0] is not None:  # If current data exists
-                        current_ts, current_value, previous_ts, previous_value = row
+                    if row_data and row_data['current_ts'] is not None:  # If current data exists
+                        current_ts = row_data['current_ts']
+                        current_value = row_data['current_value']
+                        previous_ts = row_data['previous_ts']
+                        previous_value = row_data['previous_value']
                         
-                        # Process current timestamp
+                        # Process current timestamp (same as original)
                         if current_ts is not None:
                             if current_ts.tzinfo is None:
                                 aware_utc_datetime = current_ts.replace(tzinfo=timezone.utc)
@@ -1802,7 +1792,7 @@ def get_dashboard_section_cards_data(request: https_fn.Request) -> https_fn.Resp
                                 aware_utc_datetime = current_ts.astimezone(timezone.utc)
                             timestamp_iso = aware_utc_datetime.strftime('%Y-%m-%dT%H:%M:%SZ')
                         
-                        # Process current value
+                        # Process current value (same as original)
                         if current_value is not None:
                             numeric_current = None
                             if isinstance(current_value, decimal.Decimal):
@@ -1816,7 +1806,7 @@ def get_dashboard_section_cards_data(request: https_fn.Request) -> https_fn.Resp
                                     logger.warning(f"Could not convert current value for metric_id {metric_id_to_query}")
                             
                             if numeric_current is not None:
-                                # Apply special formatting for Reservoir Fill
+                                # Apply special formatting for Reservoir Fill (same as original)
                                 display_current = numeric_current
                                 if card_title == "Reservoir Fill":
                                     display_current *= 100
@@ -1826,7 +1816,7 @@ def get_dashboard_section_cards_data(request: https_fn.Request) -> https_fn.Resp
                                     formatted_num_str = formatted_num_str[:-2]
                                 value_display = f"{formatted_num_str} {config['unit']}"
                                 
-                                # Calculate 24-hour change if previous value exists
+                                # Calculate 24-hour change if previous value exists (same as original)
                                 if previous_value is not None:
                                     numeric_previous = None
                                     if isinstance(previous_value, decimal.Decimal):
@@ -1840,14 +1830,14 @@ def get_dashboard_section_cards_data(request: https_fn.Request) -> https_fn.Resp
                                             logger.warning(f"Could not convert previous value for metric_id {metric_id_to_query}")
                                     
                                     if numeric_previous is not None:
-                                        # Calculate absolute and percentage change
+                                        # Calculate absolute and percentage change (same as original)
                                         change_24h = numeric_current - numeric_previous
                                         if numeric_previous != 0:
                                             change_24h_percent = (change_24h / abs(numeric_previous)) * 100
                                         else:
                                             change_24h_percent = 0 if change_24h == 0 else float('inf')
                                         
-                                        # Determine trend based on change
+                                        # Determine trend based on change (same as original)
                                         if abs(change_24h) < 0.01:  # Very small change threshold
                                             trend_val = "neutral"
                                         elif change_24h > 0:
@@ -1857,7 +1847,7 @@ def get_dashboard_section_cards_data(request: https_fn.Request) -> https_fn.Resp
                                         
                                         logger.info(f"Metric {card_title}: current={numeric_current}, previous={numeric_previous}, change={change_24h}, trend={trend_val}")
                     
-                    # Build response object with 24-hour change data
+                    # Build response object with 24-hour change data (EXACT same format as original)
                     card_data = {
                         "id": str(metric_id_to_query),
                         "title": card_title,
@@ -1872,19 +1862,19 @@ def get_dashboard_section_cards_data(request: https_fn.Request) -> https_fn.Resp
                     
                     card_data_list.append(card_data)
 
-            # Ensure consistent ordering of cards based on METRICS_CONFIG keys
-            ordered_card_data_list = sorted(card_data_list, key=lambda x: list(METRICS_CONFIG.keys()).index(x["title"]))
+                # Ensure consistent ordering of cards based on METRICS_CONFIG keys (same as original)
+                ordered_card_data_list = sorted(card_data_list, key=lambda x: list(METRICS_CONFIG.keys()).index(x["title"]))
 
-            return https_fn.Response(
-                json.dumps(ordered_card_data_list), # Use default=str for datetime if not already string
-                status=200,
-                headers={"Content-Type": "application/json"}
-            )
+                return https_fn.Response(
+                    json.dumps(ordered_card_data_list),
+                    status=200,
+                    headers={"Content-Type": "application/json"}
+                )
 
-        except Exception as db_error: # pylint: disable=broad-except
+        except Exception as db_error:
             logger.error(f"Database error in get_dashboard_section_cards_data: {db_error}")
             logger.error(traceback.format_exc())
-            if conn: # conn might not be None if getconn() succeeded but cursor failed
+            if conn:
                 conn.rollback()
             return https_fn.Response(
                 json.dumps({"error": "A database error occurred.", "details": str(db_error)}),
@@ -1892,10 +1882,10 @@ def get_dashboard_section_cards_data(request: https_fn.Request) -> https_fn.Resp
                 headers={"Content-Type": "application/json"}
             )
         finally:
-            if conn: # conn should exist if pool.getconn() was successful
+            if conn:
                 pool.putconn(conn)
 
-    except Exception as e: # pylint: disable=broad-except
+    except Exception as e:
         logger.error(f"General error in get_dashboard_section_cards_data: {e}")
         logger.error(traceback.format_exc())
         return https_fn.Response(
@@ -2934,7 +2924,7 @@ def ingest_bpa_icr(request: https_fn.Request) -> https_fn.Response:
             headers=headers
         )
 
-    # 2) Fetch existing state from Django’s pool
+    # 2) Fetch existing state from Django's pool
     pool = get_connection_pool()
     conn = pool.getconn()
     try:

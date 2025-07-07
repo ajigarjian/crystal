@@ -22,8 +22,21 @@ import { Terminal, Mic, Square, TrendingUp, MapPin, Activity, Info, Zap } from "
 import { Separator } from "@/components/ui/separator"
 import { MetricsTable, transformSectionCardDataToMetrics } from "@/components/metrics-table"
 import { ChartBPAGenerationMix } from "@/components/chart-bpa-generation-mix"
-
-import { getDashboardSectionCards, SectionCardData, getDamLocations, DamLocation, getSnotelStations, SnotelStationData, getSnotelStationSummary, getPowerGenerators, getPowerPlants, GeneratorData, PowerPlantsData } from "@/lib/firebase"
+import { 
+  getDashboardSectionCards, 
+  SectionCardData, 
+  getDamLocations, 
+  DamLocation, 
+  getSnotelStations, 
+  SnotelStationData, 
+  getSnotelStationSummary 
+} from "@/lib/firebase"
+import { 
+  getPowerGenerators, 
+  GeneratorData, 
+  getPowerPlants, 
+  PowerPlantsData 
+} from "@/lib/gcp"
 
 export interface DamInfo {
   id: number;
@@ -326,7 +339,7 @@ export default function Page() {
   React.useEffect(() => {
     async function loadPowerInfrastructureForSearch() {
       try {
-        const { getPowerInfrastructure } = await import("@/lib/firebase");
+        const { getPowerInfrastructure } = await import("@/lib/gcp");
         const data = await getPowerInfrastructure();
         setPowerInfrastructureData(data);
       } catch (error) {
