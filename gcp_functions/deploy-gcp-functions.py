@@ -5,6 +5,7 @@ import shutil
 from pathlib import Path
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import argparse
 
 # --- Configuration ---
 PROJECT_ID = "crystal-2f87e"  # Your GCP Project ID
@@ -192,36 +193,95 @@ def remove_build_temp_root():
         except Exception:
             pass
 
+def find_function_by_name(function_name):
+    """Find a function configuration by its deployed name."""
+    for handler_module, entry_point, deployed_name, memory in FUNCTIONS_TO_DEPLOY:
+        if deployed_name == function_name:
+            return (handler_module, entry_point, deployed_name, memory)
+    return None
+
+def list_available_functions():
+    """List all available functions that can be deployed."""
+    print("Available functions to deploy:")
+    for _, _, deployed_name, _ in FUNCTIONS_TO_DEPLOY:
+        print(f"  - {deployed_name}")
+
 def main():
-    """Main function to deploy all configured Cloud Functions serially."""
-    print("Starting deployment of Google Cloud Functions...")
-
-    results = []
-    try:
-        for handler_module, entry_point, deployed_name, memory in FUNCTIONS_TO_DEPLOY:
-            try:
-                result = deploy_function(
-                    handler_module, entry_point, deployed_name, memory, PROJECT_ID, REGION
-                )
-                results.append((handler_module, deployed_name, result))
-            except Exception as exc:
-                print(f"\n[ERROR] {deployed_name} generated an exception: {exc}")
-                results.append((handler_module, deployed_name, False))
-
-        success_count = sum(1 for _, _, r in results if r)
-        failure_count = sum(1 for _, _, r in results if not r)
-
-        print("\n--- Deployment Summary ---")
-        print(f"Successfully deployed: {success_count}")
-        print(f"Failed to deploy: {failure_count}")
-
-        if failure_count > 0:
-            print("\nSome deployments failed. Please check the logs above for details.")
+    """Main function to deploy Cloud Functions."""
+    parser = argparse.ArgumentParser(description="Deploy Google Cloud Functions")
+    parser.add_argument(
+        "function_name", 
+        nargs="?", 
+        help="Name of the specific function to deploy (e.g., 'energy-agent'). If not provided, all functions will be deployed."
+    )
+    parser.add_argument(
+        "--list", 
+        action="store_true", 
+        help="List all available functions"
+    )
+    
+    args = parser.parse_args()
+    
+    if args.list:
+        list_available_functions()
+        return
+    
+    if args.function_name:
+        # Deploy specific function
+        function_config = find_function_by_name(args.function_name)
+        if not function_config:
+            print(f"[ERROR] Function '{args.function_name}' not found.")
+            print()
+            list_available_functions()
             sys.exit(1)
-        else:
-            print("\nAll functions deployed successfully!")
-    finally:
-        remove_build_temp_root()
+        
+        handler_module, entry_point, deployed_name, memory = function_config
+        print(f"Deploying specific function: {deployed_name}")
+        
+        try:
+            result = deploy_function(
+                handler_module, entry_point, deployed_name, memory, PROJECT_ID, REGION
+            )
+            if result:
+                print(f"\n[SUCCESS] Successfully deployed {deployed_name}!")
+            else:
+                print(f"\n[ERROR] Failed to deploy {deployed_name}.")
+                sys.exit(1)
+        except Exception as exc:
+            print(f"\n[ERROR] {deployed_name} generated an exception: {exc}")
+            sys.exit(1)
+        finally:
+            remove_build_temp_root()
+    else:
+        # Deploy all functions (original behavior)
+        print("Starting deployment of all Google Cloud Functions...")
+        
+        results = []
+        try:
+            for handler_module, entry_point, deployed_name, memory in FUNCTIONS_TO_DEPLOY:
+                try:
+                    result = deploy_function(
+                        handler_module, entry_point, deployed_name, memory, PROJECT_ID, REGION
+                    )
+                    results.append((handler_module, deployed_name, result))
+                except Exception as exc:
+                    print(f"\n[ERROR] {deployed_name} generated an exception: {exc}")
+                    results.append((handler_module, deployed_name, False))
+
+            success_count = sum(1 for _, _, r in results if r)
+            failure_count = sum(1 for _, _, r in results if not r)
+
+            print("\n--- Deployment Summary ---")
+            print(f"Successfully deployed: {success_count}")
+            print(f"Failed to deploy: {failure_count}")
+
+            if failure_count > 0:
+                print("\nSome deployments failed. Please check the logs above for details.")
+                sys.exit(1)
+            else:
+                print("\nAll functions deployed successfully!")
+        finally:
+            remove_build_temp_root()
 
 if __name__ == "__main__":
     main() 
