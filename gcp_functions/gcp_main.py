@@ -132,15 +132,3 @@ if __name__ == "__main__":
         if rule.endpoint != 'static':
             print(f" - {rule.endpoint}: http://localhost:{EMULATOR_PORT}{rule.rule}")
     app.run(host="0.0.0.0", port=int(EMULATOR_PORT), debug=True)
-
-# --- GCP Cloud Functions entry points ---
-# Deploy with entry point 'energy_agent' or 'hello_world' as needed 
-
-def get_power_generators_entry(request):
-    return get_power_generators(request)
-
-def get_power_infrastructure_entry(request):
-    return get_power_infrastructure(request)
-
-def get_power_plants_entry(request):
-    return get_power_plants(request) 
