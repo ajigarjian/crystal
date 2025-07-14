@@ -19,6 +19,7 @@ import { TradingSummary } from "@/components/TradingSummary"
 import { ChartAreaInteractive } from '@/components/chart-area-interactive'
 import { ChartTTCFlowgate } from '@/components/chart-ttc-flowgate'
 import { Terminal, Mic, Square, TrendingUp, MapPin, Activity, Info, Zap } from "lucide-react"
+import { logEvent } from "firebase/analytics"
 import { Separator } from "@/components/ui/separator"
 import { MetricsTable, transformSectionCardDataToMetrics } from "@/components/metrics-table"
 import { ChartBPAGenerationMix } from "@/components/chart-bpa-generation-mix"
@@ -29,7 +30,10 @@ import {
   DamLocation, 
   getSnotelStations, 
   SnotelStationData, 
-  getSnotelStationSummary 
+  getSnotelStationSummary,
+  getFirebaseAnalytics,
+  trackDwellTimeStart,
+  trackDwellTimeEnd
 } from "@/lib/firebase"
 import { 
   getPowerGenerators, 
@@ -242,6 +246,7 @@ const formatVoltageToKV = (voltage: string | undefined): string => {
 
 export default function Page() {
   const [selectedFeature, setSelectedFeature] = React.useState<SelectedFeature | null>(null);
+  const [pageStartTime, setPageStartTime] = React.useState<Date | null>(null);
   
   const [currentSectionCardData, setCurrentSectionCardData] = React.useState<SectionCardData[]>([]);
   const [isLoadingCards, setIsLoadingCards] = React.useState<boolean>(true);
@@ -264,6 +269,18 @@ export default function Page() {
   const [selectedMetricId, setSelectedMetricId] = React.useState<string>("6"); // Default to Inflow
   const [selectedSnotelMetricId, setSelectedSnotelMetricId] = React.useState<string>("25"); // Default to WTEQ
 
+  // Analytics helper functions
+  const trackAnalyticsEvent = (eventName: string, parameters?: any) => {
+    const analytics = getFirebaseAnalytics();
+    if (analytics) {
+      logEvent(analytics, eventName, {
+        page: 'dashboard',
+        timestamp: new Date().toISOString(),
+        ...parameters
+      });
+    }
+  };
+
   const getCurrentDam = (): DamInfo | null => {
     return selectedFeature?.type === 'dam' ? selectedFeature.data as DamInfo : null;
   };
@@ -279,6 +296,36 @@ export default function Page() {
   const getCurrentSnotelStation = (): SnotelStationInfo | null => {
     return selectedFeature?.type === 'snotel' ? selectedFeature.data as SnotelStationInfo : null;
   };
+
+  // Page load analytics tracking
+  React.useEffect(() => {
+    const startTime = new Date();
+    setPageStartTime(startTime);
+    
+    // Track page load
+    trackDwellTimeStart('dashboard');
+    trackAnalyticsEvent('dashboard_page_load', {
+      user_agent: navigator.userAgent,
+      screen_resolution: `${window.screen.width}x${window.screen.height}`,
+      viewport_size: `${window.innerWidth}x${window.innerHeight}`
+    });
+
+    // Track page unload
+    const handleBeforeUnload = () => {
+      trackDwellTimeEnd('dashboard', startTime);
+      trackAnalyticsEvent('dashboard_page_unload', {
+        session_duration: Math.floor((new Date().getTime() - startTime.getTime()) / 1000)
+      });
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      // Also track on component unmount
+      trackDwellTimeEnd('dashboard', startTime);
+    };
+  }, []);
 
   React.useEffect(() => {
     async function loadSectionCards() {
@@ -518,6 +565,14 @@ export default function Page() {
     setSelectedFeature({ type: 'dam', data: dam });
     setSelectedFlowgate(null);
     setSelectedMetricId("6"); // Reset to Inflow when dam changes
+    
+    // Track analytics
+    trackAnalyticsEvent('feature_selected', {
+      feature_type: 'dam',
+      feature_id: dam.id,
+      feature_name: dam.name,
+      selection_method: 'search'
+    });
   };
 
   const handleSearchPowerLineSelect = (powerLine: PowerLineInfo) => {
@@ -526,6 +581,16 @@ export default function Page() {
     setSelectedFeature({
       type: 'powerline',
       data: powerLine
+    });
+    
+    // Track analytics
+    trackAnalyticsEvent('feature_selected', {
+      feature_type: 'powerline',
+      feature_id: powerLine.id,
+      feature_name: powerLine.name,
+      flowgate: powerLine.flowgate,
+      voltage: powerLine.voltage,
+      selection_method: 'search'
     });
   };
 
@@ -545,6 +610,15 @@ export default function Page() {
       setSelectedFeature({
         type: 'powerline',
         data: selectedLine.data as PowerLineInfo
+      });
+      
+      // Track analytics
+      trackAnalyticsEvent('flowgate_selected', {
+        flowgate: flowgate,
+        line_count: flowgateLines.length,
+        selected_line_id: selectedLine.id,
+        selected_line_name: selectedLine.name,
+        selection_method: 'search'
       });
     }
   };
@@ -581,12 +655,33 @@ export default function Page() {
         technology: generationData.technology,
       }
     });
+    
+    // Track analytics
+    trackAnalyticsEvent('feature_selected', {
+      feature_type: 'generation',
+      feature_id: generationData.id,
+      feature_name: generationData.name,
+      generation_type: generationData.type,
+      fuel_type: generationData.fuelType,
+      capacity: generationData.capacity,
+      selection_method: 'map_click'
+    });
   };
 
   const handleSnotelStationClick = (stationData: SnotelStationInfo) => {
     setSelectedFeature({ type: 'snotel', data: stationData });
     setSelectedFlowgate(null);
     setSelectedSnotelMetricId("25"); // Reset to WTEQ when station changes
+    
+    // Track analytics
+    trackAnalyticsEvent('feature_selected', {
+      feature_type: 'snotel',
+      feature_id: stationData.id,
+      feature_name: stationData.name,
+      triplet: stationData.triplet,
+      elevation: stationData.elevation,
+      selection_method: 'map_click'
+    });
   };
 
   const handleMapMarkerClick = (marker: { id: string | number; name?: string; latitude: number; longitude: number }) => {
@@ -627,6 +722,14 @@ export default function Page() {
       setSelectedFeature({ type: 'dam', data: damInfo });
       setSelectedFlowgate(null);
       setSelectedMetricId("6"); // Reset to Inflow when dam changes
+      
+      // Track analytics
+      trackAnalyticsEvent('feature_selected', {
+        feature_type: 'dam',
+        feature_id: damInfo.id,
+        feature_name: damInfo.name,
+        selection_method: 'map_click'
+      });
     }
   };
 
@@ -705,6 +808,15 @@ export default function Page() {
 
   // Add deselection handler
   const handleDeselection = () => {
+    // Track analytics before clearing
+    if (selectedFeature) {
+      trackAnalyticsEvent('feature_deselected', {
+        feature_type: selectedFeature.type,
+        feature_id: selectedFeature.data.id,
+        feature_name: selectedFeature.data.name
+      });
+    }
+    
     setSelectedFeature(null);
     setSelectedFlowgate(null);
     setSelectedMetricId("6"); // Reset to Inflow when deselecting
@@ -873,7 +985,14 @@ export default function Page() {
                     )}
 
                     {selectedFeature?.type === 'dam' && currentDam && (
-                      <Tabs defaultValue="data" className="w-full">
+                      <Tabs defaultValue="data" className="w-full" onValueChange={(value) => {
+                        trackAnalyticsEvent('tab_switched', {
+                          feature_type: 'dam',
+                          feature_id: currentDam.id,
+                          feature_name: currentDam.name,
+                          tab: value
+                        });
+                      }}>
                         <TabsList className="grid w-full grid-cols-2">
                           <TabsTrigger value="data" className="flex items-center gap-2">
                             <Activity className="h-4 w-4" />
@@ -902,7 +1021,15 @@ export default function Page() {
                               emptyStateTitle="No operational data available"
                               emptyStateDescription="Dam operational metrics are currently unavailable. This might be due to a temporary issue or no data being found."
                               selectedMetricId={selectedMetricId}
-                              onMetricSelect={setSelectedMetricId}
+                              onMetricSelect={(metricId) => {
+                                setSelectedMetricId(metricId);
+                                trackAnalyticsEvent('metric_selected', {
+                                  metric_id: metricId,
+                                  feature_type: 'dam',
+                                  feature_id: currentDam?.id,
+                                  feature_name: currentDam?.name
+                                });
+                              }}
                             />
                           </div>
                         </TabsContent>
@@ -1052,7 +1179,14 @@ export default function Page() {
                     )}
 
                     {selectedFeature?.type === 'powerline' && currentPowerLine && (
-                      <Tabs defaultValue="data" className="w-full">
+                      <Tabs defaultValue="data" className="w-full" onValueChange={(value) => {
+                        trackAnalyticsEvent('tab_switched', {
+                          feature_type: 'powerline',
+                          feature_id: currentPowerLine.id,
+                          feature_name: currentPowerLine.name,
+                          tab: value
+                        });
+                      }}>
                         <TabsList className="grid w-full grid-cols-2">
                           <TabsTrigger value="data" className="flex items-center gap-2">
                             <Activity className="h-4 w-4" />
@@ -1150,7 +1284,18 @@ export default function Page() {
                                                 key={index} 
                                                 variant="secondary"
                                                 className="text-xs block w-full justify-start py-1 px-2 font-normal cursor-pointer hover:bg-muted"
-                                                onClick={() => lineInfo && handleSearchPowerLineSelect(lineInfo)}
+                                                onClick={() => {
+                                                  if (lineInfo) {
+                                                    trackAnalyticsEvent('related_line_clicked', {
+                                                      from_line_id: currentPowerLine.id,
+                                                      from_line_name: currentPowerLine.name,
+                                                      to_line_id: lineInfo.id,
+                                                      to_line_name: lineInfo.name,
+                                                      flowgate: lineInfo.flowgate
+                                                    });
+                                                    handleSearchPowerLineSelect(lineInfo);
+                                                  }
+                                                }}
                                               >
                                                 {lineName}
                                               </Badge>
@@ -1168,7 +1313,14 @@ export default function Page() {
                     )}
 
                     {selectedFeature?.type === 'generation' && currentGeneration && (
-                      <Tabs defaultValue="about" className="w-full">
+                      <Tabs defaultValue="about" className="w-full" onValueChange={(value) => {
+                        trackAnalyticsEvent('tab_switched', {
+                          feature_type: 'generation',
+                          feature_id: currentGeneration.id,
+                          feature_name: currentGeneration.name,
+                          tab: value
+                        });
+                      }}>
                         <TabsList className="grid w-full grid-cols-2">
                           <TabsTrigger value="data" className="flex items-center gap-2">
                             <Activity className="h-4 w-4" />
@@ -1251,7 +1403,14 @@ export default function Page() {
                     )}
 
                     {selectedFeature?.type === 'snotel' && currentSnotelStation && (
-                      <Tabs defaultValue="data" className="w-full">
+                      <Tabs defaultValue="data" className="w-full" onValueChange={(value) => {
+                        trackAnalyticsEvent('tab_switched', {
+                          feature_type: 'snotel',
+                          feature_id: currentSnotelStation.id,
+                          feature_name: currentSnotelStation.name,
+                          tab: value
+                        });
+                      }}>
                         <TabsList className="grid w-full grid-cols-2">
                           <TabsTrigger value="data" className="flex items-center gap-2">
                             <Activity className="h-4 w-4" />
@@ -1282,7 +1441,15 @@ export default function Page() {
                               emptyStateTitle="No weather data available"
                               emptyStateDescription="SNOTEL station metrics are currently unavailable. This might be due to a temporary issue or no data being found."
                               selectedMetricId={selectedSnotelMetricId}
-                              onMetricSelect={(metricId) => setSelectedSnotelMetricId(metricId)}
+                              onMetricSelect={(metricId) => {
+                                setSelectedSnotelMetricId(metricId);
+                                trackAnalyticsEvent('metric_selected', {
+                                  metric_id: metricId,
+                                  feature_type: 'snotel',
+                                  feature_id: currentSnotelStation?.id,
+                                  feature_name: currentSnotelStation?.name
+                                });
+                              }}
                             />
                           </div>
                         </TabsContent>
