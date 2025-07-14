@@ -4,7 +4,7 @@ import * as React from 'react';
 import ReactMapGL, { Marker, Popup, NavigationControl, ViewStateChangeEvent, Source, Layer } from 'react-map-gl/mapbox';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { MapSkeleton } from "@/components/MapSkeleton";
-import { getPowerInfrastructure, PowerInfrastructureData, getPowerGenerators, GeneratorData, getPowerPlants, PowerPlantsData } from "@/lib/gcp";
+import { getPowerInfrastructure, PowerInfrastructureData, getPowerGenerators, GeneratorData, getPowerPlants, PowerPlantsData, getWildfires, WildfireData } from "@/lib/gcp";
 import { Switch } from "@/components/ui/switch";
 
 
@@ -44,6 +44,24 @@ interface GenerationClickData {
   technology?: string;
 }
 
+interface WildfireClickData {
+  irwinId: string;
+  incidentName: string;
+  gisAcres: number;
+  reportedAcres: number;
+  percentContained: number;
+  status: string;
+  incidentType: string;
+  complexityLevel: string;
+  causeGeneral: string;
+  state: string;
+  county: string;
+  discoveryTime: string;
+  perimeterTime: string;
+  lastUpdateSrc: string;
+  ingestionTimestamp: string;
+}
+
 interface InteractiveMapProps {
   initialLatitude?: number;
   initialLongitude?: number;
@@ -54,6 +72,7 @@ interface InteractiveMapProps {
   onMarkerClick?: (marker: MapMarker) => void;
   onPowerLineClick?: (powerLineData: PowerLineClickData) => void;
   onGenerationClick?: (generationData: GenerationClickData) => void;
+  onWildfireClick?: (wildfireData: WildfireClickData) => void;
   onEmptyMapClick?: () => void;
   selectedMarkerId?: string | number;
   selectedPowerLineId?: number | null;
@@ -171,6 +190,7 @@ export function InteractiveMap({
   onMarkerClick,
   onPowerLineClick,
   onGenerationClick,
+  onWildfireClick,
   onEmptyMapClick,
   selectedMarkerId,
   selectedPowerLineId,
@@ -192,6 +212,7 @@ export function InteractiveMap({
   const [clickedLineId, setClickedLineId] = React.useState<number | null>(null);
   const [generatorData, setGeneratorData] = React.useState<GeneratorData | null>(null);
   const [plantData, setPlantData] = React.useState<PowerPlantsData | null>(null);
+  const [wildfireData, setWildfireData] = React.useState<WildfireData | null>(null);
   const [isLegendVisible, setIsLegendVisible] = React.useState(false);
   const [isMobileModalOpen, setIsMobileModalOpen] = React.useState(false);
   const [isMobile, setIsMobile] = React.useState(false);
@@ -246,6 +267,10 @@ export function InteractiveMap({
         geothermal: true,
         other: true
       }
+    },
+    environmental: {
+      wildfires: true,
+      activeOnly: true
     }
   });
 
@@ -269,6 +294,8 @@ export function InteractiveMap({
   const showBiomass = filters.generation.types.biomass;
   const showGeothermal = filters.generation.types.geothermal;
   const showOtherTypes = filters.generation.types.other;
+  const showWildfires = filters.environmental.wildfires;
+  const showActiveWildfiresOnly = filters.environmental.activeOnly;
 
   // Mobile detection
   React.useEffect(() => {
@@ -317,8 +344,11 @@ export function InteractiveMap({
     if (showSnotelStations && snotelGeoJsonData && viewport.zoom >= 5.8) {
         layers.push('snotel-points');
     }
+    if (showWildfires && wildfireData) {
+      layers.push('wildfire-fills', 'wildfire-outlines');
+    }
     return layers;
-  }, [showPlants, showGenerators, showSnotelStations, viewport.zoom, plantData, generatorData, snotelGeoJsonData]);
+  }, [showPlants, showGenerators, showSnotelStations, showWildfires, viewport.zoom, plantData, generatorData, snotelGeoJsonData, wildfireData]);
 
   // Add hover state for dam markers
   const [hoveredMarker, setHoveredMarker] = React.useState<MapMarker | null>(null);
@@ -331,6 +361,9 @@ export function InteractiveMap({
 
   // Add hover state for power lines
   const [hoveredPowerLine, setHoveredPowerLine] = React.useState<{ name: string; voltage: string; longitude: number; latitude: number; flowgate?: string | null; capacityFactor?: number; } | null>(null);
+
+  // Add hover state for wildfires
+  const [hoveredWildfire, setHoveredWildfire] = React.useState<{ name: string; acres: number; percentContained: number; status: string; state: string; county: string; longitude: number; latitude: number; } | null>(null);
 
   // Add debouncing for hover events to prevent flickering
   const hoverTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
@@ -592,6 +625,73 @@ export function InteractiveMap({
     setPlantData({ ...allPlantData, features: filteredFeatures });
   }, [allPlantData, showPlants, showNuclear, showSolar, showWind, showHydro, showGas, showCoal, showBiomass, showGeothermal, showOtherTypes]);
 
+  // Optimized wildfire loading - only load once or when wildfires are toggled
+  const [wildfireDataLoaded, setWildfireDataLoaded] = React.useState(false);
+  const [allWildfireData, setAllWildfireData] = React.useState<WildfireData | null>(null);
+  
+  // Reset wildfire data when active filter changes
+  React.useEffect(() => {
+    setWildfireDataLoaded(false);
+    setAllWildfireData(null);
+  }, [showActiveWildfiresOnly]);
+  
+  React.useEffect(() => {
+    async function loadAllWildfires() {
+      if (wildfireDataLoaded || !showWildfires) return;
+      
+      try {
+        // Load all wildfire data once with high zoom level to get comprehensive data
+        const data = await getWildfires(
+          22, // High zoom to get all data
+          undefined, // status filter
+          undefined, // state filter
+          showActiveWildfiresOnly
+        );
+        console.log("All wildfire data loaded:", data);
+        setAllWildfireData(data);
+        setWildfireDataLoaded(true);
+      } catch (error) {
+        console.error("Failed to load wildfire data:", error);
+        setAllWildfireData(null);
+      }
+    }
+    
+    if (showWildfires) {
+      loadAllWildfires();
+    }
+  }, [showWildfires, showActiveWildfiresOnly, wildfireDataLoaded]);
+
+  // Filter wildfire data based on zoom level (client-side progressive disclosure)
+  React.useEffect(() => {
+    if (!allWildfireData || !showWildfires) {
+      setWildfireData(null);
+      return;
+    }
+    
+    // Client-side progressive disclosure based on zoom level
+    let filteredFeatures = allWildfireData.features;
+    
+    if (viewport.zoom < 6) {
+      // Show only major fires at low zoom levels (>1000 acres)
+      filteredFeatures = filteredFeatures
+        .filter(f => (f.properties.gis_acres || 0) > 1000)
+        .slice(0, 50);
+    } else if (viewport.zoom < 8) {
+      // Show fires >100 acres at medium zoom
+      filteredFeatures = filteredFeatures
+        .filter(f => (f.properties.gis_acres || 0) > 100)
+        .slice(0, 200);
+    } else if (viewport.zoom < 10) {
+      // Show most fires at higher zoom
+      filteredFeatures = filteredFeatures.slice(0, 500);
+    } else {
+      // Show all fires at highest zoom
+      filteredFeatures = filteredFeatures.slice(0, 1000);
+    }
+    
+    setWildfireData({ ...allWildfireData, features: filteredFeatures });
+  }, [allWildfireData, showWildfires, viewport.zoom]);
+
   // Add effect to sync external selectedFlowgate prop with internal state
   React.useEffect(() => {
     setSelectedFlowgateGroup(selectedFlowgate || null);
@@ -802,6 +902,36 @@ export function InteractiveMap({
           )}
         </div>
       </div>
+
+      {/* Environmental Section */}
+      <div className="border-t border-gray-200 pt-4">
+        <div className="flex items-center justify-between mb-2">
+          <h4 className="font-medium text-gray-800 text-xs uppercase tracking-wider">Environmental</h4>
+        </div>
+        <div className="space-y-2 pl-1">
+          <div className="flex items-center justify-between">
+            <label htmlFor="show-wildfires" className="text-xs text-gray-700 font-medium cursor-pointer">Wildfires</label>
+            <Switch
+              id="show-wildfires"
+              checked={showWildfires}
+              onCheckedChange={(checked) => updateFilter(['environmental', 'wildfires'], checked)}
+            />
+          </div>
+          
+          {showWildfires && (
+            <div className="mt-2 border-t border-gray-100 pt-2">
+              <div className="flex items-center justify-between">
+                <label htmlFor="show-active-fires" className="text-xs text-gray-600 cursor-pointer">Active Only</label>
+                <Switch
+                  id="show-active-fires"
+                  checked={showActiveWildfiresOnly}
+                  onCheckedChange={(checked) => updateFilter(['environmental', 'activeOnly'], checked)}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 
@@ -827,6 +957,33 @@ export function InteractiveMap({
             if (snotelFeature && snotelFeature.properties) {
               handleSnotelStationClick(snotelFeature.properties as SnotelStationInfo);
               return; // Exit early
+            }
+
+            // Then: Wildfire
+            const wildfireFeature = features.find(f => f.source === 'wildfires' && (f.layer?.id === 'wildfire-fills' || f.layer?.id === 'wildfire-outlines'));
+            if (wildfireFeature && wildfireFeature.properties) {
+              const wildfireData: WildfireClickData = {
+                irwinId: wildfireFeature.properties.irwin_id,
+                incidentName: wildfireFeature.properties.incident_name,
+                gisAcres: wildfireFeature.properties.gis_acres,
+                reportedAcres: wildfireFeature.properties.reported_acres,
+                percentContained: wildfireFeature.properties.percent_contained,
+                status: wildfireFeature.properties.status,
+                incidentType: wildfireFeature.properties.incident_type,
+                complexityLevel: wildfireFeature.properties.complexity_level,
+                causeGeneral: wildfireFeature.properties.cause_general,
+                state: wildfireFeature.properties.state,
+                county: wildfireFeature.properties.county,
+                discoveryTime: wildfireFeature.properties.discovery_time,
+                perimeterTime: wildfireFeature.properties.perimeter_time,
+                lastUpdateSrc: wildfireFeature.properties.last_update_src,
+                ingestionTimestamp: wildfireFeature.properties.ingestion_timestamp
+              };
+              
+              if (onWildfireClick) {
+                onWildfireClick(wildfireData);
+              }
+              return;
             }
 
             // Then: Generation (Plant or Generator)
@@ -960,12 +1117,11 @@ export function InteractiveMap({
             map.getCanvas().style.cursor = 'pointer';
           }
         }}
-        onMouseLeave={(event) => {
-          // Reset cursor and clear generation hover
-          event.target.getCanvas().style.cursor = '';
+        onMouseLeave={() => {
           setHoveredGeneration(null);
           setHoveredSnotelStation(null);
           setHoveredPowerLine(null);
+          setHoveredWildfire(null);
         }}
         onMouseMove={(event) => {
           const map = event.target;
@@ -981,6 +1137,7 @@ export function InteractiveMap({
           const generatorFeature = features.find(f => f.layer?.id === 'generator-points');
           const snotelFeature = features.find(f => f.layer?.id === 'snotel-points');
           const powerLineFeature = features.find(f => f.layer?.id === 'power-lines' || f.layer?.id === 'power-lines-clickable');
+          const wildfireFeature = features.find(f => f.source === 'wildfires' && (f.layer?.id === 'wildfire-fills' || f.layer?.id === 'wildfire-outlines'));
 
           if (plantFeature?.properties) {
             setHoveredGeneration({
@@ -993,6 +1150,7 @@ export function InteractiveMap({
             });
             setHoveredSnotelStation(null);
             setHoveredPowerLine(null);
+            setHoveredWildfire(null);
           } else if (generatorFeature?.properties) {
             setHoveredGeneration({
               id: generatorFeature.properties.id,
@@ -1004,6 +1162,7 @@ export function InteractiveMap({
             });
             setHoveredSnotelStation(null);
             setHoveredPowerLine(null);
+            setHoveredWildfire(null);
           } else if (snotelFeature?.properties && snotelFeature.geometry.type === 'Point') {
             const coords = (snotelFeature.geometry as PointGeometry).coordinates;
             setHoveredSnotelStation({
@@ -1013,6 +1172,7 @@ export function InteractiveMap({
             });
             setHoveredGeneration(null);
             setHoveredPowerLine(null);
+            setHoveredWildfire(null);
           } else if (powerLineFeature?.properties) {
             setHoveredPowerLine({
               name: powerLineFeature.properties.name,
@@ -1024,10 +1184,26 @@ export function InteractiveMap({
             });
             setHoveredGeneration(null);
             setHoveredSnotelStation(null);
+            setHoveredWildfire(null);
+          } else if (wildfireFeature?.properties) {
+            setHoveredWildfire({
+              name: wildfireFeature.properties.incident_name || 'Unnamed Fire',
+              acres: wildfireFeature.properties.gis_acres || 0,
+              percentContained: wildfireFeature.properties.percent_contained || 0,
+              status: wildfireFeature.properties.status || 'Unknown',
+              state: wildfireFeature.properties.state || '',
+              county: wildfireFeature.properties.county || '',
+              longitude: event.lngLat.lng,
+              latitude: event.lngLat.lat,
+            });
+            setHoveredGeneration(null);
+            setHoveredSnotelStation(null);
+            setHoveredPowerLine(null);
           } else {
             setHoveredGeneration(null);
             setHoveredSnotelStation(null);
             setHoveredPowerLine(null);
+            setHoveredWildfire(null);
           }
         }}
         interactiveLayerIds={queryableLayers}
@@ -1611,6 +1787,98 @@ export function InteractiveMap({
           />
         </Source>
 
+        {/* Wildfire Layers */}
+        <Source
+          id="wildfires"
+          type="geojson"
+          data={wildfireData || { type: 'FeatureCollection', features: [] }}
+        >
+          {/* Wildfire perimeter fills */}
+          <Layer
+            id="wildfire-fills"
+            type="fill"
+            layout={{ visibility: showWildfires ? 'visible' : 'none' }}
+            paint={{
+              "fill-color": [
+                "case",
+                // Color based on containment percentage
+                ["<", ["coalesce", ["get", "percent_contained"], 0], 25],
+                "#ff4444", // Red for very active fires (< 25% contained)
+                ["<", ["coalesce", ["get", "percent_contained"], 0], 50],
+                "#ff8800", // Orange for moderately active fires (25-50% contained)
+                ["<", ["coalesce", ["get", "percent_contained"], 0], 80],
+                "#ffaa00", // Yellow-orange for mostly contained (50-80% contained)
+                "#ffdd00"  // Yellow for nearly contained (80%+ contained)
+              ],
+              "fill-opacity": [
+                "case",
+                // More opaque for active fires
+                ["<", ["coalesce", ["get", "percent_contained"], 0], 50],
+                0.6,
+                0.4
+              ]
+            }}
+          />
+          
+          {/* Wildfire perimeter outlines */}
+          <Layer
+            id="wildfire-outlines"
+            type="line"
+            layout={{ visibility: showWildfires ? 'visible' : 'none' }}
+            paint={{
+              "line-color": [
+                "case",
+                // Darker outline colors
+                ["<", ["coalesce", ["get", "percent_contained"], 0], 25],
+                "#cc0000", // Dark red
+                ["<", ["coalesce", ["get", "percent_contained"], 0], 50],
+                "#cc4400", // Dark orange
+                ["<", ["coalesce", ["get", "percent_contained"], 0], 80],
+                "#cc6600", // Dark yellow-orange
+                "#cc8800"  // Dark yellow
+              ],
+              "line-width": [
+                "case",
+                // Thicker lines for larger fires
+                [">", ["coalesce", ["get", "gis_acres"], 0], 10000],
+                3,
+                [">", ["coalesce", ["get", "gis_acres"], 0], 1000],
+                2,
+                1.5
+              ],
+              "line-opacity": 0.8
+            }}
+          />
+          
+          {/* Wildfire labels for larger fires */}
+          <Layer
+            id="wildfire-labels"
+            type="symbol"
+            minzoom={8}
+            layout={{
+              visibility: showWildfires ? 'visible' : 'none',
+              "text-field": [
+                "format",
+                ["coalesce", ["get", "incident_name"], "Unnamed Fire"], {},
+                "\n", {},
+                ["concat", ["number-format", ["coalesce", ["get", "gis_acres"], 0], {}], " acres"], { "font-scale": 0.8 },
+                "\n", {},
+                ["concat", ["number-format", ["coalesce", ["get", "percent_contained"], 0], {}], "% contained"], { "font-scale": 0.8 }
+              ],
+              "text-font": ["Open Sans Bold"],
+              "text-size": 12,
+              "text-anchor": "center",
+              "text-max-width": 8
+            }}
+            paint={{
+              "text-color": "#ffffff",
+              "text-halo-color": "#000000",
+              "text-halo-width": 2
+            }}
+            filter={[">", ["coalesce", ["get", "gis_acres"], 0], 500]} // Only show labels for fires > 500 acres
+          />
+        </Source>
+
         {/* Dam markers with proper dam icons */}
         {showDams && markers && markers.length > 0 && markers.map((marker) => (
           <Marker
@@ -1754,6 +2022,40 @@ export function InteractiveMap({
                   )}
                 </div>
               )}
+            </div>
+          </Popup>
+        )}
+
+        {/* Wildfire hover popup */}
+        {hoveredWildfire && (
+          <Popup
+            latitude={hoveredWildfire.latitude}
+            longitude={hoveredWildfire.longitude}
+            closeButton={false}
+            closeOnClick={false}
+            offset={[0, -15]}
+            className="wildfire-hover-popup"
+            style={{ pointerEvents: 'none' }}
+          >
+            <div style={{ pointerEvents: 'none', color: '#333333', fontSize: '14px' }}>
+              <div className="font-semibold">{hoveredWildfire.name}</div>
+              <div className="text-xs text-gray-600">{hoveredWildfire.state}{hoveredWildfire.county && `, ${hoveredWildfire.county} County`}</div>
+              <div className="mt-2 pt-2 border-t border-gray-200">
+                <div className="text-xs">
+                  <span className="font-medium text-gray-700">Size:</span>
+                  <span className="font-mono text-xs ml-1">{hoveredWildfire.acres.toLocaleString()} acres</span>
+                </div>
+                <div className="text-xs">
+                  <span className="font-medium text-gray-700">Contained:</span>
+                  <span className="font-mono text-xs ml-1">{hoveredWildfire.percentContained}%</span>
+                </div>
+                {hoveredWildfire.status && hoveredWildfire.status !== 'Unknown' && (
+                  <div className="text-xs">
+                    <span className="font-medium text-gray-700">Status:</span>
+                    <span className="font-mono text-xs ml-1">{hoveredWildfire.status}</span>
+                  </div>
+                )}
+              </div>
             </div>
           </Popup>
         )}

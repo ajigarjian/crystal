@@ -126,11 +126,29 @@ export interface SnotelStationInfo {
   longitude: number;
 }
 
-export type SelectedFeatureType = 'dam' | 'powerline' | 'generation' | 'snotel';
+export interface WildfireInfo {
+  irwinId: string;
+  incidentName: string;
+  gisAcres: number;
+  reportedAcres: number;
+  percentContained: number;
+  status: string;
+  incidentType: string;
+  complexityLevel: string;
+  causeGeneral: string;
+  state: string;
+  county: string;
+  discoveryTime: string;
+  perimeterTime: string;
+  lastUpdateSrc: string;
+  ingestionTimestamp: string;
+}
+
+export type SelectedFeatureType = 'dam' | 'powerline' | 'generation' | 'snotel' | 'wildfire';
 
 export interface SelectedFeature {
   type: SelectedFeatureType;
-  data: DamInfo | PowerLineInfo | GenerationInfo | SnotelStationInfo;
+  data: DamInfo | PowerLineInfo | GenerationInfo | SnotelStationInfo | WildfireInfo;
 }
 
 const AVAILABLE_DAMS: DamInfo[] = [
@@ -278,6 +296,10 @@ export default function Page() {
 
   const getCurrentSnotelStation = (): SnotelStationInfo | null => {
     return selectedFeature?.type === 'snotel' ? selectedFeature.data as SnotelStationInfo : null;
+  };
+
+  const getCurrentWildfire = (): WildfireInfo | null => {
+    return selectedFeature?.type === 'wildfire' ? selectedFeature.data as WildfireInfo : null;
   };
 
   React.useEffect(() => {
@@ -677,6 +699,32 @@ export default function Page() {
     setSelectedFlowgate(null);
   };
 
+  const handleWildfireClick = (wildfireData: {
+    irwinId: string;
+    incidentName: string;
+    gisAcres: number;
+    reportedAcres: number;
+    percentContained: number;
+    status: string;
+    incidentType: string;
+    complexityLevel: string;
+    causeGeneral: string;
+    state: string;
+    county: string;
+    discoveryTime: string;
+    perimeterTime: string;
+    lastUpdateSrc: string;
+    ingestionTimestamp: string;
+  }) => {
+    console.log('Dashboard handling wildfire click:', wildfireData);
+    
+    setSelectedFeature({
+      type: 'wildfire',
+      data: wildfireData
+    });
+    setSelectedFlowgate(null);
+  };
+
   // Helper function to get display info for selected feature
   const getSelectedFeatureDisplay = () => {
     if (!selectedFeature) return null;
@@ -693,6 +741,9 @@ export default function Page() {
     } else if (selectedFeature.type === 'snotel') {
       const station = selectedFeature.data as SnotelStationInfo;
       return station.name;
+    } else if (selectedFeature.type === 'wildfire') {
+      const wildfire = selectedFeature.data as WildfireInfo;
+      return wildfire.incidentName;
     }
     return null;
   };
@@ -701,6 +752,7 @@ export default function Page() {
   const currentPowerLine = getCurrentPowerLine();
   const currentGeneration = getCurrentGeneration();
   const currentSnotelStation = getCurrentSnotelStation();
+  const currentWildfire = getCurrentWildfire();
   const selectedDisplay = getSelectedFeatureDisplay();
 
   // Add deselection handler
@@ -779,6 +831,7 @@ export default function Page() {
                         onPowerLineClick={handlePowerLineClick}
                         onGenerationClick={handleGenerationClick}
                         onSnotelStationClick={handleSnotelStationClick}
+                        onWildfireClick={handleWildfireClick}
                         onEmptyMapClick={handleDeselection}
                         selectedMarkerId={currentDam?.id}
                         selectedPowerLineId={currentPowerLine?.id}
@@ -1306,6 +1359,122 @@ export default function Page() {
                                 <div className="col-span-2">
                                   <span className="font-medium text-muted-foreground">Coordinates:</span>
                                   <div className="font-medium">Lat: {currentSnotelStation.latitude.toFixed(4)}, Lon: {currentSnotelStation.longitude.toFixed(4)}</div>
+                                </div>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        </TabsContent>
+                      </Tabs>
+                    )}
+
+                    {selectedFeature?.type === 'wildfire' && currentWildfire && (
+                      <Tabs defaultValue="about" className="w-full">
+                        <TabsList className="grid w-full grid-cols-1">
+                          <TabsTrigger value="about" className="flex items-center gap-2">
+                            <Info className="h-4 w-4" />
+                            About
+                          </TabsTrigger>
+                        </TabsList>
+                        
+                        <TabsContent value="about" className="space-y-4 mt-4">
+                          <Card>
+                            <CardHeader>
+                              <CardTitle className="text-sm text-muted-foreground">Wildfire Information</CardTitle>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                              {/* Basic Wildfire Information */}
+                              <div className="grid grid-cols-2 gap-3 text-sm">
+                                <div>
+                                  <span className="font-medium text-muted-foreground">Name:</span>
+                                  <div className="font-medium">{currentWildfire.incidentName}</div>
+                                </div>
+                                <div>
+                                  <span className="font-medium text-muted-foreground">Size:</span>
+                                  <div className="font-medium">{currentWildfire.gisAcres.toLocaleString()} acres</div>
+                                </div>
+                                <div>
+                                  <span className="font-medium text-muted-foreground">Containment:</span>
+                                  <div className="font-medium">{currentWildfire.percentContained}%</div>
+                                </div>
+                                <div>
+                                  <span className="font-medium text-muted-foreground">Status:</span>
+                                  <div className="font-medium">{currentWildfire.status}</div>
+                                </div>
+                                <div>
+                                  <span className="font-medium text-muted-foreground">Complexity:</span>
+                                  <div className="font-medium">{currentWildfire.complexityLevel}</div>
+                                </div>
+                                <div>
+                                  <span className="font-medium text-muted-foreground">Cause:</span>
+                                  <div className="font-medium">{currentWildfire.causeGeneral}</div>
+                                </div>
+                              </div>
+
+                              {/* Location Information */}
+                              <Separator />
+                              <div>
+                                <div className="text-sm font-medium text-muted-foreground mb-2">Location</div>
+                                <div className="grid grid-cols-2 gap-3 text-sm">
+                                  <div>
+                                    <span className="font-medium text-muted-foreground">State:</span>
+                                    <div className="font-medium">{currentWildfire.state}</div>
+                                  </div>
+                                  <div>
+                                    <span className="font-medium text-muted-foreground">County:</span>
+                                    <div className="font-medium">{currentWildfire.county}</div>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Size Information */}
+                              <Separator />
+                              <div>
+                                <div className="text-sm font-medium text-muted-foreground mb-2">Size Details</div>
+                                <div className="grid grid-cols-2 gap-3 text-sm">
+                                  <div>
+                                    <span className="font-medium text-muted-foreground">GIS Acres:</span>
+                                    <div className="font-medium">{currentWildfire.gisAcres.toLocaleString()}</div>
+                                  </div>
+                                  <div>
+                                    <span className="font-medium text-muted-foreground">Reported Acres:</span>
+                                    <div className="font-medium">{currentWildfire.reportedAcres.toLocaleString()}</div>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Timeline Information */}
+                              <Separator />
+                              <div>
+                                <div className="text-sm font-medium text-muted-foreground mb-2">Timeline</div>
+                                <div className="grid grid-cols-1 gap-3 text-sm">
+                                  <div>
+                                    <span className="font-medium text-muted-foreground">Discovery Time:</span>
+                                    <div className="font-medium">{new Date(currentWildfire.discoveryTime).toLocaleDateString()} {new Date(currentWildfire.discoveryTime).toLocaleTimeString()}</div>
+                                  </div>
+                                  <div>
+                                    <span className="font-medium text-muted-foreground">Perimeter Time:</span>
+                                    <div className="font-medium">{new Date(currentWildfire.perimeterTime).toLocaleDateString()} {new Date(currentWildfire.perimeterTime).toLocaleTimeString()}</div>
+                                  </div>
+                                  <div>
+                                    <span className="font-medium text-muted-foreground">Last Update:</span>
+                                    <div className="font-medium">{new Date(currentWildfire.lastUpdateSrc).toLocaleDateString()} {new Date(currentWildfire.lastUpdateSrc).toLocaleTimeString()}</div>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Technical Information */}
+                              <Separator />
+                              <div>
+                                <div className="text-sm font-medium text-muted-foreground mb-2">Technical Details</div>
+                                <div className="grid grid-cols-1 gap-3 text-sm">
+                                  <div>
+                                    <span className="font-medium text-muted-foreground">Incident Type:</span>
+                                    <div className="font-medium">{currentWildfire.incidentType}</div>
+                                  </div>
+                                  <div>
+                                    <span className="font-medium text-muted-foreground">IRWIN ID:</span>
+                                    <div className="font-medium font-mono text-xs">{currentWildfire.irwinId}</div>
+                                  </div>
                                 </div>
                               </div>
                             </CardContent>

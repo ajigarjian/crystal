@@ -41,6 +41,7 @@ from energy_agent.energy_agent import energy_agent_stream_generator
 from get_power_generators.get_power_generators import get_power_generators
 from get_power_infra.get_power_infra import get_power_infrastructure
 from get_power_plants.get_power_plants import get_power_plants
+from get_wildfires.get_wildfires import get_wildfires
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -117,6 +118,12 @@ def get_power_plants_route():
     if flask_request.method == "OPTIONS":
         return _add_cors_headers(Response(status=204))
     return get_power_plants(flask_request)
+
+@app.route('/get-wildfires', methods=['GET', 'POST', 'OPTIONS'])
+def get_wildfires_route():
+    if flask_request.method == "OPTIONS":
+        return _add_cors_headers(Response(status=204))
+    return get_wildfires(flask_request)
 
 def main(request):
     """

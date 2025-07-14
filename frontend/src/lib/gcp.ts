@@ -285,3 +285,86 @@ export const getPowerPlants = async (
     throw error;
   }
 }; 
+
+// Types for Wildfire Data
+export interface WildfireFeature {
+  type: "Feature";
+  id: string;
+  geometry: GeoJSON.Geometry;
+  properties: {
+    irwin_id: string;
+    incident_name: string;
+    gis_acres: number;
+    reported_acres: number;
+    percent_contained: number;
+    status: string;
+    incident_type: string;
+    complexity_level: string;
+    cause_general: string;
+    state: string;
+    county: string;
+    discovery_time: string;
+    perimeter_time: string;
+    last_update_src: string;
+    ingestion_timestamp: string;
+    geometry_type: string;
+  };
+}
+
+export interface WildfireData {
+  type: "FeatureCollection";
+  features: WildfireFeature[];
+}
+
+/**
+ * Fetch wildfire perimeter data as GeoJSON with zoom-based progressive disclosure
+ * @param zoom Zoom level for progressive disclosure
+ * @param status Optional status filter (e.g., 'Active', 'Contained')
+ * @param state Optional state filter (e.g., 'CA', 'OR')
+ * @param activeOnly Only show fires that are not 100% contained
+ */
+export const getWildfires = async (
+  zoom?: number,
+  status?: string,
+  state?: string,
+  activeOnly?: boolean
+): Promise<WildfireData> => {
+  const { baseUrl, prefixFunctionName } = getFunctionsBaseUrl();
+  let url = `${baseUrl}/${prefixFunctionName('get-wildfires')}`;
+  const params = new URLSearchParams();
+  
+  if (zoom !== undefined) params.append('zoom', zoom.toString());
+  if (status) params.append('status', status);
+  if (state) params.append('state', state);
+  if (activeOnly) params.append('active_only', 'true');
+  
+  if (params.toString()) {
+    url += `?${params.toString()}`;
+  }
+  
+  console.log("Calling getWildfires API at URL:", url);
+  
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    console.log("Wildfires API response status:", response.status);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Error fetching wildfires:', errorText);
+      throw new Error(`Failed to fetch wildfires: ${response.status}`);
+    }
+
+    const data = await response.json();
+    console.log("Raw wildfires API response data:", data);
+    return data;
+  } catch (error) {
+    console.error('Error in getWildfires:', error);
+    throw error;
+  }
+}; 
