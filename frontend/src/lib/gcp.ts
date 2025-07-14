@@ -117,26 +117,136 @@ export interface PowerInfrastructureFeature {
     geometry_type: string;
     flowgate: string | null;
     is_flowgate_line: boolean;
-    capacity_factor: number;
-    capacity_factor_timestamp: string | null;
+    capacity_factor?: number; // Optional for single datetime queries
+    capacity_factor_timestamp?: string | null; // Optional for single datetime queries
+    data_quality?: string | null; // Optional for single datetime queries
+    time_series_data?: TimeSeriesDataPoint[] | null; // Optional for date range queries
+  };
+}
+
+export interface TimeSeriesDataPoint {
+  datetime_utc: string;
+  capacity_factor: number;
+  quality: string; // 'R' for real/historical, 'F' for forecast
+}
+
+/**
+ * Extract capacity factor data for a specific datetime from time series data
+ * @param timeSeriesData Array of time series data points
+ * @param targetDateTime Target datetime as Date object
+ * @returns Object with capacity_factor, timestamp, and quality, or null if not found
+ */
+export function extractCapacityFactorForDateTime(
+  timeSeriesData: TimeSeriesDataPoint[] | null | undefined,
+  targetDateTime: Date
+): { capacity_factor: number; capacity_factor_timestamp: string; data_quality: string } | null {
+  if (!timeSeriesData || timeSeriesData.length === 0) {
+    return null;
+  }
+  
+  // Round target datetime to nearest hour
+  const targetHour = new Date(targetDateTime);
+  targetHour.setMinutes(0, 0, 0);
+  const targetISOString = targetHour.toISOString();
+  
+  // Find exact match first
+  const exactMatch = timeSeriesData.find(point => 
+    new Date(point.datetime_utc).toISOString() === targetISOString
+  );
+  
+  if (exactMatch) {
+    return {
+      capacity_factor: exactMatch.capacity_factor,
+      capacity_factor_timestamp: exactMatch.datetime_utc,
+      data_quality: exactMatch.quality
+    };
+  }
+  
+  // If no exact match, find closest time point
+  const closestMatch = timeSeriesData.reduce((closest, current) => {
+    const currentTime = new Date(current.datetime_utc).getTime();
+    const closestTime = new Date(closest.datetime_utc).getTime();
+    const targetTime = targetHour.getTime();
+    
+    return Math.abs(currentTime - targetTime) < Math.abs(closestTime - targetTime) 
+      ? current : closest;
+  });
+  
+  return {
+    capacity_factor: closestMatch.capacity_factor,
+    capacity_factor_timestamp: closestMatch.datetime_utc,
+    data_quality: closestMatch.quality
+  };
+}
+
+/**
+ * Transform time series data to single datetime format for backward compatibility
+ * @param powerInfraData Power infrastructure data with time series
+ * @param targetDateTime Target datetime to extract
+ * @returns Transformed data with single datetime capacity factors
+ */
+export function transformTimeSeriesForDateTime(
+  powerInfraData: PowerInfrastructureData,
+  targetDateTime: Date
+): PowerInfrastructureData {
+  return {
+    ...powerInfraData,
+    features: powerInfraData.features.map(feature => {
+      const capacityFactorData = extractCapacityFactorForDateTime(
+        feature.properties.time_series_data,
+        targetDateTime
+      );
+      
+      return {
+        ...feature,
+        properties: {
+          ...feature.properties,
+          capacity_factor: capacityFactorData?.capacity_factor || 0.0,
+          capacity_factor_timestamp: capacityFactorData?.capacity_factor_timestamp || null,
+          data_quality: capacityFactorData?.data_quality || null,
+          // Remove time_series_data for backward compatibility
+          time_series_data: undefined
+        }
+      };
+    })
   };
 }
 
 export interface PowerInfrastructureData {
   type: "FeatureCollection";
   features: PowerInfrastructureFeature[];
+  time_range?: {
+    start_date: string;
+    end_date: string;
+    weeks: number;
+  };
 }
 
 /**
  * Fetch BPA power infrastructure data as GeoJSON from the new GCP endpoint
  * @param zoom Optional zoom level for simplification
+ * @param datetime Optional datetime in ISO format (YYYY-MM-DDTHH:MM:SSZ) to get capacity factors for specific time
+ * @param dateRange Optional date range (e.g., "4w" for 4 weeks of data) to get time series data
  */
-export const getPowerInfrastructure = async (zoom?: number): Promise<PowerInfrastructureData> => {
+export const getPowerInfrastructure = async (zoom?: number, datetime?: string, dateRange?: string): Promise<PowerInfrastructureData> => {
   const { baseUrl, prefixFunctionName } = getFunctionsBaseUrl();
   let url = `${baseUrl}/${prefixFunctionName('get-power-infrastructure')}`;
+  
+  const params = new URLSearchParams();
   if (zoom !== undefined) {
-    url += `?zoom=${zoom}`;
+    params.append('zoom', zoom.toString());
   }
+  if (datetime !== undefined) {
+    params.append('datetime', datetime);
+  }
+  if (dateRange !== undefined) {
+    params.append('date_range', dateRange);
+  }
+  
+  if (params.toString()) {
+    url += `?${params.toString()}`;
+  }
+  
   console.log("Calling getPowerInfrastructure API at URL:", url);
   try {
     const response = await fetch(url, {

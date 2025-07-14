@@ -4,8 +4,9 @@ import * as React from 'react';
 import ReactMapGL, { Marker, Popup, NavigationControl, ViewStateChangeEvent, Source, Layer } from 'react-map-gl/mapbox';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { MapSkeleton } from "@/components/MapSkeleton";
-import { getPowerInfrastructure, PowerInfrastructureData, getPowerGenerators, GeneratorData, getPowerPlants, PowerPlantsData, getWildfires, WildfireData } from "@/lib/gcp";
+import { getPowerInfrastructure, PowerInfrastructureData, getPowerGenerators, GeneratorData, getPowerPlants, PowerPlantsData, getWildfires, WildfireData, transformTimeSeriesForDateTime } from "@/lib/gcp";
 import { Switch } from "@/components/ui/switch";
+import { TemporalControl } from "./TemporalControl";
 
 
 interface PointGeometry {
@@ -216,6 +217,20 @@ export function InteractiveMap({
   const [isLegendVisible, setIsLegendVisible] = React.useState(false);
   const [isMobileModalOpen, setIsMobileModalOpen] = React.useState(false);
   const [isMobile, setIsMobile] = React.useState(false);
+  const [isTemporalControlCollapsed, setIsTemporalControlCollapsed] = React.useState(false);
+  
+  // Temporal control state
+  const [selectedDateTime, setSelectedDateTime] = React.useState<Date>(() => {
+    const now = new Date();
+    now.setMinutes(0, 0, 0); // Round to nearest hour
+    return now;
+  });
+  const [isTemporalDataLoading, setIsTemporalDataLoading] = React.useState(false);
+  
+  // Caching state for time series data
+  const [cachedTimeSeriesData, setCachedTimeSeriesData] = React.useState<PowerInfrastructureData | null>(null);
+  const [cacheLoadTime, setCacheLoadTime] = React.useState<Date | null>(null);
+  const [isCacheLoading, setIsCacheLoading] = React.useState(false);
   
   const selectedGenId = selectedGeneration?.id ?? -1;
   const selectedGenType = selectedGeneration?.type ?? '';
@@ -400,10 +415,11 @@ export function InteractiveMap({
   // Replace the hardcoded timeout effect with data-driven loading
   React.useEffect(() => {
     // Set loading to false once power infrastructure data is loaded (or failed to load)
-    if (powerInfrastructureData !== null) {
+    // and the cache is either loaded or failed to load
+    if (powerInfrastructureData !== null && !isCacheLoading && !isTemporalDataLoading) {
       setIsLoading(false);
     }
-  }, [powerInfrastructureData]);
+  }, [powerInfrastructureData, isCacheLoading, isTemporalDataLoading]);
 
   React.useEffect(() => {
     // Update viewport if initial props change
@@ -455,54 +471,122 @@ export function InteractiveMap({
     };
   }, [isFullScreen, handleEscapeKey]);
 
-  // Load power infrastructure data once on component mount
+  // Load initial 4-week time series data cache
   React.useEffect(() => {
-    async function loadPowerInfrastructure() {
+    async function loadInitialTimeSeriesCache() {
       try {
-        // Load power infrastructure data without zoom-based filtering
-        const data = await getPowerInfrastructure();
-        console.log("Power infrastructure data received:", data);
+        setIsCacheLoading(true);
         
-        // Format voltage values in the data
-        if (data && data.features) {
-          const formattedData = {
-            ...data,
-            features: data.features.map(feature => ({
-              ...feature,
-              properties: {
-                ...feature.properties,
-                voltage_formatted: formatVoltageToKV(feature.properties.voltage)
-              }
-            }))
-          };
-          
-          // Log capacity factor information
-          const flowgateLines = formattedData.features.filter(f => f.properties.is_flowgate_line);
-          const capacityFactorStats = flowgateLines.reduce((acc, line) => {
-            const cf = line.properties.capacity_factor;
-            if (cf < 0.4) acc.green++;
-            else if (cf < 0.6) acc.yellow++;
-            else if (cf < 0.8) acc.orange++;
-            else acc.red++;
-            return acc;
-          }, { green: 0, yellow: 0, orange: 0, red: 0 });
-          
-          console.log(`Capacity factor coloring: ${flowgateLines.length} flowgate lines loaded -`, 
-                     `Green: ${capacityFactorStats.green}, Yellow: ${capacityFactorStats.yellow}, ` +
-                     `Orange: ${capacityFactorStats.orange}, Red: ${capacityFactorStats.red}`);
-          
-          setPowerInfrastructureData(formattedData);
-        } else {
-          setPowerInfrastructureData(data);
-        }
+        // Load 4 weeks of time series data
+        const data = await getPowerInfrastructure(undefined, undefined, '4w');
+        
+        console.log("Time series cache loaded:", data);
+        console.log("Time range:", data.time_range);
+        
+        setCachedTimeSeriesData(data);
+        setCacheLoadTime(new Date());
       } catch (error) {
-        console.error("Failed to load power infrastructure data:", error);
-        setPowerInfrastructureData(null);
+        console.error("Failed to load time series cache:", error);
+        setCachedTimeSeriesData(null);
+      } finally {
+        setIsCacheLoading(false);
       }
     }
     
-    loadPowerInfrastructure();
-  }, []); // Empty dependency array - only run once on mount
+    // Only load cache once on component mount
+    if (!cachedTimeSeriesData && !isCacheLoading) {
+      loadInitialTimeSeriesCache();
+    }
+  }, []); // Empty dependency array - only run once
+  
+  // Transform cached data for selected datetime (instant, no loading needed)
+  React.useEffect(() => {
+    if (cachedTimeSeriesData) {
+      try {
+        // Transform the cached time series data for the selected datetime (synchronous)
+        const transformedData = transformTimeSeriesForDateTime(cachedTimeSeriesData, selectedDateTime);
+        
+        // Format voltage values in the data
+        const formattedData = {
+          ...transformedData,
+          features: transformedData.features.map(feature => ({
+            ...feature,
+            properties: {
+              ...feature.properties,
+              voltage_formatted: formatVoltageToKV(feature.properties.voltage)
+            }
+          }))
+        };
+        
+        // Log capacity factor information
+        const flowgateLines = formattedData.features.filter(f => f.properties.is_flowgate_line);
+        const capacityFactorStats = flowgateLines.reduce((acc, line) => {
+          const cf = line.properties.capacity_factor || 0;
+          if (cf < 0.5) acc.red++;
+          else if (cf < 0.8) acc.orange++;
+          else if (cf < 1.0) acc.yellow++;
+          else acc.green++;
+          return acc;
+        }, { green: 0, yellow: 0, orange: 0, red: 0 });
+        
+        const qualityStats = flowgateLines.reduce((acc, line) => {
+          const quality = line.properties.data_quality;
+          if (quality === 'R') acc.historical++;
+          else if (quality === 'F') acc.forecast++;
+          else acc.unknown++;
+          return acc;
+        }, { historical: 0, forecast: 0, unknown: 0 });
+        
+        console.log(`Capacity factor coloring for ${selectedDateTime.toISOString()}: ${flowgateLines.length} flowgate lines -`, 
+                   `Green: ${capacityFactorStats.green}, Yellow: ${capacityFactorStats.yellow}, ` +
+                   `Orange: ${capacityFactorStats.orange}, Red: ${capacityFactorStats.red}`);
+        console.log(`Data quality distribution: Historical: ${qualityStats.historical}, ` +
+                   `Forecast: ${qualityStats.forecast}, Unknown: ${qualityStats.unknown}`);
+        
+        setPowerInfrastructureData(formattedData);
+      } catch (error) {
+        console.error("Failed to transform cached data:", error);
+        setPowerInfrastructureData(null);
+      }
+    } else if (!isCacheLoading) {
+      // If no cache and not loading, fall back to single datetime API call
+      async function loadSingleDatetimeData() {
+        try {
+          setIsTemporalDataLoading(true);
+          
+          const data = await getPowerInfrastructure(undefined, selectedDateTime.toISOString());
+          
+          console.log("Single datetime data loaded:", data);
+          console.log("Selected datetime:", selectedDateTime.toISOString());
+          
+          // Format voltage values in the data
+          if (data && data.features) {
+            const formattedData = {
+              ...data,
+              features: data.features.map(feature => ({
+                ...feature,
+                properties: {
+                  ...feature.properties,
+                  voltage_formatted: formatVoltageToKV(feature.properties.voltage)
+                }
+              }))
+            };
+            
+            setPowerInfrastructureData(formattedData);
+          } else {
+            setPowerInfrastructureData(data);
+          }
+        } catch (error) {
+          console.error("Failed to load single datetime data:", error);
+          setPowerInfrastructureData(null);
+        } finally {
+          setIsTemporalDataLoading(false);
+        }
+      }
+      
+      loadSingleDatetimeData();
+    }
+  }, [selectedDateTime, cachedTimeSeriesData, isCacheLoading]); // Reload when selectedDateTime or cache changes
 
   // Optimized generator loading - only load once or when generation is toggled
   const [generatorDataLoaded, setGeneratorDataLoaded] = React.useState(false);
@@ -722,7 +806,7 @@ export function InteractiveMap({
     <div className="space-y-4 text-xs">
       {/* Selected Flowgate Info */}
       {selectedFlowgateGroup && (
-        <div className="bg-cyan-50 border border-cyan-200 rounded-lg p-3 mb-4">
+        <div className="bg-cyan-50 border border-cyan-200 rounded-md p-3 mb-4">
           <div className="flex items-center justify-between">
             <div>
               <div className="font-medium text-cyan-800 text-xs mb-1">Active Selection</div>
@@ -2096,13 +2180,12 @@ export function InteractiveMap({
       
       {/* Columbia River System Label Overlay with Full Screen Button */}
       <div 
-        className="absolute top-4 left-4 bg-white/95 rounded-lg px-3 py-2 border"
-        style={{ zIndex: 40 }}
+        className="absolute top-4 left-0 bg-white/95 rounded-r-md px-3 py-2 border"
+        style={{ zIndex: 40, width: '250px' }}
       >
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h4 className="text-sm font-semibold text-blue-900 mb-1">Columbia River Basin</h4>
-            <p className="text-xs text-gray-600">Water Features Highlighted</p>
+            <h4 className="text-sm font-semibold text-blue-900">Columbia River Basin</h4>
           </div>
           <button
             onClick={toggleFullScreen}
@@ -2121,6 +2204,27 @@ export function InteractiveMap({
             )}
           </button>
         </div>
+      </div>
+      
+      {/* Temporal Control Widget */}
+      <div 
+        className={`absolute top-20 left-0 transition-all duration-300 ${
+          isTemporalControlCollapsed 
+            ? 'w-12' 
+            : 'w-[250px] bg-white/95 backdrop-blur-sm rounded-r-md border-r border-t border-b border-gray-200'
+        }`}
+        style={{ zIndex: 40 }}
+      >
+        <TemporalControl
+          selectedDateTime={selectedDateTime}
+          onDateTimeChange={setSelectedDateTime}
+          isLoading={isTemporalDataLoading || isCacheLoading}
+          hasCachedData={cachedTimeSeriesData !== null}
+          cacheTimeRange={cachedTimeSeriesData?.time_range}
+          className="!border-none !bg-transparent !backdrop-blur-none"
+          isCollapsed={isTemporalControlCollapsed}
+          onToggleCollapse={() => setIsTemporalControlCollapsed(!isTemporalControlCollapsed)}
+        />
       </div>
       
       {/* Modern Legend */}
