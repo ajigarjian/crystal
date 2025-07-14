@@ -19,6 +19,7 @@ FUNCTIONS_TO_DEPLOY = [
     ("get_power_infra.get_power_infra", "get_power_infrastructure", "get-power-infrastructure", "512MB"),
     ("get_power_generators.get_power_generators", "get_power_generators", "get-power-generators", "512MB"),
     ("get_power_plants.get_power_plants", "get_power_plants", "get-power-plants", "512MB"),
+    ("get_wildfires.get_wildfires", "get_wildfires", "get-wildfires", "256MB"),
 ]
 
 GCP_CLI_PREFIX = "gcp-cli-"
