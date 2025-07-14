@@ -315,6 +315,7 @@ export default function Page() {
     return selectedFeature?.type === 'snotel' ? selectedFeature.data as SnotelStationInfo : null;
   };
 
+
   const getCurrentWildfire = (): WildfireInfo | null => {
     return selectedFeature?.type === 'wildfire' ? selectedFeature.data as WildfireInfo : null;
   };
@@ -883,7 +884,7 @@ export default function Page() {
         feature_name: (selectedFeature.data as any).name || (selectedFeature.data as any).incidentName
       });
     }
-
+        
     setSelectedFeature(null);
     setSelectedFlowgate(null);
     setSelectedMetricId("6"); // Reset to Inflow when deselecting
