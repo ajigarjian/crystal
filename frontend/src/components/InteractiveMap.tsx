@@ -412,14 +412,15 @@ export function InteractiveMap({
     };
   }, []);
 
-  // Replace the hardcoded timeout effect with data-driven loading
+  // Show map immediately - don't wait for data to load
   React.useEffect(() => {
-    // Set loading to false once power infrastructure data is loaded (or failed to load)
-    // and the cache is either loaded or failed to load
-    if (powerInfrastructureData !== null && !isCacheLoading && !isTemporalDataLoading) {
+    // Set a short delay to show the map base layer, then load data in background
+    const timer = setTimeout(() => {
       setIsLoading(false);
-    }
-  }, [powerInfrastructureData, isCacheLoading, isTemporalDataLoading]);
+    }, 100);
+    
+    return () => clearTimeout(timer);
+  }, []); // Only run once on mount
 
   React.useEffect(() => {
     // Update viewport if initial props change
@@ -776,6 +777,65 @@ export function InteractiveMap({
     setWildfireData({ ...allWildfireData, features: filteredFeatures });
   }, [allWildfireData, showWildfires, viewport.zoom]);
 
+  // Calculate loading progress for different data sources
+  const loadingProgress = React.useMemo(() => {
+    let completed = 0;
+    let total = 0;
+    
+    // Power infrastructure data (always loads)
+    total += 1;
+    if (powerInfrastructureData !== null && !isCacheLoading && !isTemporalDataLoading) {
+      completed += 1;
+    }
+    
+    // Generator data (if enabled)
+    if (showGenerators) {
+      total += 1;
+      if (generatorDataLoaded && allGeneratorData !== null) {
+        completed += 1;
+      }
+    }
+    
+    // Plant data (if enabled)  
+    if (showPlants) {
+      total += 1;
+      if (plantDataLoaded && allPlantData !== null) {
+        completed += 1;
+      }
+    }
+    
+    // Wildfire data (if enabled)
+    if (showWildfires) {
+      total += 1;
+      if (wildfireDataLoaded && allWildfireData !== null) {
+        completed += 1;
+      }
+    }
+    
+    return total > 0 ? (completed / total) * 100 : 100;
+  }, [
+    powerInfrastructureData, isCacheLoading, isTemporalDataLoading,
+    showGenerators, generatorDataLoaded, allGeneratorData,
+    showPlants, plantDataLoaded, allPlantData,
+    showWildfires, wildfireDataLoaded, allWildfireData
+  ]);
+
+  // Check if any data is still loading
+  const isAnyDataLoading = React.useMemo(() => {
+    return (
+      isCacheLoading || 
+      isTemporalDataLoading ||
+      (showGenerators && !generatorDataLoaded) ||
+      (showPlants && !plantDataLoaded) ||
+      (showWildfires && !wildfireDataLoaded)
+    );
+  }, [
+    isCacheLoading, isTemporalDataLoading,
+    showGenerators, generatorDataLoaded,
+    showPlants, plantDataLoaded, 
+    showWildfires, wildfireDataLoaded
+  ]);
+
   // Add effect to sync external selectedFlowgate prop with internal state
   React.useEffect(() => {
     setSelectedFlowgateGroup(selectedFlowgate || null);
@@ -1025,6 +1085,21 @@ export function InteractiveMap({
 
   const mapComponent = (
     <div className="relative w-full h-full">
+      {/* Loading Progress Bar */}
+      {isAnyDataLoading && (
+        <div className="absolute top-0 left-0 right-0 z-50 bg-white/90 backdrop-blur-sm">
+          <div className="h-1 bg-gray-200">
+            <div 
+              className="h-full bg-blue-500 transition-all duration-300 ease-out"
+              style={{ width: `${Math.max(5, loadingProgress)}%` }}
+            />
+          </div>
+          <div className="px-3 py-1 text-xs text-gray-600 font-medium">
+            Loading map data... {Math.round(loadingProgress)}%
+          </div>
+        </div>
+      )}
+      
       <ReactMapGL
         {...viewport}
         mapboxAccessToken={mapboxAccessToken}
