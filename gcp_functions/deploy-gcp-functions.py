@@ -16,10 +16,10 @@ REGION = "us-central1"        # The region for your function
 # handler_module is the python module path, e.g. 'energy_agent.energy_agent'
 FUNCTIONS_TO_DEPLOY = [
     ("energy_agent.energy_agent", "energy_agent", "energy-agent", "512MB"),
-    ("get_power_infra.get_power_infra", "get_power_infrastructure", "get-power-infrastructure", "512MB"),
+    ("get_power_infra.get_power_infra", "get_power_infrastructure", "get-power-infrastructure", "2GB"),
     ("get_power_generators.get_power_generators", "get_power_generators", "get-power-generators", "512MB"),
     ("get_power_plants.get_power_plants", "get_power_plants", "get-power-plants", "512MB"),
-    ("get_wildfires.get_wildfires", "get_wildfires", "get-wildfires", "256MB"),
+    ("get_wildfires.get_wildfires", "get_wildfires", "get-wildfires", "1GB"),
 ]
 
 GCP_CLI_PREFIX = "gcp-cli-"
